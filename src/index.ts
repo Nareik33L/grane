@@ -30,6 +30,15 @@ export { createConnector } from "./connectors/create.js";
 export { getDialect, WAREHOUSE_TYPES } from "./connectors/dialect.js";
 export { buildMcpServer } from "./mcp/server.js";
 export { serveStdio, serveHttp } from "./mcp/transport.js";
+export {
+  CLIENT_IDS,
+  connectMcp,
+  printMcpConfig,
+  resolveClient,
+  resolveGraneLaunch,
+  runDoctor,
+} from "./mcp/connect/index.js";
+export type { ClientId, Transport } from "./mcp/connect/index.js";
 export { GraneError, type Refusal } from "./errors.js";
 export { explorationPolicy } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";

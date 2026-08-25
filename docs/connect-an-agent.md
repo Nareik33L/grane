@@ -34,6 +34,35 @@ deterministic infrastructure in the middle.
 
 ---
 
+## Fast path
+
+After `grane validate` succeeds, register Grane with whichever MCP client you
+use. The command is the same shape for every agent; only the last-mile config
+file (or UI) changes.
+
+```bash
+grane mcp doctor                 # project + optional MCP handshake
+grane mcp clients                # claude, cursor, gemini, vscode, chatgpt, …
+grane mcp connect claude         # or cursor, gemini, vscode, chatgpt, windsurf, claude-code
+```
+
+| Command | What it does |
+| --- | --- |
+| `grane mcp connect <client>` | Merge a Grane server entry into that client's config (stdio by default for desktop/CLI agents) |
+| `grane mcp print-config <client>` | Print the JSON snippet without writing |
+| `grane mcp list` | Show Grane entries across known client config files |
+| `grane mcp remove <client>` | Remove the Grane entry |
+| `grane mcp doctor` | Validate the project and probe MCP |
+
+Useful flags: `--transport http --url https://your-host/mcp`, `--global` (user
+config instead of project), `--dry-run`, `--no-env`, `--command grane`.
+
+ChatGPT has no config file — `grane mcp connect chatgpt` prints the HTTPS
+connector steps. Manual JSON for every client is still below if you prefer
+to edit files yourself.
+
+---
+
 ## Before you connect any agent
 
 Do these three steps once, regardless of which chat product you use.
@@ -74,11 +103,17 @@ grane query revenue --dimension country --last 30d   # sanity check from CLI
 ```
 
 If the CLI query works, Grane and the database are wired correctly. Connecting
-an agent is the next step.
+an agent is the next step:
+
+```bash
+grane mcp doctor
+grane mcp connect <client>    # claude, cursor, gemini, vscode, chatgpt, …
+```
 
 ### 3. Expose Grane over MCP
 
-Grane speaks MCP in two transports:
+Prefer `grane mcp connect <client>` (see **Fast path**). Grane speaks MCP in
+two transports:
 
 | Transport | Best for | How |
 | --- | --- | --- |

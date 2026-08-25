@@ -4,6 +4,19 @@ Grane exposes four MCP tools. For the full agent connection guide (ChatGPT,
 Claude, Gemini, database setup, HTTPS vs stdio), see
 [connect-an-agent.md](connect-an-agent.md).
 
+## Connect from the CLI
+
+```bash
+grane mcp doctor
+grane mcp connect claude     # also: cursor, gemini, vscode, chatgpt, windsurf, claude-code
+grane mcp print-config cursor
+grane mcp list
+```
+
+`connect` merges a Grane server entry into the client's config file (Claude
+Desktop, Cursor, Gemini CLI, VS Code, Windsurf, Claude Code, or a generic
+`.mcp.json`). ChatGPT has no file — the command prints HTTPS connector steps.
+
 ## Transports
 
 - **stdio** — `grane serve --stdio` (agent launches Grane as a subprocess)

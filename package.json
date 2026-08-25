@@ -1,6 +1,6 @@
 {
   "name": "grane-analytics",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Governed analytics and controlled exploration for AI agents. Connect your database, define business metrics in code, and let MCP agents query them — plus permitted raw warehouse columns, clearly labeled.",
   "license": "Apache-2.0",
   "type": "module",

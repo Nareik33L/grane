@@ -76,15 +76,16 @@ Your Postgres  — DATABASE_URL
    metrics in YAML; run `grane validate`.
 2. **Grane MCP** — run `grane serve` (HTTP) or let the agent launch
    `grane serve --stdio` (local desktop clients).
-3. **Agent** — add Grane as an MCP server in Claude, ChatGPT, Gemini CLI,
-   Cursor, etc., then ask questions in chat.
+3. **Agent** — register Grane with `grane mcp connect <client>` (Claude,
+   Cursor, Gemini, VS Code, ChatGPT, Windsurf, Claude Code, or generic), then
+   ask questions in chat.
 
 | Agent | Typical setup | Grane transport |
 | --- | --- | --- |
-| Claude Desktop | `claude_desktop_config.json` or Connectors UI | stdio (local) or HTTPS (remote) |
-| ChatGPT | Settings → Connectors (Developer Mode) | **HTTPS only** — deploy Grane publicly |
-| Gemini CLI | `~/.gemini/settings.json` | stdio or HTTP |
-| Cursor / VS Code | `.cursor/mcp.json` | stdio or local HTTP |
+| Claude Desktop | `grane mcp connect claude` | stdio (local) or HTTPS (remote) |
+| ChatGPT | `grane mcp connect chatgpt` (prints HTTPS steps) | **HTTPS only** — deploy Grane publicly |
+| Gemini CLI | `grane mcp connect gemini` | stdio or HTTP |
+| Cursor / VS Code | `grane mcp connect cursor` or `vscode` | stdio or local HTTP |
 
 Full walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)**
 
@@ -108,6 +109,8 @@ docker compose -f example/docker-compose.yml up -d --wait
 grane -p example/analytics validate
 grane -p example/analytics query revenue --dimension country --last last_month
 grane -p example/analytics query revenue --raw-dimension customers.name --last 30d
+grane -p example/analytics mcp doctor --offline --skip-mcp
+grane -p example/analytics mcp print-config generic
 grane -p example/analytics serve
 # MCP  http://localhost:8080/mcp
 ```
@@ -246,8 +249,8 @@ Every result carries a trust level and provenance:
 ```
 
 See [docs/connect-an-agent.md](docs/connect-an-agent.md) for ChatGPT, Claude,
-Gemini, and Cursor setup. See [docs/mcp-setup.md](docs/mcp-setup.md) for MCP
-tool reference and config file formats.
+Gemini, Cursor, and `grane mcp connect`. See [docs/mcp-setup.md](docs/mcp-setup.md)
+for MCP tool reference and config file formats.
 
 ## The trust contract
 

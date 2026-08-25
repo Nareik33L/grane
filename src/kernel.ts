@@ -12,7 +12,7 @@ import { explorationPolicy } from "./explore/policy.js";
 import { listExplorableColumns, type ExplorableColumn } from "./explore/raw.js";
 import { recordRawUsage } from "./explore/usage.js";
 
-export const GRANE_VERSION = "0.4.1";
+export const GRANE_VERSION = "0.5.0";
 
 export interface ServerInfo {
   name: "grane";
