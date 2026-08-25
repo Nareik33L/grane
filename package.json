@@ -1,5 +1,5 @@
 {
-  "name": "grane",
+  "name": "grane-analytics",
   "version": "0.1.0",
   "description": "The open-source semantic layer for AI agents. Connect your database, define your business metrics in code, and give any MCP-compatible agent governed access to your data.",
   "license": "Apache-2.0",

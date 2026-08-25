@@ -107,11 +107,11 @@ node dist/cli/index.js -p example/analytics serve
 ## Install
 
 ```bash
-npm install -g grane
-# or: npx grane --help
+npm install -g grane-analytics
+# or: npx grane-analytics --help
 ```
 
-Requires Node 20+.
+The CLI command is still `grane`. Requires Node 20+.
 
 ## Quickstart (your own database)
 
