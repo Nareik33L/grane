@@ -88,21 +88,19 @@ Warehouse connections: **[docs/warehouses.md](docs/warehouses.md)**
 ## Quickstart (with the example database)
 
 ```bash
+npm install -g grane-analytics @duckdb/node-api
 git clone https://github.com/Nareik33L/grane.git
 cd grane
-npm install && npm run build
 
-# 1. Start the example e-commerce Postgres (seeded, includes a read-only role)
+# DuckDB (no Docker): seeded shop data in example/analytics-duckdb
+grane -p example/analytics-duckdb validate
+grane -p example/analytics-duckdb query revenue -d country --last 30d
+
+# Or Postgres:
 docker compose -f example/docker-compose.yml up -d --wait
-
-# 2. Validate the example semantic model against the live schema
-node dist/cli/index.js -p example/analytics validate
-
-# 3. Ask the headline question
-node dist/cli/index.js -p example/analytics query revenue --dimension country --last last_month
-
-# 4. Serve MCP
-node dist/cli/index.js -p example/analytics serve
+grane -p example/analytics validate
+grane -p example/analytics query revenue --dimension country --last last_month
+grane -p example/analytics serve
 # MCP  http://localhost:8080/mcp
 ```
 

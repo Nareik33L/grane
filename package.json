@@ -1,6 +1,6 @@
 {
   "name": "grane-analytics",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The open-source semantic layer for AI agents. Connect your database, define your business metrics in code, and give any MCP-compatible agent governed access to your data.",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,7 +10,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "example"
   ],
   "engines": {
     "node": ">=20"

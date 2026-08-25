@@ -9,7 +9,7 @@ import type { SemanticQueryInput } from "./query/model.js";
 import { compileQuery, type CompiledQuery } from "./compile/compiler.js";
 import { executeCompiled, type QueryResult } from "./execute/executor.js";
 
-export const GRANE_VERSION = "0.2.0";
+export const GRANE_VERSION = "0.3.0";
 
 export interface ServerInfo {
   name: "grane";

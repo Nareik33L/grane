@@ -97,8 +97,8 @@ A seeded e-commerce file ships at `example/analytics-duckdb/warehouse.duckdb`
 (rebuild with `python3 example/scripts/build_duckdb.py`). Point Grane at it:
 
 ```bash
-npx tsx src/cli/index.ts -p example/analytics-duckdb validate
-npx tsx src/cli/index.ts -p example/analytics-duckdb query revenue -d country --last 30d
+grane -p example/analytics-duckdb validate
+grane -p example/analytics-duckdb query revenue -d country --last 30d
 ```
 
 ### MotherDuck (hosted DuckDB)
