@@ -104,6 +104,15 @@ node dist/cli/index.js -p example/analytics serve
 # MCP  http://localhost:8080/mcp
 ```
 
+## Install
+
+```bash
+npm install -g grane
+# or: npx grane --help
+```
+
+Requires Node 20+.
+
 ## Quickstart (your own database)
 
 ```bash
