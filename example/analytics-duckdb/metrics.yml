@@ -1,0 +1,64 @@
+metrics:
+  revenue:
+    description: Net revenue from completed orders.
+    owner: finance
+    entity: order
+    type: sum
+    sql: ${orders.net_amount}
+    time_dimension: ${orders.completed_at}
+    unit: GBP
+    status: approved
+    synonyms:
+      - sales
+      - net sales
+    filters:
+      orders.status: completed
+
+  orders:
+    description: Number of completed orders.
+    entity: order
+    type: count
+    sql: ${orders.id}
+    time_dimension: ${orders.completed_at}
+    unit: count
+    filters:
+      orders.status: completed
+
+  average_order_value:
+    description: Average net revenue per completed order.
+    entity: order
+    type: ratio
+    numerator: revenue
+    denominator: orders
+    unit: GBP
+    synonyms:
+      - aov
+
+  payments_received:
+    description: >-
+      Total successfully collected payments. Payments are one_to_many from
+      orders, so Grane pre-aggregates them at the order grain before joining.
+    owner: finance
+    entity: order
+    type: sum
+    sql: ${payments.amount}
+    time_dimension: ${orders.completed_at}
+    unit: GBP
+    filters:
+      payments.status: succeeded
+
+  refunded_amount:
+    description: Total refunded amount, at the order grain.
+    entity: order
+    type: sum
+    sql: ${refunds.amount}
+    time_dimension: ${orders.completed_at}
+    unit: GBP
+
+  customers:
+    description: Number of registered customers.
+    entity: customer
+    type: count
+    sql: ${customers.id}
+    time_dimension: ${customers.created_at}
+    unit: count

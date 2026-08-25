@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { graneConfigSchema, type GraneConfig } from "./schema.js";
 import { configError } from "../errors.js";
@@ -107,6 +107,9 @@ export function loadConfig(projectDir: string): LoadedConfig {
       "location",
       "credentials",
       "path",
+      "catalog",
+      "http_path",
+      "token",
     ]) {
       if (field in connection) connection[field] = interpolateEnv(connection[field]);
     }
@@ -120,5 +123,17 @@ export function loadConfig(projectDir: string): LoadedConfig {
     throw configError(`Invalid Grane configuration:\n${issues}`, parsed.error.issues);
   }
 
-  return { config: parsed.data, projectDir: dir, files };
+  const config = parsed.data;
+  const duckPath = config.connection.path;
+  if (
+    config.connection.type === "duckdb" &&
+    duckPath &&
+    duckPath !== ":memory:" &&
+    !duckPath.startsWith("md:") &&
+    !isAbsolute(duckPath)
+  ) {
+    config.connection.path = resolve(dir, duckPath);
+  }
+
+  return { config, projectDir: dir, files };
 }

@@ -126,8 +126,9 @@ Set `connection.type` in `grane.yml`. Postgres and Redshift use the bundled
 | `mysql` | `npm install mysql2` |
 | `snowflake` | `npm install snowflake-sdk` |
 | `bigquery` | `npm install @google-cloud/bigquery` |
-| `duckdb` | `npm install duckdb` |
+| `duckdb` | `npm install @duckdb/node-api` |
 | `clickhouse` | `npm install @clickhouse/client` |
+| `databricks` | `npm install @databricks/sql` |
 
 Connection examples: **[docs/warehouses.md](docs/warehouses.md)**
 

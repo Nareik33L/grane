@@ -10,9 +10,10 @@ the one you need.
 | MySQL / MariaDB | `mysql` | `npm install mysql2` |
 | Snowflake | `snowflake` | `npm install snowflake-sdk` |
 | BigQuery | `bigquery` | `npm install @google-cloud/bigquery` |
-| DuckDB | `duckdb` | `npm install duckdb` |
+| DuckDB | `duckdb` | `npm install @duckdb/node-api` |
 | ClickHouse | `clickhouse` | `npm install @clickhouse/client` |
 | Amazon Redshift | `redshift` | bundled (`pg`) |
+| Databricks | `databricks` | `npm install @databricks/sql` |
 
 Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
 
@@ -86,8 +87,66 @@ connection:
 ```
 
 ```bash
-npm install duckdb
+npm install @duckdb/node-api
 ```
+
+`:memory:` is useful for tests. A file path persists tables across `grane` runs.
+Relative file paths are resolved from the directory that contains `grane.yml`.
+
+A seeded e-commerce file ships at `example/analytics-duckdb/warehouse.duckdb`
+(rebuild with `python3 example/scripts/build_duckdb.py`). Point Grane at it:
+
+```bash
+npx tsx src/cli/index.ts -p example/analytics-duckdb validate
+npx tsx src/cli/index.ts -p example/analytics-duckdb query revenue -d country --last 30d
+```
+
+### MotherDuck (hosted DuckDB)
+
+Sign up at [app.motherduck.com](https://app.motherduck.com), create an access
+token, and upload the example file:
+
+```bash
+export MOTHERDUCK_TOKEN=...
+python3 -c "
+import duckdb, os
+con = duckdb.connect('md:', config={'motherduck_token': os.environ['MOTHERDUCK_TOKEN']})
+con.execute(\"CREATE OR REPLACE DATABASE grane_example FROM 'example/analytics-duckdb/warehouse.duckdb'\")
+"
+```
+
+Then in `grane.yml`:
+
+```yaml
+connection:
+  type: duckdb
+  path: md:grane_example?attach_mode=single
+  token: ${MOTHERDUCK_TOKEN}
+  schema: main
+```
+
+The same tables are also exported as Parquet in
+`example/analytics-duckdb/parquet/` for upload into Databricks (see
+`databricks_load.sql` in that folder).
+
+## Databricks
+
+```yaml
+connection:
+  type: databricks
+  host: ${DATABRICKS_SERVER_HOSTNAME}   # xxx.cloud.databricks.com
+  http_path: ${DATABRICKS_HTTP_PATH}    # /sql/1.0/warehouses/...
+  token: ${DATABRICKS_TOKEN}
+  catalog: main
+  schema: analytics
+```
+
+```bash
+npm install @databricks/sql
+```
+
+Use a SQL warehouse HTTP path and a read-only personal access token (or
+service principal token). Tables compile as `` `catalog`.`schema`.`table` ``.
 
 ## ClickHouse
 
@@ -109,5 +168,5 @@ your configured warehouse. The semantic model (metrics.yml) does not change.
 
 ## Not in this release
 
-Databricks, Trino, and a community connector SDK. Demand on GitHub issues
-will drive the next engines.
+Trino and a community connector SDK. Demand on GitHub issues will drive
+the next engines.

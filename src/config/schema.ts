@@ -101,6 +101,7 @@ export const warehouseTypeSchema = z.enum([
   "duckdb",
   "clickhouse",
   "redshift",
+  "databricks",
 ]);
 export type WarehouseType = z.infer<typeof warehouseTypeSchema>;
 
@@ -127,8 +128,14 @@ export const connectionConfigSchema = z.object({
   location: z.string().optional(),
   /** Path to a service-account JSON key (BigQuery). */
   credentials: z.string().optional(),
-  /** DuckDB file path, or :memory:. */
+  /** DuckDB file path, :memory:, or MotherDuck md:database. */
   path: z.string().optional(),
+  /** Databricks Unity Catalog name. */
+  catalog: z.string().optional(),
+  /** Databricks SQL warehouse HTTP path (e.g. /sql/1.0/warehouses/...). */
+  http_path: z.string().optional(),
+  /** Databricks or MotherDuck token (falls back to password / MOTHERDUCK_TOKEN). */
+  token: z.string().optional(),
 });
 export type ConnectionConfig = z.infer<typeof connectionConfigSchema>;
 

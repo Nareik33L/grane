@@ -13,6 +13,13 @@ function compileFor(type: WarehouseType) {
   if (type === "mysql") {
     kernel.config.connection.schema = "shop";
   }
+  if (type === "duckdb") {
+    kernel.config.connection.schema = "main";
+  }
+  if (type === "databricks") {
+    kernel.config.connection.catalog = "main";
+    kernel.config.connection.schema = "analytics";
+  }
   return kernel.compile({
     metrics: ["revenue"],
     dimensions: ["country"],
@@ -65,5 +72,25 @@ describe("warehouse SQL dialects", () => {
     expect(sql).toContain("$1");
     expect(sql).toContain("SUM(CASE WHEN");
     expect(sql).not.toContain("FILTER (WHERE");
+  });
+
+  it("emits duckdb unquoted-main tables, $n placeholders, and FILTER", () => {
+    const sql = compileFor("duckdb").sql;
+    expect(sql).toContain('FROM "orders"');
+    expect(sql).not.toContain('"main"."orders"');
+    expect(sql).toContain("FILTER (WHERE");
+    expect(sql).toContain("$1");
+    expect(sql).toContain("date_trunc('month'");
+  });
+
+  it("emits databricks catalog.schema backticks, DATE_TRUNC, and ?", () => {
+    const compiled = compileFor("databricks");
+    expect(compiled.sql).toContain("FROM `main`.`analytics`.`orders`");
+    expect(compiled.sql).toContain("JOIN `main`.`analytics`.`customers`");
+    expect(compiled.sql).toContain("DATE_TRUNC('MONTH'");
+    expect(compiled.sql).toContain("FILTER (WHERE");
+    expect(compiled.sql).toContain("?");
+    expect(compiled.sql).not.toContain("$1");
+    expect(compiled.params[0]).toBe("completed");
   });
 });

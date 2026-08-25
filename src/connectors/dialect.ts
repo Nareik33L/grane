@@ -7,7 +7,8 @@ export type WarehouseType =
   | "bigquery"
   | "duckdb"
   | "clickhouse"
-  | "redshift";
+  | "redshift"
+  | "databricks";
 
 export const WAREHOUSE_TYPES: WarehouseType[] = [
   "postgres",
@@ -17,6 +18,7 @@ export const WAREHOUSE_TYPES: WarehouseType[] = [
   "duckdb",
   "clickhouse",
   "redshift",
+  "databricks",
 ];
 
 export interface SqlDialect {
@@ -215,6 +217,37 @@ export const bigqueryDialect: SqlDialect = {
   filteredAggregate: filteredWithCase,
 };
 
+export const databricksDialect: SqlDialect = {
+  type: "databricks",
+  supportsFilterClause: true,
+  ident: quoteBacktick,
+  qualifyTable(schema, table) {
+    if (!schema) return quoteBacktick(table);
+    const parts = schema.split(".").filter(Boolean);
+    return [...parts.map(quoteBacktick), quoteBacktick(table)].join(".");
+  },
+  placeholder() {
+    return "?";
+  },
+  dateTrunc(grain, expr) {
+    return `DATE_TRUNC(${lit(grain.toUpperCase())}, ${expr})`;
+  },
+  localizeTime(expr, timezone) {
+    if (!timezone || timezone === "UTC") return expr;
+    return `from_utc_timestamp(${expr}, ${lit(timezone)})`;
+  },
+  castTimestamp(placeholder) {
+    return `CAST(${placeholder} AS TIMESTAMP)`;
+  },
+  castNumeric(expr) {
+    return `CAST((${expr}) AS DOUBLE)`;
+  },
+  contains(columnExpr, placeholder) {
+    return `LOWER(CAST(${columnExpr} AS STRING)) LIKE CONCAT('%', LOWER(${placeholder}), '%')`;
+  },
+  filteredAggregate: filteredWithFilter,
+};
+
 export const clickhouseDialect: SqlDialect = {
   type: "clickhouse",
   supportsFilterClause: false,
@@ -281,6 +314,8 @@ export function getDialect(type: WarehouseType): SqlDialect {
       return clickhouseDialect;
     case "redshift":
       return redshiftDialect;
+    case "databricks":
+      return databricksDialect;
   }
 }
 

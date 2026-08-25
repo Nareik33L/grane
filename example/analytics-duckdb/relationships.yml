@@ -1,0 +1,25 @@
+relationships:
+  orders_to_customers:
+    from: orders.customer_id
+    to: customers.id
+    type: many_to_one
+
+  payments_to_orders:
+    from: payments.order_id
+    to: orders.id
+    type: many_to_one
+
+  refunds_to_orders:
+    from: refunds.order_id
+    to: orders.id
+    type: many_to_one
+
+  order_items_to_orders:
+    from: order_items.order_id
+    to: orders.id
+    type: many_to_one
+
+  order_items_to_products:
+    from: order_items.product_id
+    to: products.id
+    type: many_to_one

@@ -1,0 +1,32 @@
+project:
+  name: grane-example-duckdb
+  timezone: Europe/London
+  week:
+    starts: monday
+
+connection:
+  type: duckdb
+  path: warehouse.duckdb
+  schema: main
+  # MotherDuck (after uploading warehouse.duckdb):
+  # path: md:grane_example?attach_mode=single
+  # token: ${MOTHERDUCK_TOKEN}
+
+limits:
+  max_rows: 10000
+  default_rows: 1000
+  timeout_ms: 30000
+
+entities:
+  customer:
+    table: customers
+    primary_key: id
+    description: A person or business that has registered with the shop.
+  order:
+    table: orders
+    primary_key: id
+    description: A customer order. Most metrics are defined at this grain.
+  product:
+    table: products
+    primary_key: id
+    description: A sellable product.

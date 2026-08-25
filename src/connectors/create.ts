@@ -6,6 +6,7 @@ import { SnowflakeConnector } from "./snowflake.js";
 import { BigQueryConnector, bigquerySchemaNamespace } from "./bigquery.js";
 import { DuckDbConnector } from "./duckdb.js";
 import { ClickHouseConnector } from "./clickhouse.js";
+import { DatabricksConnector, databricksSchemaNamespace } from "./databricks.js";
 import type { WarehouseConnector } from "./types.js";
 import type { WarehouseType } from "./dialect.js";
 import { getDialect } from "./dialect.js";
@@ -27,15 +28,18 @@ export function createConnector(connection: ConnectionConfig): WarehouseConnecto
       return new DuckDbConnector(connection);
     case "clickhouse":
       return new ClickHouseConnector(connection);
+    case "databricks":
+      return new DatabricksConnector(connection);
     default:
       throw configError(
-        `Unknown warehouse type "${String(type)}". Supported: postgres, mysql, snowflake, bigquery, duckdb, clickhouse, redshift.`,
+        `Unknown warehouse type "${String(type)}". Supported: postgres, mysql, snowflake, bigquery, duckdb, clickhouse, redshift, databricks.`,
       );
   }
 }
 
 export function compilerNamespace(connection: ConnectionConfig): string | undefined {
   if (connection.type === "bigquery") return bigquerySchemaNamespace(connection);
+  if (connection.type === "databricks") return databricksSchemaNamespace(connection);
   if (connection.type === "duckdb") {
     return connection.schema && connection.schema !== "main" ? connection.schema : undefined;
   }
