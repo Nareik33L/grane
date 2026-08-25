@@ -86,7 +86,8 @@ MCP tool reference and config examples: **[docs/mcp-setup.md](docs/mcp-setup.md)
 ## Quickstart (with the example database)
 
 ```bash
-git clone <this repo> && cd grane
+git clone https://github.com/Nareik33L/grane.git
+cd grane
 npm install && npm run build
 
 # 1. Start the example e-commerce Postgres (seeded, includes a read-only role)

@@ -31,6 +31,14 @@
     "postgres",
     "metrics"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nareik33L/grane.git"
+  },
+  "homepage": "https://github.com/Nareik33L/grane",
+  "bugs": {
+    "url": "https://github.com/Nareik33L/grane/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "commander": "^15.0.0",
