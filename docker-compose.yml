@@ -1,0 +1,19 @@
+# Runs the Grane MCP server against your own project and database.
+#
+#   1. Put your grane.yml / metrics.yml / ... in ./analytics
+#   2. export DATABASE_URL=postgres://readonly_user:...@your-host:5432/db
+#   3. docker compose up -d
+#
+# For a self-contained demo (database included), see example/docker-compose.yml
+# and the Quickstart in README.md.
+
+services:
+  grane:
+    build: .
+    container_name: grane
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - ./analytics:/project:ro
+    ports:
+      - "8080:8080"

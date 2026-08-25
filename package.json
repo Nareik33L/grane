@@ -1,0 +1,48 @@
+{
+  "name": "grane",
+  "version": "0.1.0",
+  "description": "The open-source semantic layer for AI agents. Connect your database, define your business metrics in code, and give any MCP-compatible agent governed access to your data.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "grane": "dist/cli/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build && npm run test:unit",
+    "dev": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
+  },
+  "keywords": [
+    "analytics",
+    "semantic-layer",
+    "mcp",
+    "ai-agents",
+    "postgres",
+    "metrics"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "commander": "^15.0.0",
+    "pg": "^8.23.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

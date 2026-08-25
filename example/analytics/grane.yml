@@ -1,0 +1,30 @@
+project:
+  name: grane-example
+  timezone: Europe/London
+  week:
+    starts: monday
+
+connection:
+  type: postgres
+  # Environment variables are interpolated; defaults to the example compose DB.
+  url: ${GRANE_EXAMPLE_DATABASE_URL:-postgres://grane_readonly:grane_readonly@localhost:5433/grane_demo}
+  schema: public
+
+limits:
+  max_rows: 10000
+  default_rows: 1000
+  timeout_ms: 30000
+
+entities:
+  customer:
+    table: customers
+    primary_key: id
+    description: A person or business that has registered with the shop.
+  order:
+    table: orders
+    primary_key: id
+    description: A customer order. Most metrics are defined at this grain.
+  product:
+    table: products
+    primary_key: id
+    description: A sellable product.

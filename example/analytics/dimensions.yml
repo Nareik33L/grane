@@ -1,0 +1,31 @@
+dimensions:
+  country:
+    description: Customer billing country.
+    entity: customer
+    sql: ${customers.country}
+
+  customer_type:
+    description: consumer or business.
+    entity: customer
+    sql: ${customers.customer_type}
+
+  channel:
+    description: Sales channel the order came through.
+    entity: order
+    sql: ${orders.channel}
+
+  order_status:
+    entity: order
+    sql: ${orders.status}
+
+  completed_at:
+    entity: order
+    sql: ${orders.completed_at}
+    type: timestamp
+
+  # Product category sits below the order grain (orders -> order_items fans
+  # out), so Grane will refuse to combine it with order-grain metrics.
+  product_category:
+    description: Product category.
+    entity: product
+    sql: ${products.category}
