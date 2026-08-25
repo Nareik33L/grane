@@ -45,11 +45,15 @@ export function registerMcpCommands(program: Command, ctx: McpCliContext): void 
         return;
       }
       const idWidth = Math.max(...rows.map((r) => r.id.length), "id".length);
-      console.log(`${"id".padEnd(idWidth)}  label            stdio  http  write  default`);
-      console.log(`${"-".repeat(idWidth)}  ---------------  -----  ----  -----  -------`);
+      const labelWidth = Math.max(...rows.map((r) => r.label.length), "label".length);
+      const header = `${"id".padEnd(idWidth)}  ${"label".padEnd(labelWidth)}  stdio  http  write  default`;
+      console.log(header);
+      console.log(
+        `${"-".repeat(idWidth)}  ${"-".repeat(labelWidth)}  -----  ----  -----  -------`,
+      );
       for (const row of rows) {
         console.log(
-          `${row.id.padEnd(idWidth)}  ${row.label.padEnd(15)}  ${yn(row.stdio).padEnd(5)}  ${yn(row.http).padEnd(4)}  ${yn(row.writable).padEnd(5)}  ${row.defaultTransport}`,
+          `${row.id.padEnd(idWidth)}  ${row.label.padEnd(labelWidth)}  ${yn(row.stdio).padEnd(5)}  ${yn(row.http).padEnd(4)}  ${yn(row.writable).padEnd(5)}  ${row.defaultTransport}`,
         );
       }
       console.log(`\nConnect: grane mcp connect <id>`);
@@ -188,9 +192,10 @@ export function registerMcpCommands(program: Command, ctx: McpCliContext): void 
           console.log("No writable MCP client configs.");
           return;
         }
+        const labelWidth = Math.max(...rows.map((r) => r.label.length), 16);
         for (const row of rows) {
           const status = !row.exists ? "missing" : row.configured ? "grane" : row.servers.length > 0 ? row.servers.join(", ") : "empty";
-          console.log(`${row.label.padEnd(16)} ${row.scope.padEnd(8)} ${status.padEnd(12)} ${row.path}`);
+          console.log(`${row.label.padEnd(labelWidth)}  ${row.scope.padEnd(8)}  ${status.padEnd(12)}  ${row.path}`);
         }
       } catch (err) {
         ctx.fail(err);
