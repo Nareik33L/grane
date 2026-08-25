@@ -18,7 +18,7 @@ export interface LoadedConfig {
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
-const SINGLETON_KEYS = ["project", "connection", "limits"] as const;
+const SINGLETON_KEYS = ["project", "connection", "limits", "exploration"] as const;
 
 /** Resolve the project directory: the given dir, or ./analytics under it if grane.yml lives there. */
 export function findProjectDir(startDir: string): string {

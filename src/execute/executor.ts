@@ -3,11 +3,15 @@ import type { Scalar, LimitsConfig } from "../config/schema.js";
 import type { CompiledQuery } from "../compile/compiler.js";
 import type { WarehouseConnector } from "../connectors/types.js";
 import { unsafeQuery } from "../errors.js";
+import type { TrustLevel } from "../query/model.js";
 
 export interface Provenance {
   query_id: string;
-  trust: "governed";
+  trust: TrustLevel;
   query_model: "v1";
+  governed: string[];
+  ungoverned: string[];
+  warning: string | null;
   metrics: Record<string, { definition_version: string }>;
   generated_sql: string;
   params: Scalar[];
@@ -19,6 +23,10 @@ export interface Provenance {
 export interface QueryResult {
   columns: string[];
   rows: Record<string, unknown>[];
+  trust: TrustLevel;
+  governed: string[];
+  ungoverned: string[];
+  warning: string | null;
   provenance: Provenance;
 }
 
@@ -42,8 +50,11 @@ export async function executeCompiled(
   const rows = result.rows.slice(0, limits.max_rows);
   const provenance: Provenance = {
     query_id: newQueryId(),
-    trust: "governed",
+    trust: compiled.trust,
     query_model: "v1",
+    governed: compiled.governed,
+    ungoverned: compiled.ungoverned,
+    warning: compiled.warning,
     metrics: Object.fromEntries(
       Object.entries(compiled.metricVersions).map(([name, version]) => [
         name,
@@ -56,5 +67,13 @@ export async function executeCompiled(
     row_count: rows.length,
     duration_ms: Date.now() - startedAt,
   };
-  return { columns: result.columns, rows, provenance };
+  return {
+    columns: result.columns,
+    rows,
+    trust: compiled.trust,
+    governed: compiled.governed,
+    ungoverned: compiled.ungoverned,
+    warning: compiled.warning,
+    provenance,
+  };
 }

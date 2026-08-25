@@ -57,10 +57,15 @@ ChatGPT requires a **public HTTPS URL** and Developer Mode (paid plan). Local
 
 | Tool | Input | Returns |
 | --- | --- | --- |
-| `catalog` | `{ search? }` | metrics, dimensions, entities, server capabilities |
-| `query` | `{ query: QueryModelV1 }` | rows + provenance (`trust: governed`) |
+| `catalog` | `{ search? }` | metrics, dimensions, entities, explorable columns, server capabilities |
+| `query` | `{ query: QueryModelV1 }` | rows + `trust` (`governed` \| `mixed` \| `exploratory`) + provenance |
 | `validate` | `{ query: QueryModelV1 }` | dry-run with SQL, or structured refusal |
-| `explain` | `{ query: QueryModelV1 }` | definitions, join plan, SQL (no execution) |
+| `explain` | `{ query: QueryModelV1 }` | definitions, trust, join plan, SQL (no execution) |
+
+Query Model v1 accepts governed `metrics` / `dimensions` and, when exploration
+is enabled, `raw_dimensions` (`table.column`) and `raw_metrics`
+(`{ field, type, alias? }`). Grane compiles the SQL either way. Do not present
+`trust: mixed` or `trust: exploratory` results as approved business truth.
 
 ## Example database
 

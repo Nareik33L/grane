@@ -167,6 +167,35 @@ describe.skipIf(!dbUp)("governed workflow (integration)", () => {
     });
   });
 
+  it("slices a governed metric by a raw warehouse column (trust: mixed)", async () => {
+    const result = await kernel.query({
+      metrics: ["revenue"],
+      raw_dimensions: ["customers.name"],
+      limit: 5,
+    });
+    expect(result.trust).toBe("mixed");
+    expect(result.governed).toContain("revenue");
+    expect(result.ungoverned).toContain("customers.name");
+    expect(result.warning).toContain("customers.name");
+    expect(result.columns).toContain("customers.name");
+    expect(result.provenance.trust).toBe("mixed");
+    expect(result.rows.length).toBeGreaterThan(0);
+    expect(result.rows.length).toBeLessThanOrEqual(5);
+  });
+
+  it("runs an exploratory aggregation over raw warehouse columns", async () => {
+    const result = await kernel.query({
+      raw_metrics: [{ field: "payments.id", type: "count" }],
+      raw_dimensions: ["payments.status"],
+    });
+    expect(result.trust).toBe("exploratory");
+    expect(result.governed).toEqual([]);
+    expect(result.ungoverned).toEqual(expect.arrayContaining(["payments.status", "payments.id"]));
+    expect(result.columns).toContain("payments.status");
+    const statuses = result.rows.map((r) => r["payments.status"]);
+    expect(statuses).toEqual(expect.arrayContaining(["succeeded"]));
+  });
+
   it("executes read-only: the connected role cannot write", async () => {
     await expect(rawQuery("DELETE FROM orders")).rejects.toThrow();
   });

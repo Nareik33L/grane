@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exampleKernel } from "../fixtures.js";
+import { exampleKernel, exploringKernel } from "../fixtures.js";
 import { GraneError } from "../../src/errors.js";
 
 const kernel = exampleKernel();
@@ -101,6 +101,17 @@ describe("deterministic SQL compiler", () => {
   it("enforces the configured row limit cap", () => {
     const { compiled } = kernel.compile({ metrics: ["revenue"], limit: 999999 });
     expect(compiled.sql).toContain("LIMIT 10000");
+  });
+
+  it("groups a governed metric by a raw warehouse column", () => {
+    const exploring = exploringKernel();
+    const { compiled } = exploring.compile({
+      metrics: ["revenue"],
+      raw_dimensions: ["orders.discount_code"],
+    });
+    expect(compiled.trust).toBe("mixed");
+    expect(compiled.sql).toContain('"orders"."discount_code" AS "orders.discount_code"');
+    expect(compiled.plan.columns).toEqual(["orders.discount_code", "revenue"]);
   });
 });
 

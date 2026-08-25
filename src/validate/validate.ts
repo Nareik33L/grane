@@ -127,7 +127,28 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
     }
   }
 
-  // --- Metrics ---
+  // --- Exploration policy ---
+  for (const entry of model.config.exploration.exclude) {
+    if (!parseColumnRef(entry)) {
+      issues.push({
+        severity: "error",
+        code: "invalid_reference",
+        subject: "exploration",
+        message: `exploration.exclude entry "${entry}" must be a table.column reference.`,
+      });
+      continue;
+    }
+    const ref = parseColumnRef(entry)!;
+    if (!tableColumns) continue;
+    if (!tableColumns.has(ref.table) || !tableColumns.get(ref.table)!.has(ref.column)) {
+      issues.push({
+        severity: "warning",
+        code: "unknown_exclude",
+        subject: "exploration",
+        message: `exploration.exclude "${entry}" was not found in the introspected schema.`,
+      });
+    }
+  }
   const metricReports: MetricReport[] = [];
   for (const metric of model.metrics.values()) {
     const metricIssues = validateMetric(model, metric, checkColumnFactory(issues, tableColumns), columnType);

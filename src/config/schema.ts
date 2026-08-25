@@ -171,10 +171,27 @@ export const limitsConfigSchema = z.object({
 });
 export type LimitsConfig = z.infer<typeof limitsConfigSchema>;
 
+/**
+ * Controlled exploration: agents may query warehouse columns that are not
+ * governed metrics or dimensions. Results are never marked trust: governed.
+ */
+export const explorationConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  /**
+   * Schemas agents may explore. Empty means the connection schema (or every
+   * table returned by introspection).
+   */
+  schemas: z.array(z.string()).default([]),
+  /** table.column refs that must never be queried, even when exploration is on. */
+  exclude: z.array(z.string()).default([]),
+});
+export type ExplorationConfig = z.infer<typeof explorationConfigSchema>;
+
 export const graneConfigSchema = z.object({
   project: projectConfigSchema.prefault({}),
   connection: connectionConfigSchema.prefault({}),
   limits: limitsConfigSchema.prefault({}),
+  exploration: explorationConfigSchema.prefault({}),
   entities: z.record(z.string(), entityConfigSchema).default({}),
   metrics: z.record(z.string(), metricConfigSchema).default({}),
   dimensions: z.record(z.string(), dimensionConfigSchema).default({}),

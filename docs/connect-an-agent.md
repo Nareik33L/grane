@@ -154,8 +154,9 @@ Ask in natural language, for example:
 > What metrics are defined in Grane?
 > What was revenue by country last month?
 
-Claude calls `catalog()` to discover approved metrics, then `query()` with a
-semantic request. Results include `trust: governed` provenance.
+Claude calls `catalog()` to discover approved metrics (and explorable columns
+when exploration is enabled), then `query()` with a semantic request. Results
+include a `trust` level (`governed`, `mixed`, or `exploratory`) and provenance.
 
 ---
 

@@ -28,6 +28,16 @@ limits:
   default_rows: 1000
   timeout_ms: 30000
 
+# Controlled exploration: agents may query warehouse columns that are not
+# governed metrics or dimensions. Results are marked trust: mixed or exploratory.
+# exploration:
+#   enabled: false
+#   schemas:
+#     - public
+#   exclude:
+#     - users.password_hash
+#     - customers.ssn
+
 # Entities are the business objects your metrics are counted at (their grain).
 entities: {}
 # Example:

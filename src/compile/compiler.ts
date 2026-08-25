@@ -44,6 +44,10 @@ export interface CompiledQuery {
   params: Scalar[];
   plan: QueryPlan;
   metricVersions: Record<string, string>;
+  trust: ResolvedQuery["trust"];
+  governed: string[];
+  ungoverned: string[];
+  warning: string | null;
 }
 
 class Params {
@@ -267,8 +271,11 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   for (const dimension of resolved.dimensions) {
     joinPathTo(dimension.column.table, `dimension "${dimension.name}"`);
   }
+  for (const raw of resolved.rawDimensions) {
+    joinPathTo(raw.ref.table, `raw dimension "${raw.qualified}"`);
+  }
   for (const filter of resolved.filters) {
-    joinPathTo(filter.dimension.column.table, `filter on "${filter.dimension.name}"`);
+    joinPathTo(filter.column.table, `filter on "${filter.field}"`);
   }
   if (resolved.time) {
     joinPathTo(resolved.time.column.table, "time range");
@@ -277,6 +284,14 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   const metricSelects = resolved.metrics.map(
     (metric) => `${compileMetricExpr(metric)} AS ${ident(metric.name)}`,
   );
+  const rawMetricSelects = resolved.rawMetrics.map((metric) => {
+    const measureExpr = col(metric.field);
+    const expr =
+      metric.type === "count_distinct"
+        ? `COUNT(DISTINCT ${measureExpr})`
+        : `${rawAggregateFn(metric.type)}(${measureExpr})`;
+    return `${expr} AS ${ident(metric.alias)}`;
+  });
 
   // ---- SELECT list and GROUP BY ----
   const selects: string[] = [];
@@ -292,7 +307,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     selects.push(`${col(dimension.column)} AS ${ident(dimension.name)}`);
     groupBy.push(String(selects.length));
   }
+  for (const raw of resolved.rawDimensions) {
+    selects.push(`${col(raw.ref)} AS ${ident(raw.alias)}`);
+    groupBy.push(String(selects.length));
+  }
   selects.push(...metricSelects);
+  selects.push(...rawMetricSelects);
 
   // ---- WHERE ----
   const where: string[] = [];
@@ -324,8 +344,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   if (orderClauses.length === 0) {
     if (resolved.time?.grain) {
       orderClauses.push(`${ident(timeAlias(resolved.time.grain))} ASC`);
-    } else if (resolved.dimensions.length > 0 && resolved.metrics.length > 0) {
-      orderClauses.push(`${ident(resolved.metrics[0]!.name)} DESC`);
+    } else if (
+      (resolved.dimensions.length > 0 || resolved.rawDimensions.length > 0) &&
+      (resolved.metrics.length > 0 || resolved.rawMetrics.length > 0)
+    ) {
+      const first = resolved.metrics[0]?.name ?? resolved.rawMetrics[0]!.alias;
+      orderClauses.push(`${ident(first)} DESC`);
     }
   }
 
@@ -361,10 +385,16 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       columns: [
         ...(resolved.time?.grain ? [timeAlias(resolved.time.grain)] : []),
         ...resolved.dimensions.map((d) => d.name),
+        ...resolved.rawDimensions.map((d) => d.alias),
         ...resolved.metrics.map((m) => m.name),
+        ...resolved.rawMetrics.map((m) => m.alias),
       ],
     },
     metricVersions,
+    trust: resolved.trust,
+    governed: resolved.governed,
+    ungoverned: resolved.ungoverned,
+    warning: resolved.warning,
   };
 }
 
@@ -412,7 +442,23 @@ function compileQueryFilter(
   params: Params,
   formatCol: (ref: ColumnRef) => string,
 ): string {
-  return compileOperator(formatCol(filter.dimension.column), filter.operator, filter.value, params);
+  return compileOperator(formatCol(filter.column), filter.operator, filter.value, params);
+}
+
+function rawAggregateFn(type: "sum" | "count" | "count_distinct" | "avg" | "min" | "max"): "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" {
+  switch (type) {
+    case "sum":
+      return "SUM";
+    case "count":
+    case "count_distinct":
+      return "COUNT";
+    case "avg":
+      return "AVG";
+    case "min":
+      return "MIN";
+    case "max":
+      return "MAX";
+  }
 }
 
 function compileOperator(

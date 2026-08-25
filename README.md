@@ -1,13 +1,15 @@
 # Grane
 
-**The open-source semantic layer for AI agents.**
+**Governed analytics and controlled exploration for AI agents.**
 
-Connect your database, define your business metrics in code, and give any
-MCP-compatible agent governed access to your data.
+Connect your database, define the business metrics that matter, and give any
+MCP-compatible agent governed access to those definitions — plus permissioned
+exploration of everything else.
 
-**Self-hosted. Deterministic. No dashboards.**
+**Self-hosted. Deterministic. Semantic-first, not semantic-only.**
 
 > Your AI can write SQL. That doesn't mean it knows what Revenue means.
+> Grane tells it which numbers are authoritative and which conclusions are exploratory.
 
 ---
 
@@ -31,17 +33,22 @@ Claude / ChatGPT / Cursor / internal agents
            Your Postgres
 ```
 
-- **The agent reasons. Grane enforces truth.** Agents send semantic requests
-  ("revenue by country last month"); Grane resolves the approved definitions,
-  plans the joins, compiles the SQL, and executes it read-only.
+- **The agent reasons. Grane enforces truth — and labels exploration.** Agents
+  send semantic requests ("revenue by country last month"); Grane resolves the
+  approved definitions, plans the joins, compiles the SQL, and executes it
+  read-only. Permitted raw warehouse columns can be requested as
+  `raw_dimensions` / `raw_metrics` without writing SQL.
 - **Fan-out safety.** Grane knows relationship cardinality and metric grain.
   Measures across `one_to_many` joins are pre-aggregated deterministically;
-  queries that would silently multiply rows are refused.
+  queries that would silently multiply rows are refused — including exploratory
+  ones.
 - **Refusal is a trust feature.** Ask for a metric that isn't defined and
   Grane returns a structured `undefined_metric` response with suggestions —
-  it never invents business logic.
-- **Provenance on every result.** `trust: governed`, a query id, the exact
-  metric definition versions, and the generated SQL.
+  it never invents business logic. Raw columns are allowed only when
+  exploration is enabled and the column is not excluded.
+- **Three trust levels.** `governed` (approved definitions only), `mixed`
+  (approved metrics plus raw fields), `exploratory` (raw warehouse data).
+  Agents must not present exploration as approved business truth.
 - **No LLM inside.** Grane is deterministic infrastructure. No API keys, no
   hosted data plane, nothing leaves your environment.
 
@@ -100,6 +107,7 @@ grane -p example/analytics-duckdb query revenue -d country --last 30d
 docker compose -f example/docker-compose.yml up -d --wait
 grane -p example/analytics validate
 grane -p example/analytics query revenue --dimension country --last last_month
+grane -p example/analytics query revenue --raw-dimension customers.name --last 30d
 grane -p example/analytics serve
 # MCP  http://localhost:8080/mcp
 ```
@@ -196,10 +204,10 @@ Four tools, deliberately hard to misuse:
 
 | Tool | Purpose |
 | --- | --- |
-| `catalog()` | Discover metrics, dimensions, entities, synonyms, capabilities |
+| `catalog()` | Discover metrics, dimensions, entities, synonyms, and (when enabled) explorable warehouse columns |
 | `query()` | Run a Query Model v1 request: resolve → validate → compile → execute → provenance |
 | `validate()` | Dry-run a query without executing it |
-| `explain()` | Inspect definitions, the join plan and the exact SQL |
+| `explain()` | Inspect definitions, trust level, the join plan and the exact SQL |
 
 Agents send analytical intent, not SQL:
 
@@ -207,6 +215,7 @@ Agents send analytical intent, not SQL:
 {
   "metrics": ["revenue"],
   "dimensions": ["country"],
+  "raw_dimensions": ["orders.discount_code"],
   "filters": [{ "field": "customer_type", "operator": "=", "value": "business" }],
   "time": { "from": "2026-07-01", "to": "2026-07-31", "grain": "month" },
   "order": [{ "field": "revenue", "direction": "desc" }],
@@ -214,13 +223,17 @@ Agents send analytical intent, not SQL:
 }
 ```
 
-And every result carries provenance:
+Every result carries a trust level and provenance:
 
 ```json
 {
+  "trust": "mixed",
+  "governed": ["revenue"],
+  "ungoverned": ["orders.discount_code"],
+  "warning": "orders.discount_code is not defined in the Grane semantic model",
   "provenance": {
     "query_id": "q_1faea438cc34",
-    "trust": "governed",
+    "trust": "mixed",
     "query_model": "v1",
     "metrics": { "revenue": { "definition_version": "a82cf1d3" } },
     "generated_sql": "SELECT ...",
@@ -235,6 +248,40 @@ tool reference and config file formats.
 
 ## The trust contract
 
+Grane is **semantic-first, not semantic-only**. A company should not have to
+model its entire warehouse before agents can investigate. Define Revenue, MRR,
+Customers; let agents explore `discount_code` or `device_type` when policy
+allows. Grane still compiles the SQL — agents never get unrestricted SQL by
+default.
+
+| `trust` | Meaning |
+| --- | --- |
+| `governed` | Every field came through an approved Grane definition. Present as business truth. |
+| `mixed` | Approved metrics combined with permitted raw warehouse fields. A strong lead, not an approved conclusion. |
+| `exploratory` | Raw warehouse data only. Investigation, not governed analytics. |
+
+Enable exploration in `grane.yml`:
+
+```yaml
+exploration:
+  enabled: true
+  schemas:
+    - public
+  exclude:
+    - users.password_hash
+    - customers.ssn
+```
+
+Set `enabled: false` to refuse every raw column. Excluded columns are never
+queryable. The database credentials used by Grane should remain read-only.
+
+When a raw field is repeatedly useful:
+
+```bash
+grane usage                          # orders.discount_code used in 47 analyses
+grane promote orders.discount_code   # writes a governed dimension to dimensions.yml
+```
+
 When Grane returns `trust: governed`, it guarantees that every metric and
 dimension was explicitly defined in the semantic model, every join was known
 and cardinality-safe, no business logic was invented by an LLM, the SQL is
@@ -244,7 +291,8 @@ cannot safely resolve the requested meaning, it refuses instead.
 ## What Grane is not
 
 No dashboards, no chart builder, no built-in chatbot, no hosted data plane,
-no required LLM API key. Agents own presentation; Grane owns analytics truth.
+no required LLM API key. Agents own presentation; Grane owns analytics truth
+— and always says which numbers are governed and which are exploratory.
 
 ## Development
 

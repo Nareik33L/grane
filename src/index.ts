@@ -8,6 +8,7 @@ export {
   type MetricConfig,
   type DimensionConfig,
   type RelationshipConfig,
+  type ExplorationConfig,
 } from "./config/schema.js";
 export { SemanticModel, type Metric, type Dimension } from "./model/model.js";
 export { RelationshipGraph } from "./model/graph.js";
@@ -18,6 +19,7 @@ export {
   QUERY_MODEL_VERSION,
   type SemanticQuery,
   type SemanticQueryInput,
+  type TrustLevel,
 } from "./query/model.js";
 export { resolveQuery, type ResolvedQuery } from "./query/resolve.js";
 export { resolveRelativeRange, todayInTimeZone } from "./query/time.js";
@@ -29,3 +31,6 @@ export { getDialect, WAREHOUSE_TYPES } from "./connectors/dialect.js";
 export { buildMcpServer } from "./mcp/server.js";
 export { serveStdio, serveHttp } from "./mcp/transport.js";
 export { GraneError, type Refusal } from "./errors.js";
+export { explorationPolicy } from "./explore/policy.js";
+export { listExplorableColumns } from "./explore/raw.js";
+export { promoteColumn, planPromotion } from "./explore/promote.js";

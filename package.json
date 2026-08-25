@@ -1,7 +1,7 @@
 {
   "name": "grane-analytics",
-  "version": "0.3.0",
-  "description": "The open-source semantic layer for AI agents. Connect your database, define your business metrics in code, and give any MCP-compatible agent governed access to your data.",
+  "version": "0.4.0",
+  "description": "Governed analytics and controlled exploration for AI agents. Connect your database, define business metrics in code, and let MCP agents query them — plus permitted raw warehouse columns, clearly labeled.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {

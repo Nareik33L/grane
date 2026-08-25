@@ -15,6 +15,12 @@ limits:
   default_rows: 1000
   timeout_ms: 30000
 
+exploration:
+  enabled: true
+  schemas:
+    - public
+  exclude: []
+
 entities:
   customer:
     table: customers

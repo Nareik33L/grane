@@ -73,6 +73,7 @@ describe.skipIf(!dbUp)("MCP over streamable HTTP (integration)", () => {
     const revenue = metrics.find((m) => m.name === "revenue")!;
     expect(revenue.available_dimensions).toContain("country");
     expect((catalog["server"] as { query_model: string }).query_model).toBe("v1");
+    expect((catalog["exploration"] as { enabled: boolean }).enabled).toBe(true);
   });
 
   it("query() returns rows plus provenance marked trust: governed", async () => {
@@ -90,8 +91,26 @@ describe.skipIf(!dbUp)("MCP over streamable HTTP (integration)", () => {
     expect((payload["rows"] as unknown[]).length).toBeGreaterThan(0);
     const provenance = payload["provenance"] as Record<string, unknown>;
     expect(provenance["trust"]).toBe("governed");
+    expect(payload["trust"]).toBe("governed");
     expect(provenance["query_id"]).toMatch(/^q_/);
     expect(provenance["generated_sql"]).toContain("SELECT");
+  });
+
+  it("query() can slice a governed metric by a raw column (trust: mixed)", async () => {
+    const result = await client.callTool({
+      name: "query",
+      arguments: {
+        query: {
+          metrics: ["revenue"],
+          raw_dimensions: ["customers.name"],
+          limit: 3,
+        },
+      },
+    });
+    const payload = parseText(result);
+    expect(payload["trust"]).toBe("mixed");
+    expect(payload["ungoverned"]).toEqual(["customers.name"]);
+    expect((payload["rows"] as unknown[]).length).toBeGreaterThan(0);
   });
 
   it("explain() shows the join plan and SQL without executing", async () => {

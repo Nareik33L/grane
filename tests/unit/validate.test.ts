@@ -26,6 +26,10 @@ function schemaFixture(): DatabaseSchema {
         ["channel", "text"],
         ["net_amount", "numeric"],
         ["completed_at", "timestamp with time zone"],
+        ["created_at", "timestamp with time zone"],
+        ["discount_code", "text"],
+        ["device_type", "text"],
+        ["referrer", "text"],
       ]),
       table("payments", [
         ["id", "integer"],

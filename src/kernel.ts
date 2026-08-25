@@ -4,12 +4,15 @@ import { createConnector } from "./connectors/create.js";
 import type { WarehouseConnector } from "./connectors/types.js";
 import type { DatabaseSchema } from "./connectors/types.js";
 import { validateModel, type ValidationReport } from "./validate/validate.js";
-import { resolveQuery, type ResolvedQuery } from "./query/resolve.js";
-import type { SemanticQueryInput } from "./query/model.js";
+import { resolveQuery, queryNeedsSchema, type ResolvedQuery } from "./query/resolve.js";
+import type { SemanticQueryInput, TrustLevel } from "./query/model.js";
 import { compileQuery, type CompiledQuery } from "./compile/compiler.js";
 import { executeCompiled, type QueryResult } from "./execute/executor.js";
+import { explorationPolicy } from "./explore/policy.js";
+import { listExplorableColumns, type ExplorableColumn } from "./explore/raw.js";
+import { recordRawUsage } from "./explore/usage.js";
 
-export const GRANE_VERSION = "0.3.0";
+export const GRANE_VERSION = "0.4.0";
 
 export interface ServerInfo {
   name: "grane";
@@ -17,6 +20,7 @@ export interface ServerInfo {
   query_model: "v1";
   database: string;
   capabilities: string[];
+  exploration: { enabled: boolean };
 }
 
 export interface CatalogMetric {
@@ -45,17 +49,28 @@ export interface CatalogEntity {
   description: string | null;
 }
 
+export interface CatalogExploration {
+  enabled: boolean;
+  schemas: string[];
+  excluded: string[];
+  columns: ExplorableColumn[];
+}
+
 export interface Catalog {
   server: ServerInfo;
   metrics: CatalogMetric[];
   dimensions: CatalogDimension[];
   entities: CatalogEntity[];
+  exploration: CatalogExploration;
 }
 
 export interface ExplainResult {
-  trust: "governed";
+  trust: TrustLevel;
+  governed: string[];
+  ungoverned: string[];
+  warning: string | null;
   query_model: "v1";
-  entity: string;
+  entity: string | null;
   base_table: string;
   metrics: Record<
     string,
@@ -67,6 +82,11 @@ export interface ExplainResult {
   notes: string[];
 }
 
+export interface KernelOptions {
+  projectDir?: string;
+  schema?: DatabaseSchema;
+}
+
 /**
  * The Grane kernel: a loaded semantic model bound to a database connection.
  * The CLI and the MCP server are both thin layers over this class.
@@ -74,20 +94,29 @@ export interface ExplainResult {
 export class GraneKernel {
   readonly model: SemanticModel;
   readonly config: GraneConfig;
+  readonly projectDir: string | undefined;
   private connector: WarehouseConnector | null = null;
+  private schemaCache: DatabaseSchema | null = null;
 
-  constructor(config: GraneConfig) {
+  constructor(config: GraneConfig, options: KernelOptions = {}) {
     this.config = config;
     this.model = new SemanticModel(config);
+    this.projectDir = options.projectDir;
+    this.schemaCache = options.schema ?? null;
   }
 
   serverInfo(): ServerInfo {
+    const capabilities = ["metrics", "dimensions", "filters", "time_grains", "ordering", "provenance"];
+    if (this.config.exploration.enabled) {
+      capabilities.push("exploration", "raw_dimensions", "raw_metrics");
+    }
     return {
       name: "grane",
       version: GRANE_VERSION,
       query_model: "v1",
       database: this.config.connection.type,
-      capabilities: ["metrics", "dimensions", "filters", "time_grains", "ordering", "provenance"],
+      capabilities,
+      exploration: { enabled: this.config.exploration.enabled },
     };
   }
 
@@ -98,6 +127,17 @@ export class GraneKernel {
     return this.connector;
   }
 
+  setSchema(schema: DatabaseSchema): void {
+    this.schemaCache = schema;
+  }
+
+  async loadSchema(): Promise<DatabaseSchema> {
+    if (!this.schemaCache) {
+      this.schemaCache = await this.getConnector().introspect();
+    }
+    return this.schemaCache;
+  }
+
   async close(): Promise<void> {
     if (this.connector) {
       await this.connector.close();
@@ -106,7 +146,9 @@ export class GraneKernel {
   }
 
   async introspectSchema(): Promise<DatabaseSchema> {
-    return this.getConnector().introspect();
+    const schema = await this.getConnector().introspect();
+    this.schemaCache = schema;
+    return schema;
   }
 
   /** Structural validation; pass a schema snapshot for live checks. */
@@ -114,7 +156,8 @@ export class GraneKernel {
     return validateModel(this.model, schema);
   }
 
-  catalog(search?: string): Catalog {
+  /** Governed catalog (sync). Prefer catalog() when exploration columns are needed. */
+  governedCatalog(search?: string): Omit<Catalog, "exploration"> {
     const filter = search ? this.model.search(search) : null;
     const metrics = [...this.model.metrics.values()]
       .filter((m) => !filter || filter.metrics.includes(m.name))
@@ -148,10 +191,32 @@ export class GraneKernel {
     return { server: this.serverInfo(), metrics, dimensions, entities };
   }
 
+  async catalog(search?: string): Promise<Catalog> {
+    const governed = this.governedCatalog(search);
+    const policy = explorationPolicy(this.config);
+    if (!policy.enabled) {
+      return {
+        ...governed,
+        exploration: { enabled: false, schemas: [], excluded: this.config.exploration.exclude, columns: [] },
+      };
+    }
+    const schema = await this.loadSchema();
+    return {
+      ...governed,
+      exploration: {
+        enabled: true,
+        schemas: policy.schemas,
+        excluded: this.config.exploration.exclude,
+        columns: listExplorableColumns(this.model, schema, search),
+      },
+    };
+  }
+
   resolve(input: SemanticQueryInput): ResolvedQuery {
     return resolveQuery(this.model, input, {
       defaultRows: this.config.limits.default_rows,
       maxRows: this.config.limits.max_rows,
+      schema: this.schemaCache,
     });
   }
 
@@ -161,11 +226,24 @@ export class GraneKernel {
     return { resolved, compiled };
   }
 
+  private async compileReady(input: SemanticQueryInput): Promise<{
+    resolved: ResolvedQuery;
+    compiled: CompiledQuery;
+  }> {
+    if (queryNeedsSchema(input, this.model)) {
+      await this.loadSchema();
+    }
+    return this.compile(input);
+  }
+
   /** Validate + compile without executing (dry run). */
-  explain(input: SemanticQueryInput): ExplainResult {
-    const { resolved, compiled } = this.compile(input);
+  async explain(input: SemanticQueryInput): Promise<ExplainResult> {
+    const { resolved, compiled } = await this.compileReady(input);
     return {
-      trust: "governed",
+      trust: resolved.trust,
+      governed: resolved.governed,
+      ungoverned: resolved.ungoverned,
+      warning: resolved.warning,
       query_model: "v1",
       entity: resolved.entity,
       base_table: resolved.baseTable,
@@ -187,10 +265,17 @@ export class GraneKernel {
     };
   }
 
-  /** The full governed path: resolve -> validate -> compile -> execute -> provenance. */
+  /** Resolve -> validate -> compile -> execute. Trust reflects governed vs raw fields. */
   async query(input: SemanticQueryInput): Promise<QueryResult & { notes: string[] }> {
-    const { resolved, compiled } = this.compile(input);
+    const { resolved, compiled } = await this.compileReady(input);
     const result = await executeCompiled(this.getConnector(), compiled, this.config.limits);
+    if (this.projectDir && resolved.ungoverned.length > 0) {
+      try {
+        recordRawUsage(this.projectDir, resolved.ungoverned);
+      } catch {
+        // Usage tracking is best-effort and must not fail a query.
+      }
+    }
     return { ...result, notes: resolved.notes };
   }
 }

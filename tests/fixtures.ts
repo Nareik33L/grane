@@ -1,6 +1,7 @@
 import { graneConfigSchema, type GraneConfig } from "../src/config/schema.js";
 import { SemanticModel } from "../src/model/model.js";
 import { GraneKernel } from "../src/kernel.js";
+import type { DatabaseSchema } from "../src/connectors/types.js";
 
 /** The example e-commerce model, inlined so unit tests need no database. */
 export function exampleConfig(overrides: Record<string, unknown> = {}): GraneConfig {
@@ -88,3 +89,76 @@ export function exampleModel(): SemanticModel {
 export function exampleKernel(): GraneKernel {
   return new GraneKernel(exampleConfig());
 }
+
+export function exploringConfig(overrides: Record<string, unknown> = {}): GraneConfig {
+  return exampleConfig({
+    exploration: {
+      enabled: true,
+      schemas: ["public"],
+      exclude: ["customers.email"],
+    },
+    ...overrides,
+  });
+}
+
+export function exploringKernel(overrides: Record<string, unknown> = {}): GraneKernel {
+  const kernel = new GraneKernel(exploringConfig(overrides));
+  kernel.setSchema(exampleSchema());
+  return kernel;
+}
+
+/** Live-schema-shaped snapshot used by unit tests (no database required). */
+export function exampleSchema(): DatabaseSchema {
+  const table = (name: string, columns: [string, string][]) => ({
+    schema: "public",
+    name,
+    columns: columns.map(([n, t]) => ({ name: n, dataType: t, nullable: true })),
+  });
+  return {
+    schemaName: "public",
+    tables: [
+      table("customers", [
+        ["id", "integer"],
+        ["name", "text"],
+        ["email", "text"],
+        ["country", "text"],
+        ["customer_type", "text"],
+        ["created_at", "timestamp with time zone"],
+      ]),
+      table("orders", [
+        ["id", "integer"],
+        ["customer_id", "integer"],
+        ["status", "text"],
+        ["channel", "text"],
+        ["net_amount", "numeric"],
+        ["completed_at", "timestamp with time zone"],
+        ["created_at", "timestamp with time zone"],
+        ["discount_code", "text"],
+        ["device_type", "text"],
+        ["referrer", "text"],
+      ]),
+      table("payments", [
+        ["id", "integer"],
+        ["order_id", "integer"],
+        ["amount", "numeric"],
+        ["status", "text"],
+      ]),
+      table("refunds", [
+        ["id", "integer"],
+        ["order_id", "integer"],
+        ["amount", "numeric"],
+      ]),
+      table("order_items", [
+        ["id", "integer"],
+        ["order_id", "integer"],
+        ["product_id", "integer"],
+      ]),
+      table("products", [
+        ["id", "integer"],
+        ["category", "text"],
+      ]),
+    ],
+    foreignKeys: [],
+  };
+}
+

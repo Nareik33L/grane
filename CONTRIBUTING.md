@@ -19,9 +19,11 @@ database on `localhost:5433`.
 ## Scope
 
 In scope: metrics, dimensions, relationships, validation, the SQL compiler,
-join/grain safety, provenance, MCP, CLI, and database connectors.
+join/grain safety, provenance, controlled exploration of raw warehouse
+columns, MCP, CLI, and database connectors.
 
 Out of scope: dashboards, chart builders, a built-in chatbot, hosted
-analytics, or anything that makes Grane invent business definitions.
+analytics, unrestricted agent-written SQL, or anything that makes Grane
+invent business definitions or present exploration as governed truth.
 
 See [README.md](README.md) and [docs/connect-an-agent.md](docs/connect-an-agent.md).

@@ -10,13 +10,17 @@ import { resolveRelativeRange } from "../query/time.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
 import { GraneError } from "../errors.js";
 import type { SemanticQueryInput } from "../query/model.js";
+import { listExplorableColumns } from "../explore/raw.js";
+import { explorationPolicy } from "../explore/policy.js";
+import { promoteColumn } from "../explore/promote.js";
+import { usageRanked } from "../explore/usage.js";
 import { GRANE_YML, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 
 const program = new Command();
 
 program
   .name("grane")
-  .description("Grane — the open-source semantic layer for AI agents.")
+  .description("Grane — governed analytics and controlled exploration for AI agents.")
   .version(GRANE_VERSION)
   .option("-p, --project <dir>", "project directory containing grane.yml", ".");
 
@@ -25,8 +29,8 @@ function projectDir(): string {
 }
 
 function loadKernel(): GraneKernel {
-  const { config } = loadConfig(projectDir());
-  return new GraneKernel(config);
+  const loaded = loadConfig(projectDir());
+  return new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
 }
 
 function fail(err: unknown): never {
@@ -88,11 +92,23 @@ program
         return;
       }
       const columnCount = schema.tables.reduce((n, t) => n + t.columns.length, 0);
+      const policy = explorationPolicy(kernel.config);
+      const explorable = policy.enabled ? listExplorableColumns(kernel.model, schema) : [];
       console.log(`Database: ${kernel.config.connection.type} (schema "${schema.schemaName}")\n`);
       console.log(`${schema.tables.length} tables`);
-      console.log(`${columnCount} columns`);
+      console.log(`${columnCount} columns discovered`);
       console.log(`${schema.foreignKeys.length} foreign keys`);
       console.log(`${Object.keys(inferred).length} inferred relationships\n`);
+      console.log(`Governed:`);
+      console.log(`  ${kernel.model.metrics.size} metrics`);
+      console.log(`  ${kernel.model.dimensions.size} dimensions`);
+      if (policy.enabled) {
+        console.log(`Explorable:`);
+        console.log(`  ${explorable.length} additional columns`);
+      } else {
+        console.log(`Exploration: disabled`);
+      }
+      console.log("");
       for (const table of schema.tables) {
         console.log(`${table.name}`);
         for (const column of table.columns) {
@@ -156,10 +172,12 @@ program
 // ---------------------------------------------------------------- query
 program
   .command("query")
-  .description("Run a governed query, e.g.: grane query revenue --dimension country --last 30d")
-  .argument("<metrics...>", "metric names")
-  .option("-d, --dimension <name...>", "dimension(s) to group by")
-  .option("-f, --filter <expr...>", "filter(s) as dimension=value")
+  .description("Run a query, e.g.: grane query revenue --dimension country --last 30d")
+  .argument("[metrics...]", "governed metric names")
+  .option("-d, --dimension <name...>", "governed dimension(s) to group by")
+  .option("--raw-dimension <ref...>", "ungoverned table.column field(s) to group by")
+  .option("--raw-metric <spec...>", "ungoverned aggregation(s), e.g. count:orders.id")
+  .option("-f, --filter <expr...>", "filter(s) as dimension=value or table.column=value")
   .option("--last <period>", "relative period, e.g. 30d, 6m, last_month")
   .option("--from <date>", "start date (YYYY-MM-DD)")
   .option("--to <date>", "end date (YYYY-MM-DD), inclusive")
@@ -172,6 +190,8 @@ program
       metrics: string[],
       options: {
         dimension?: string[];
+        rawDimension?: string[];
+        rawMetric?: string[];
         filter?: string[];
         last?: string;
         from?: string;
@@ -184,13 +204,17 @@ program
     ) => {
       const kernel = loadKernel();
       try {
-        const query: SemanticQueryInput = { metrics };
+        const query: SemanticQueryInput = { metrics: metrics ?? [] };
         if (options.dimension) query.dimensions = options.dimension;
+        if (options.rawDimension) query.raw_dimensions = options.rawDimension;
+        if (options.rawMetric) {
+          query.raw_metrics = options.rawMetric.map(parseRawMetricSpec);
+        }
         if (options.filter) {
           query.filters = options.filter.map((expr) => {
             const eq = expr.indexOf("=");
             if (eq < 1) {
-              throw new Error(`Invalid --filter "${expr}"; use dimension=value.`);
+              throw new Error(`Invalid --filter "${expr}"; use field=value.`);
             }
             return { field: expr.slice(0, eq), operator: "=" as const, value: expr.slice(eq + 1) };
           });
@@ -217,11 +241,12 @@ program
         if (options.limit) query.limit = Number(options.limit);
 
         if (options.sql) {
-          const explained = kernel.explain(query);
+          const explained = await kernel.explain(query);
           console.log(explained.generated_sql);
           if (explained.params.length > 0) {
             console.log(`\n-- params: ${JSON.stringify(explained.params)}`);
           }
+          if (explained.warning) console.error(`warning: ${explained.warning}`);
           return;
         }
 
@@ -231,9 +256,10 @@ program
           return;
         }
         for (const note of result.notes) console.error(`note: ${note}`);
+        if (result.warning) console.error(`warning: ${result.warning}`);
         printTable(result.columns, result.rows);
         console.error(
-          `\n${result.provenance.row_count} rows | trust: governed | query ${result.provenance.query_id} | ${result.provenance.duration_ms}ms`,
+          `\n${result.provenance.row_count} rows | trust: ${result.trust} | query ${result.provenance.query_id} | ${result.provenance.duration_ms}ms`,
         );
       } catch (err) {
         fail(err);
@@ -258,17 +284,88 @@ program
       }
       const port = Number(options.port);
       await serveHttp(kernel, port);
-      const catalog = kernel.catalog();
+      const catalog = await kernel.catalog();
       console.log("Grane MCP Server\n");
       console.log(`Database      ${kernel.config.connection.type}`);
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
+      if (catalog.exploration.enabled) {
+        console.log(`Explorable    ${catalog.exploration.columns.length} columns`);
+      }
       console.log(`Status        ready\n`);
       console.log(`MCP           http://localhost:${port}/mcp`);
     } catch (err) {
       fail(err);
     }
   });
+
+// ---------------------------------------------------------------- promote
+program
+  .command("promote")
+  .description("Promote a raw warehouse column to a governed dimension")
+  .argument("<column>", "table.column to promote, e.g. orders.discount_code")
+  .option("--name <name>", "dimension name (default: the column name)")
+  .option("--entity <entity>", "entity (inferred from the table when omitted)")
+  .option("--description <text>", "dimension description")
+  .action(
+    async (
+      column: string,
+      options: { name?: string; entity?: string; description?: string },
+    ) => {
+      const loaded = loadConfig(projectDir());
+      const kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
+      try {
+        let schema;
+        try {
+          schema = await kernel.introspectSchema();
+        } catch {
+          schema = undefined;
+        }
+        const result = promoteColumn(kernel.model, loaded.projectDir, column, {
+          name: options.name,
+          entity: options.entity,
+          description: options.description,
+          schema: schema ?? null,
+        });
+        console.log(`Promoted ${result.column} -> governed dimension "${result.name}"`);
+        console.log(`Wrote ${result.file}`);
+        console.log(`Run "grane validate" to type-check the new definition.`);
+      } catch (err) {
+        fail(err);
+      } finally {
+        await kernel.close();
+      }
+    },
+  );
+
+// ---------------------------------------------------------------- usage
+program
+  .command("usage")
+  .description("Show how often explorable columns have been queried")
+  .action(() => {
+    const loaded = loadConfig(projectDir());
+    const ranked = usageRanked(loaded.projectDir);
+    if (ranked.length === 0) {
+      console.log("No exploratory column usage recorded yet.");
+      return;
+    }
+    const width = Math.max(...ranked.map((r) => r.column.length), "column".length);
+    console.log(`${"column".padEnd(width)}  uses  last_used`);
+    console.log(`${"-".repeat(width)}  ----  ---------`);
+    for (const row of ranked) {
+      console.log(`${row.column.padEnd(width)}  ${String(row.count).padStart(4)}  ${row.last_used}`);
+    }
+  });
+
+function parseRawMetricSpec(spec: string): { field: string; type: "sum" | "count" | "count_distinct" | "avg" | "min" | "max" } {
+  const types = ["count_distinct", "count", "sum", "avg", "min", "max"] as const;
+  for (const type of types) {
+    if (spec.startsWith(`${type}:`)) {
+      return { field: spec.slice(type.length + 1), type };
+    }
+  }
+  return { field: spec, type: "count" };
+}
 
 function printTable(columns: string[], rows: Record<string, unknown>[]): void {
   if (rows.length === 0) {
