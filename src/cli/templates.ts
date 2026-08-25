@@ -13,9 +13,14 @@ project:
 
 connection:
   type: postgres
+  # postgres | mysql | snowflake | bigquery | duckdb | clickhouse | redshift
   # Environment variables are interpolated with \${VAR_NAME}.
   url: \${DATABASE_URL}
   schema: public
+  # Snowflake: account, warehouse, database, schema, user, password, role
+  # BigQuery:  project, dataset, location, credentials (keyfile path)
+  # DuckDB:    path (file or :memory:)
+  # ClickHouse: url (http://user:pass@host:8123) or host + database
 
 limits:
   max_rows: 10000

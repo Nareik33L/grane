@@ -5,7 +5,7 @@ import { Command } from "commander";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig } from "../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
-import { inferRelationships } from "../connectors/postgres/introspect.js";
+import { inferRelationships } from "../connectors/types.js";
 import { resolveRelativeRange } from "../query/time.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
 import { GraneError } from "../errors.js";
@@ -88,7 +88,7 @@ program
         return;
       }
       const columnCount = schema.tables.reduce((n, t) => n + t.columns.length, 0);
-      console.log(`Database: postgres (schema "${schema.schemaName}")\n`);
+      console.log(`Database: ${kernel.config.connection.type} (schema "${schema.schemaName}")\n`);
       console.log(`${schema.tables.length} tables`);
       console.log(`${columnCount} columns`);
       console.log(`${schema.foreignKeys.length} foreign keys`);
@@ -260,7 +260,7 @@ program
       await serveHttp(kernel, port);
       const catalog = kernel.catalog();
       console.log("Grane MCP Server\n");
-      console.log(`Database      postgres`);
+      console.log(`Database      ${kernel.config.connection.type}`);
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
       console.log(`Status        ready\n`);

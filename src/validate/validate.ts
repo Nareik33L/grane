@@ -3,8 +3,8 @@ import { parseColumnRef } from "../model/refs.js";
 import {
   isNumericType,
   isTemporalType,
-  type DatabaseSchema,
-} from "../connectors/postgres/introspect.js";
+} from "../connectors/dialect.js";
+import type { DatabaseSchema } from "../connectors/types.js";
 
 /**
  * Structural validation: is every semantic definition legal and analytically

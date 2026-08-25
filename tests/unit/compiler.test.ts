@@ -35,7 +35,7 @@ describe("deterministic SQL compiler", () => {
     expect(compiled.sql).toContain('"m_payments_received" AS (');
     expect(compiled.sql).toContain('GROUP BY "payments"."order_id"');
     expect(compiled.sql).toContain(
-      'LEFT JOIN "m_payments_received" ON "m_payments_received"._key = "orders"."id"',
+      'LEFT JOIN "m_payments_received" ON "m_payments_received"."_key" = "orders"."id"',
     );
     // The metric's own filter is applied inside the CTE.
     expect(compiled.sql).toContain('"payments"."status" = $1');

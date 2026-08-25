@@ -93,7 +93,21 @@ export function loadConfig(projectDir: string): LoadedConfig {
   // Environment interpolation for connection secrets.
   const connection = merged["connection"] as Record<string, unknown> | undefined;
   if (connection) {
-    for (const field of ["url", "host", "database", "user", "password"]) {
+    for (const field of [
+      "url",
+      "host",
+      "database",
+      "user",
+      "password",
+      "account",
+      "warehouse",
+      "role",
+      "project",
+      "dataset",
+      "location",
+      "credentials",
+      "path",
+    ]) {
       if (field in connection) connection[field] = interpolateEnv(connection[field]);
     }
   }

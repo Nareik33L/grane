@@ -81,7 +81,9 @@ Your Postgres  — DATABASE_URL
 
 Full walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)**
 
-MCP tool reference and config examples: **[docs/mcp-setup.md](docs/mcp-setup.md)**
+MCP tool reference: **[docs/mcp-setup.md](docs/mcp-setup.md)**
+
+Warehouse connections: **[docs/warehouses.md](docs/warehouses.md)**
 
 ## Quickstart (with the example database)
 
@@ -112,6 +114,22 @@ npm install -g grane-analytics
 ```
 
 The CLI command is still `grane`. Requires Node 20+.
+
+## Warehouses
+
+Set `connection.type` in `grane.yml`. Postgres and Redshift use the bundled
+`pg` driver. Other engines need one extra package:
+
+| Type | Extra install |
+| --- | --- |
+| `postgres` / `redshift` | (bundled) |
+| `mysql` | `npm install mysql2` |
+| `snowflake` | `npm install snowflake-sdk` |
+| `bigquery` | `npm install @google-cloud/bigquery` |
+| `duckdb` | `npm install duckdb` |
+| `clickhouse` | `npm install @clickhouse/client` |
+
+Connection examples: **[docs/warehouses.md](docs/warehouses.md)**
 
 ## Quickstart (your own database)
 

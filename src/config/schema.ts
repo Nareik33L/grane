@@ -93,8 +93,19 @@ export const relationshipConfigSchema = z.object({
 });
 export type RelationshipConfig = z.infer<typeof relationshipConfigSchema>;
 
+export const warehouseTypeSchema = z.enum([
+  "postgres",
+  "mysql",
+  "snowflake",
+  "bigquery",
+  "duckdb",
+  "clickhouse",
+  "redshift",
+]);
+export type WarehouseType = z.infer<typeof warehouseTypeSchema>;
+
 export const connectionConfigSchema = z.object({
-  type: z.literal("postgres").default("postgres"),
+  type: warehouseTypeSchema.default("postgres"),
   /** Full connection URL. Supports ${ENV_VAR} interpolation. */
   url: z.string().optional(),
   host: z.string().optional(),
@@ -102,8 +113,22 @@ export const connectionConfigSchema = z.object({
   database: z.string().optional(),
   user: z.string().optional(),
   password: z.string().optional(),
-  schema: z.string().default("public"),
+  schema: z.string().optional(),
   ssl: z.boolean().optional(),
+  /** Snowflake account identifier. */
+  account: z.string().optional(),
+  /** Snowflake warehouse. */
+  warehouse: z.string().optional(),
+  role: z.string().optional(),
+  /** BigQuery project id. */
+  project: z.string().optional(),
+  /** BigQuery dataset (falls back to schema). */
+  dataset: z.string().optional(),
+  location: z.string().optional(),
+  /** Path to a service-account JSON key (BigQuery). */
+  credentials: z.string().optional(),
+  /** DuckDB file path, or :memory:. */
+  path: z.string().optional(),
 });
 export type ConnectionConfig = z.infer<typeof connectionConfigSchema>;
 

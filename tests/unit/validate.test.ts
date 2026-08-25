@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { exampleConfig, exampleModel } from "../fixtures.js";
 import { SemanticModel } from "../../src/model/model.js";
 import { validateModel } from "../../src/validate/validate.js";
-import type { DatabaseSchema } from "../../src/connectors/postgres/introspect.js";
+import type { DatabaseSchema } from "../../src/connectors/types.js";
 
 function schemaFixture(): DatabaseSchema {
   const table = (name: string, columns: [string, string][]) => ({

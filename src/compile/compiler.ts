@@ -6,6 +6,8 @@ import type { FilterOperator, Scalar, MetricFilterItem } from "../config/schema.
 import { parseColumnRef, type ColumnRef } from "../model/refs.js";
 import { addDays, formatDate } from "../query/time.js";
 import { invalidQuery, unsafeQuery } from "../errors.js";
+import { getDialect, postgresDialect, type SqlDialect } from "../connectors/dialect.js";
+import { compilerNamespace } from "../connectors/create.js";
 
 /**
  * The deterministic query compiler.
@@ -46,41 +48,28 @@ export interface CompiledQuery {
 
 class Params {
   readonly values: Scalar[] = [];
+  constructor(readonly dialect: SqlDialect) {}
   add(value: Scalar): string {
     this.values.push(value);
-    return `$${this.values.length}`;
+    return this.dialect.placeholder(this.values.length, value);
   }
 }
 
 export function quoteIdent(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`;
-}
-
-function quoteLiteralString(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function col(ref: ColumnRef): string {
-  return `${quoteIdent(ref.table)}.${quoteIdent(ref.column)}`;
+  return postgresDialect.ident(name);
 }
 
 export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): CompiledQuery {
-  const schema = model.config.connection.schema;
+  const dialect = getDialect(model.config.connection.type);
+  const schema = compilerNamespace(model.config.connection);
   const timezone = model.config.project.timezone;
-  const params = new Params();
+  const params = new Params(dialect);
   const baseTable = resolved.baseTable;
+  const ident = (name: string) => dialect.ident(name);
+  const col = (ref: ColumnRef): string => `${ident(ref.table)}.${ident(ref.column)}`;
+  const qualify = (table: string): string => dialect.qualifyTable(schema, table);
 
-  const qualify = (table: string): string => `${quoteIdent(schema)}.${quoteIdent(table)}`;
-
-  /**
-   * Timestamp expression localized to the project timezone. The executor pins
-   * the session timezone to UTC, so this is deterministic for both timestamp
-   * and timestamptz columns.
-   */
-  const localTime = (ref: ColumnRef): string => {
-    if (!timezone || timezone === "UTC") return col(ref);
-    return `(${col(ref)}::timestamptz AT TIME ZONE ${quoteLiteralString(timezone)})`;
-  };
+  const localTime = (ref: ColumnRef): string => dialect.localizeTime(col(ref), timezone);
 
   // ---- Join planning for the outer query (dimensions, filters, time, direct measures) ----
   const joinedTables = new Set<string>([baseTable]);
@@ -107,7 +96,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     joinedTables.add(edge.toTable);
     joins.push({
       table: edge.toTable,
-      on: `${quoteIdent(edge.fromTable)}.${quoteIdent(edge.fromColumn)} = ${quoteIdent(edge.toTable)}.${quoteIdent(edge.toColumn)}`,
+      on: `${ident(edge.fromTable)}.${ident(edge.fromColumn)} = ${ident(edge.toTable)}.${ident(edge.toColumn)}`,
       relationship: edge.relationship,
       cardinality: edge.cardinality,
     });
@@ -135,9 +124,13 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     if (!path.fansOut) {
       // Measure is on the base table or safely reachable: aggregate directly.
       joinPathTo(measure.table, `measure of metric "${metric.name}"`);
-      const filterClause = compileMetricFilters(metric.filters, params);
-      const agg = directAggregate(metric, col(measure));
-      return { expr: filterClause ? `${agg} FILTER (WHERE ${filterClause})` : agg };
+      const filterClause = compileMetricFilters(metric.filters, params, col);
+      const fn = aggregateFn(metric);
+      return {
+        expr: filterClause
+          ? dialect.filteredAggregate(fn, col(measure), filterClause)
+          : directAggregate(metric, col(measure)),
+      };
     }
 
     // Fan-out path: deterministic pre-aggregation at the metric grain.
@@ -155,8 +148,8 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     const firstEdge = edges[0]!;
     // The CTE starts at the child side of the first fan-out hop; its key is
     // the child column that references the base table.
-    const keyExpr = `${quoteIdent(firstEdge.toTable)}.${quoteIdent(firstEdge.toColumn)}`;
-    const baseKeyExpr = `${quoteIdent(firstEdge.fromTable)}.${quoteIdent(firstEdge.fromColumn)}`;
+    const keyExpr = `${ident(firstEdge.toTable)}.${ident(firstEdge.toColumn)}`;
+    const baseKeyExpr = `${ident(firstEdge.fromTable)}.${ident(firstEdge.fromColumn)}`;
     if (firstEdge.fromTable !== baseTable) {
       // Multi-hop before the fan-out would need intermediate joins from base;
       // out of scope for V0.1's deterministic guarantees.
@@ -171,7 +164,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       if (cteTables.has(edge.toTable)) continue;
       cteTables.add(edge.toTable);
       cteJoinClauses.push(
-        `  JOIN ${qualify(edge.toTable)} ON ${quoteIdent(edge.fromTable)}.${quoteIdent(edge.fromColumn)} = ${quoteIdent(edge.toTable)}.${quoteIdent(edge.toColumn)}`,
+        `  JOIN ${qualify(edge.toTable)} ON ${ident(edge.fromTable)}.${ident(edge.fromColumn)} = ${ident(edge.toTable)}.${ident(edge.toColumn)}`,
       );
     }
 
@@ -183,39 +176,39 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       const ref = parseColumnRef(filter.field)!;
       (ref.table === baseTable ? outerFilters : insideFilters).push(filter);
     }
-    const insideWhere = compileMetricFilters(insideFilters, params);
+    const insideWhere = compileMetricFilters(insideFilters, params, col);
 
     const valueColumns: string[] = [];
     let outerExpr: string;
     const measureCol = col(measure);
     switch (metric.config.type) {
       case "sum":
-        valueColumns.push(`SUM(${measureCol}) AS value`);
-        outerExpr = `SUM(${cteName}.value)`;
+        valueColumns.push(`SUM(${measureCol}) AS ${ident("value")}`);
+        outerExpr = `SUM(${ident(cteName)}.${ident("value")})`;
         break;
       case "count":
-        valueColumns.push(`COUNT(${measureCol}) AS value`);
-        outerExpr = `COALESCE(SUM(${cteName}.value), 0)`;
+        valueColumns.push(`COUNT(${measureCol}) AS ${ident("value")}`);
+        outerExpr = `COALESCE(SUM(${ident(cteName)}.${ident("value")}), 0)`;
         break;
       case "min":
-        valueColumns.push(`MIN(${measureCol}) AS value`);
-        outerExpr = `MIN(${cteName}.value)`;
+        valueColumns.push(`MIN(${measureCol}) AS ${ident("value")}`);
+        outerExpr = `MIN(${ident(cteName)}.${ident("value")})`;
         break;
       case "max":
-        valueColumns.push(`MAX(${measureCol}) AS value`);
-        outerExpr = `MAX(${cteName}.value)`;
+        valueColumns.push(`MAX(${measureCol}) AS ${ident("value")}`);
+        outerExpr = `MAX(${ident(cteName)}.${ident("value")})`;
         break;
       case "avg":
-        valueColumns.push(`SUM(${measureCol}) AS value_sum`, `COUNT(${measureCol}) AS value_count`);
-        outerExpr = `SUM(${cteName}.value_sum) / NULLIF(SUM(${cteName}.value_count), 0)`;
+        valueColumns.push(`SUM(${measureCol}) AS ${ident("value_sum")}`, `COUNT(${measureCol}) AS ${ident("value_count")}`);
+        outerExpr = `SUM(${ident(cteName)}.${ident("value_sum")}) / NULLIF(SUM(${ident(cteName)}.${ident("value_count")}), 0)`;
         break;
       default:
         throw unsafeQuery(`Unsupported pre-aggregated metric type "${metric.config.type}".`);
     }
 
     const cteSql = [
-      `${quoteIdent(cteName)} AS (`,
-      `  SELECT ${keyExpr} AS _key, ${valueColumns.join(", ")}`,
+      `${ident(cteName)} AS (`,
+      `  SELECT ${keyExpr} AS ${ident("_key")}, ${valueColumns.join(", ")}`,
       `  FROM ${qualify(firstEdge.toTable)}`,
       ...cteJoinClauses,
       ...(insideWhere ? [`  WHERE ${insideWhere}`] : []),
@@ -224,7 +217,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     ].join("\n");
     ctes.push(cteSql);
     cteJoins.push(
-      `LEFT JOIN ${quoteIdent(cteName)} ON ${quoteIdent(cteName)}._key = ${baseKeyExpr}`,
+      `LEFT JOIN ${ident(cteName)} ON ${ident(cteName)}.${ident("_key")} = ${baseKeyExpr}`,
     );
     preAggregations.push({
       metric: metric.name,
@@ -233,18 +226,18 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       keyColumn: `${firstEdge.toTable}.${firstEdge.toColumn}`,
     });
 
-    const outerFilterClause = compileMetricFilters(outerFilters, params);
-    // FILTER applies cleanly to a plain aggregate; for composed expressions
-    // (avg, coalesced count) fall back to CASE inside the aggregate arguments.
+    const outerFilterClause = compileMetricFilters(outerFilters, params, col);
     if (outerFilterClause) {
+      const cteVal = `${ident(cteName)}.${ident("value")}`;
       if (metric.config.type === "avg") {
         outerExpr =
-          `SUM(CASE WHEN ${outerFilterClause} THEN ${cteName}.value_sum END) / ` +
-          `NULLIF(SUM(CASE WHEN ${outerFilterClause} THEN ${cteName}.value_count END), 0)`;
+          `SUM(CASE WHEN ${outerFilterClause} THEN ${ident(cteName)}.${ident("value_sum")} END) / ` +
+          `NULLIF(SUM(CASE WHEN ${outerFilterClause} THEN ${ident(cteName)}.${ident("value_count")} END), 0)`;
       } else if (metric.config.type === "count") {
-        outerExpr = `COALESCE(SUM(${cteName}.value) FILTER (WHERE ${outerFilterClause}), 0)`;
+        outerExpr = `COALESCE(${dialect.filteredAggregate("SUM", cteVal, outerFilterClause)}, 0)`;
       } else {
-        outerExpr = `${outerExpr} FILTER (WHERE ${outerFilterClause})`;
+        const fn = aggregateFn(metric);
+        outerExpr = dialect.filteredAggregate(fn, cteVal, outerFilterClause);
       }
     }
     return { expr: outerExpr };
@@ -264,7 +257,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       metricVersions[denominator.name] = denominator.definitionVersion;
       const num = compileScalarMetric(numerator).expr;
       const den = compileScalarMetric(denominator).expr;
-      return `(${num})::numeric / NULLIF((${den})::numeric, 0)`;
+      return `${dialect.castNumeric(num)} / NULLIF(${dialect.castNumeric(den)}, 0)`;
     }
     return compileScalarMetric(metric).expr;
   };
@@ -282,7 +275,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   }
 
   const metricSelects = resolved.metrics.map(
-    (metric) => `${compileMetricExpr(metric)} AS ${quoteIdent(metric.name)}`,
+    (metric) => `${compileMetricExpr(metric)} AS ${ident(metric.name)}`,
   );
 
   // ---- SELECT list and GROUP BY ----
@@ -291,12 +284,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
   if (resolved.time?.grain) {
     const alias = timeAlias(resolved.time.grain);
-    const expr = `date_trunc(${quoteLiteralString(resolved.time.grain)}, ${localTime(resolved.time.column)})`;
-    selects.push(`${expr} AS ${quoteIdent(alias)}`);
+    const expr = dialect.dateTrunc(resolved.time.grain, localTime(resolved.time.column));
+    selects.push(`${expr} AS ${ident(alias)}`);
     groupBy.push(String(selects.length));
   }
   for (const dimension of resolved.dimensions) {
-    selects.push(`${col(dimension.column)} AS ${quoteIdent(dimension.name)}`);
+    selects.push(`${col(dimension.column)} AS ${ident(dimension.name)}`);
     groupBy.push(String(selects.length));
   }
   selects.push(...metricSelects);
@@ -316,23 +309,23 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
         1,
       ),
     );
-    where.push(`${expr} >= ${params.add(from)}::timestamp`);
-    where.push(`${expr} < ${params.add(toExclusive)}::timestamp`);
+    where.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
+    where.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
   }
   for (const filter of resolved.filters) {
-    where.push(compileQueryFilter(filter, params));
+    where.push(compileQueryFilter(filter, params, col));
   }
 
   // ---- ORDER BY ----
   const orderClauses: string[] = [];
   for (const order of resolved.order) {
-    orderClauses.push(`${quoteIdent(order.field)} ${order.direction === "desc" ? "DESC" : "ASC"}`);
+    orderClauses.push(`${ident(order.field)} ${order.direction === "desc" ? "DESC" : "ASC"}`);
   }
   if (orderClauses.length === 0) {
     if (resolved.time?.grain) {
-      orderClauses.push(`${quoteIdent(timeAlias(resolved.time.grain))} ASC`);
+      orderClauses.push(`${ident(timeAlias(resolved.time.grain))} ASC`);
     } else if (resolved.dimensions.length > 0 && resolved.metrics.length > 0) {
-      orderClauses.push(`${quoteIdent(resolved.metrics[0]!.name)} DESC`);
+      orderClauses.push(`${ident(resolved.metrics[0]!.name)} DESC`);
     }
   }
 
@@ -375,39 +368,51 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   };
 }
 
-function directAggregate(metric: Metric, measureExpr: string): string {
+function aggregateFn(metric: Metric): "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" {
   switch (metric.config.type) {
     case "sum":
-      return `SUM(${measureExpr})`;
+      return "SUM";
     case "count":
-      return `COUNT(${measureExpr})`;
     case "count_distinct":
-      return `COUNT(DISTINCT ${measureExpr})`;
+      return "COUNT";
     case "avg":
-      return `AVG(${measureExpr})`;
+      return "AVG";
     case "min":
-      return `MIN(${measureExpr})`;
+      return "MIN";
     case "max":
-      return `MAX(${measureExpr})`;
+      return "MAX";
     default:
       throw invalidQuery(`Unsupported metric type "${metric.config.type}".`);
   }
 }
 
-function compileMetricFilters(filters: MetricFilterItem[], params: Params): string | null {
+function directAggregate(metric: Metric, measureExpr: string): string {
+  if (metric.config.type === "count_distinct") return `COUNT(DISTINCT ${measureExpr})`;
+  return `${aggregateFn(metric)}(${measureExpr})`;
+}
+
+function compileMetricFilters(
+  filters: MetricFilterItem[],
+  params: Params,
+  formatCol: (ref: ColumnRef) => string,
+): string | null {
   if (filters.length === 0) return null;
   const clauses = filters.map((filter) => {
     const ref = parseColumnRef(filter.field);
     if (!ref) {
       throw invalidQuery(`Metric filter field "${filter.field}" is not a table.column reference.`);
     }
-    return compileOperator(col(ref), filter.operator, filter.value, params);
+    return compileOperator(formatCol(ref), filter.operator, filter.value, params);
   });
   return clauses.join(" AND ");
 }
 
-function compileQueryFilter(filter: ResolvedFilter, params: Params): string {
-  return compileOperator(col(filter.dimension.column), filter.operator, filter.value, params);
+function compileQueryFilter(
+  filter: ResolvedFilter,
+  params: Params,
+  formatCol: (ref: ColumnRef) => string,
+): string {
+  return compileOperator(formatCol(filter.dimension.column), filter.operator, filter.value, params);
 }
 
 function compileOperator(
@@ -431,7 +436,7 @@ function compileOperator(
       return `${columnExpr} ${operator === "in" ? "IN" : "NOT IN"} (${placeholders})`;
     }
     case "contains":
-      return `${columnExpr} ILIKE '%' || ${params.add(value as Scalar)} || '%'`;
+      return params.dialect.contains(columnExpr, params.add(value as Scalar));
     case "=":
     case "!=":
     case ">":

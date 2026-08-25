@@ -1,21 +1,21 @@
-import type pg from "pg";
 import type { GraneConfig } from "./config/schema.js";
 import { SemanticModel } from "./model/model.js";
-import { createPool } from "./connectors/postgres/client.js";
-import { introspect, type DatabaseSchema } from "./connectors/postgres/introspect.js";
+import { createConnector } from "./connectors/create.js";
+import type { WarehouseConnector } from "./connectors/types.js";
+import type { DatabaseSchema } from "./connectors/types.js";
 import { validateModel, type ValidationReport } from "./validate/validate.js";
 import { resolveQuery, type ResolvedQuery } from "./query/resolve.js";
 import type { SemanticQueryInput } from "./query/model.js";
 import { compileQuery, type CompiledQuery } from "./compile/compiler.js";
 import { executeCompiled, type QueryResult } from "./execute/executor.js";
 
-export const GRANE_VERSION = "0.1.0";
+export const GRANE_VERSION = "0.2.0";
 
 export interface ServerInfo {
   name: "grane";
   version: string;
   query_model: "v1";
-  database: "postgres";
+  database: string;
   capabilities: string[];
 }
 
@@ -74,7 +74,7 @@ export interface ExplainResult {
 export class GraneKernel {
   readonly model: SemanticModel;
   readonly config: GraneConfig;
-  private pool: pg.Pool | null = null;
+  private connector: WarehouseConnector | null = null;
 
   constructor(config: GraneConfig) {
     this.config = config;
@@ -86,27 +86,27 @@ export class GraneKernel {
       name: "grane",
       version: GRANE_VERSION,
       query_model: "v1",
-      database: "postgres",
+      database: this.config.connection.type,
       capabilities: ["metrics", "dimensions", "filters", "time_grains", "ordering", "provenance"],
     };
   }
 
-  getPool(): pg.Pool {
-    if (!this.pool) {
-      this.pool = createPool(this.config.connection);
+  getConnector(): WarehouseConnector {
+    if (!this.connector) {
+      this.connector = createConnector(this.config.connection);
     }
-    return this.pool;
+    return this.connector;
   }
 
   async close(): Promise<void> {
-    if (this.pool) {
-      await this.pool.end();
-      this.pool = null;
+    if (this.connector) {
+      await this.connector.close();
+      this.connector = null;
     }
   }
 
   async introspectSchema(): Promise<DatabaseSchema> {
-    return introspect(this.getPool(), this.config.connection.schema);
+    return this.getConnector().introspect();
   }
 
   /** Structural validation; pass a schema snapshot for live checks. */
@@ -190,7 +190,7 @@ export class GraneKernel {
   /** The full governed path: resolve -> validate -> compile -> execute -> provenance. */
   async query(input: SemanticQueryInput): Promise<QueryResult & { notes: string[] }> {
     const { resolved, compiled } = this.compile(input);
-    const result = await executeCompiled(this.getPool(), compiled, this.config.limits);
+    const result = await executeCompiled(this.getConnector(), compiled, this.config.limits);
     return { ...result, notes: resolved.notes };
   }
 }
