@@ -13,6 +13,10 @@ docker compose -f example/docker-compose.yml up -d --wait
 npm test
 ```
 
+Warehouse SDKs (MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Databricks)
+are not installed with the repo. Add the driver you are working on, e.g.
+`npm install mysql2`.
+
 `npm run test:unit` does not need Postgres. Full `npm test` needs the example
 database on `localhost:5433`.
 

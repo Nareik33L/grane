@@ -119,7 +119,10 @@ npm install -g grane-analytics
 # or: npx grane-analytics --help
 ```
 
-The CLI command is still `grane`. Requires Node 20+.
+The CLI command is still `grane`. Requires Node 20+. Warehouse drivers other
+than Postgres are **not** installed with the CLI — add only the one you use
+(see Warehouses below). That keeps a global install free of unrelated SDK
+deprecation warnings.
 
 ## Warehouses
 
