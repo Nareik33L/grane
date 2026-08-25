@@ -8,6 +8,7 @@ import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
 import { resolveRelativeRange } from "../query/time.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
+import { registerMcpCommands } from "./mcp.js";
 import { GraneError } from "../errors.js";
 import type { SemanticQueryInput } from "../query/model.js";
 import { listExplorableColumns } from "../explore/raw.js";
@@ -72,7 +73,7 @@ program
     }
     console.log(
       written.length > 0
-        ? `\nGrane project created. Next steps:\n  1. Set connection.url in grane.yml (or export DATABASE_URL)\n  2. Run "grane discover" to inspect your schema\n  3. Define entities, metrics, dimensions and relationships\n  4. Run "grane validate"\n  5. Run "grane serve" to expose MCP`
+        ? `\nGrane project created. Next steps:\n  1. Set connection.url in grane.yml (or export DATABASE_URL)\n  2. Run "grane discover" to inspect your schema\n  3. Define entities, metrics, dimensions and relationships\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Clients: claude, cursor, gemini, vscode, chatgpt, windsurf, claude-code`
         : "\nNothing to do.",
     );
   });
@@ -386,5 +387,7 @@ function printTable(columns: string[], rows: Record<string, unknown>[]): void {
     console.log(columns.map((c, i) => render(row[c]).padEnd(widths[i]!)).join("  "));
   }
 }
+
+registerMcpCommands(program, { projectDir, fail });
 
 program.parseAsync(process.argv).catch(fail);
