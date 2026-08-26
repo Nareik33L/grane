@@ -134,6 +134,12 @@ describe.skipIf(!available)("grane gauntlet", () => {
   it("prints a scorecard (findings are the report, not a CI gate)", () => {
     const card = buildScorecard(results);
     expect(card.report).toContain("GRANE GAUNTLET");
+    expect(card.report).toContain("Behavioural correctness");
+    expect(card.report).toContain("Answerable capability");
+    expect(card.report).toContain("Safety accuracy");
+    expect(card.report).toContain("Policy accuracy");
+    expect(card.report).toContain("Clarification accuracy");
+    expect(card.report).toContain("Unsupported (capability)");
     expect(card.scenarios).toBe(results.length);
   });
 

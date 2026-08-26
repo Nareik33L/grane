@@ -17,8 +17,14 @@
     clarification when a fiscal year is configured. Unknown periods and
     impossible civil dates (`2023-02-29`) are structured `invalid_query`.
 - Gauntlet scenarios carry an expected disposition (`EXECUTE`, `EXPLORE`,
-  `CLARIFY`, `REFUSE_SAFETY`, `REFUSE_POLICY`, `UNSUPPORTED`). A refusal
-  cannot pass an `EXECUTE` / `EXPLORE` scenario.
+  `CLARIFY`, `REFUSE_SAFETY`, `REFUSE_POLICY`, `INVALID`, `UNSUPPORTED`).
+  A refusal cannot pass an `EXECUTE` / `EXPLORE` scenario.
+- `UNSUPPORTED` is only a true capability gap. Malformed time payloads are
+  `INVALID`; stale-model and extra-relationship mutation tests are
+  `REFUSE_SAFETY`. The scorecard reports behavioural correctness, answerable
+  capability coverage, safety/policy/clarification accuracy, and unsupported
+  count separately — never `(EXECUTE + EXPLORE) / all scenarios`.
+  Audit: `tests/gauntlet/UNSUPPORTED.md`.
 
 ## 0.6.4
 

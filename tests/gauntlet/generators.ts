@@ -279,7 +279,7 @@ export function generateHostile(): Scenario[] {
         expectedSqlBehaviour: "Bind a parameter or refuse the payload.",
         guessSeverity: "security",
         query: { metrics: ["revenue"], filters: [{ field: "channel", operator: "=", value: value as never }] },
-        disposition: ["EXECUTE", "UNSUPPORTED", "CLARIFY"],
+        disposition: ["EXECUTE", "INVALID", "CLARIFY"],
         expectation: { kind: "refuse", reason: "hostile filter" },
         custom: async (ctx) => {
           try {
@@ -314,7 +314,7 @@ export function generateMcpAbuse(): Scenario[] {
       expectedSqlBehaviour: "No SQL, or only a safe SELECT if extra keys are ignored.",
       guessSeverity: "security",
       query: payload as Record<string, unknown>,
-      disposition: ["EXECUTE", "UNSUPPORTED"],
+      disposition: ["EXECUTE", "INVALID"],
       expectation: { kind: "refuse", statuses: ["invalid_query", "undefined_metric"], reason: "malformed" },
       custom: async (ctx) => {
         const parsed = semanticQuerySchema.safeParse(payload);
@@ -427,7 +427,7 @@ export function generateTimePeriods(): Scenario[] {
       ? "EXECUTE"
       : needsClarify
         ? "CLARIFY"
-        : "UNSUPPORTED";
+        : "INVALID";
     out.push(
       sc({
         id: `gen/time/period/${period || "empty"}`,
@@ -490,7 +490,7 @@ export function generateTimePeriods(): Scenario[] {
         interpretation: ok ? "Inclusive civil dates in the project timezone." : "Refuse malformed/inverted range.",
         expectedSqlBehaviour: ok ? "completed_at bounds." : "invalid_query",
         query: { metrics: ["revenue"], time: range },
-        disposition: ok ? "EXECUTE" : "UNSUPPORTED",
+        disposition: ok ? "EXECUTE" : "INVALID",
         expectation: ok
           ? { kind: "execute", trust: "governed" }
           : { kind: "refuse", statuses: ["invalid_query"], reason: label },
@@ -637,6 +637,7 @@ export function generateSchemaMutations(): Scenario[] {
         question: `Validate after ${name}`,
         interpretation: "Broken semantic references must fail validation, not silently change meaning.",
         expectedSqlBehaviour: "validate().ok === false.",
+        disposition: "REFUSE_SAFETY",
         expectation: { kind: "refuse", reason: "stale model" },
         custom: async (ctx) => {
           const schema = structuredClone(await ctx.kernel.loadSchema());
@@ -660,6 +661,7 @@ export function generateSchemaMutations(): Scenario[] {
         question: `Add a duplicate ambiguous relationship variant ${i}`,
         interpretation: "Additional edges must not make previously-refused queries start guessing.",
         expectedSqlBehaviour: "Revenue by ticket_category still refuses.",
+        disposition: "REFUSE_SAFETY",
         expectation: { kind: "refuse", reason: "still unsafe" },
         config: (base) => ({
           ...base,
