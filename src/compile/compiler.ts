@@ -158,7 +158,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       // Multi-hop before the fan-out would need intermediate joins from base;
       // out of scope for V0.1's deterministic guarantees.
       throw unsafeQuery(
-        `Metric "${metric.name}" measures "${measure.table}" via an indirect fan-out path; V0.1 supports pre-aggregation only for direct children of the metric's entity table ("${baseTable}").`,
+        `Metric "${metric.name}" measures "${measure.table}" via an indirect fan-out path; currently supports pre-aggregation only for direct children of the metric's entity table ("${baseTable}").`,
       );
     }
 

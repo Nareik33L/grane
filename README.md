@@ -1,8 +1,10 @@
 # Grane
 
-**Governed analytics and controlled exploration for AI agents.**
+**The open-source analytics harness for AI agents.**
 
-Connect your database, define the business metrics that matter, and give any
+Agents reason. Grane executes.
+
+Connect your warehouse, define the business metrics that matter, and give any
 MCP-compatible agent governed access to those definitions — plus permissioned
 exploration of everything else.
 
@@ -309,8 +311,9 @@ docker compose -f example/docker-compose.yml up -d --wait
 npm test                                                 # unit + integration
 ```
 
-V0.1 supports Postgres. The connector interface will open up to other
-databases (MySQL, ClickHouse, DuckDB, Snowflake, ...) as demand appears.
+See [docs/warehouses.md](docs/warehouses.md) for supported warehouses
+(Postgres, MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Redshift,
+Databricks); extra drivers are optional installs.
 
 ## License
 

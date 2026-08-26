@@ -1,6 +1,6 @@
 # Contributing to Grane
 
-Grane is an open-source, self-hosted semantic layer for AI agents. The kernel
+Grane is an open-source, self-hosted analytics harness for AI agents. The kernel
 is deterministic: pull requests that add LLM calls to query execution will
 not be accepted.
 

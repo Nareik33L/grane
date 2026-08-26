@@ -1,7 +1,7 @@
 {
   "name": "grane-analytics",
   "version": "0.5.0",
-  "description": "Governed analytics and controlled exploration for AI agents. Connect your database, define business metrics in code, and let MCP agents query them — plus permitted raw warehouse columns, clearly labeled.",
+  "description": "Open-source deterministic analytics harness for AI agents. Connect your warehouse, define business metrics in code, and let MCP agents query them — plus permitted raw warehouse columns, clearly labeled.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
@@ -26,7 +26,7 @@
   },
   "keywords": [
     "analytics",
-    "semantic-layer",
+    "analytics-harness",
     "mcp",
     "ai-agents",
     "postgres",
