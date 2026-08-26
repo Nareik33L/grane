@@ -255,23 +255,33 @@ function metricTraps(): Scenario[] {
       id: "metrics/semi-additive-balance",
       category: "metrics",
       question: "Account Balance (no date).",
-      interpretation: "Semi-additive: summing snapshots across time is wrong (3400 vs latest 1300).",
-      expectedSqlBehaviour: "Refuse an unbounded snapshot sum, or return only the latest date.",
+      interpretation:
+        "Semi-additive last-as-of: last snapshot per account, then SUM across accounts (1300, not 3400).",
+      expectedSqlBehaviour: "Last snapshot per account_id via MAX(snapshot_date), then SUM(balance).",
       query: { metrics: ["account_balance"] },
+      disposition: "EXECUTE",
       expectation: {
-        kind: "refuse",
-        statuses: ["unsafe_query", "invalid_query"],
-        reason: "semi-additive across time",
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.latestSnapshotBalance },
+        sqlMustInclude: ["last_account_balance"],
       },
     }),
     sc({
       id: "metrics/conversion-disagreeing-time",
       category: "metrics",
       question: "Conversion rate last month.",
-      interpretation: "Numerator time is completed_at, denominator is created_at.",
-      expectedSqlBehaviour: "Refuse disagreeing time dimensions.",
+      interpretation:
+        "Numerator time is completed_at, denominator is created_at. Each component is filtered on its own time_dimension.",
+      expectedSqlBehaviour: "No shared outer time WHERE; FILTER (WHERE ...) per component time column.",
       query: { metrics: ["conversion_rate"], time: { period: "last_month" } },
-      expectation: { kind: "refuse", statuses: ["invalid_query"], reason: "disagreeing time_dimension" },
+      disposition: "EXECUTE",
+      expectation: {
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.conversionLastMonth },
+        sqlMustInclude: ["created_at", "completed_at"],
+      },
     }),
     sc({
       id: "metrics/unknown-gmv",
@@ -350,29 +360,29 @@ function timeTraps(): Scenario[] {
       id: "time/wrong-timestamp-created-at",
       category: "time",
       question: "Revenue last month using created_at.",
-      interpretation: "Governed Revenue time is completed_at. Switching to created_at is a different metric.",
-      expectedSqlBehaviour: "If allowed as raw time.dimension, trust mixed; must not stay fully governed.",
+      interpretation: "Governed Revenue time is completed_at. Switching to created_at is a different, ungoverned time axis.",
+      expectedSqlBehaviour: "Execute on created_at with trust mixed, not governed.",
       query: { metrics: ["revenue"], time: { period: "last_month", dimension: "created_at" } },
-      expectation: { kind: "execute", trust: "governed" },
-      custom: async (ctx) => {
-        if (ctx.error) return { code: "FAIL", detail: String((ctx.error as Error).message) };
-        if (ctx.trust === "governed" && ctx.compileSql?.includes("created_at")) {
-          return {
-            code: "CRITICAL FAIL",
-            detail: "used created_at while still labelling trust: governed",
-          };
-        }
-        return { code: "PASS", detail: `trust ${ctx.trust}` };
+      disposition: "EXPLORE",
+      expectation: {
+        kind: "explore",
+        trust: "mixed",
+        gold: { kind: "sql", sql: GOLD_SQL.revenueFebruaryCreatedAt },
       },
     }),
     sc({
       id: "time/fiscal-year",
       category: "time",
       question: "Revenue this fiscal year (FY starts 1 April).",
-      interpretation: "Grane has fiscal_year config but V0.1 relative periods ignore it.",
-      expectedSqlBehaviour: "Refuse unknown period rather than guess calendar year.",
+      interpretation: "Now is 15 Mar 2024 in Europe/London; current FY started 2023-04-01.",
+      expectedSqlBehaviour: "completed_at from 2023-04-01 through 2024-03-15 inclusive.",
       query: { metrics: ["revenue"], time: { period: "this_fiscal_year" } },
-      expectation: { kind: "refuse", statuses: ["invalid_query"], reason: "fiscal year not implemented" },
+      disposition: "EXECUTE",
+      expectation: {
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.revenueThisFiscalYear },
+      },
     }),
   ];
 }
@@ -537,9 +547,15 @@ function ambiguityTraps(): Scenario[] {
       category: "ambiguity",
       question: "Revenue by countries.name (raw).",
       interpretation: "Three safe paths: customer, billing, shipping. Order 1 is GB/US/FR.",
-      expectedSqlBehaviour: "Refuse rather than BFS-pick a path. Picking one is CRITICAL.",
+      expectedSqlBehaviour:
+        "Refuse with ambiguous_query listing the paths. Suggest customer_country / billing_country / shipping_country. Do not BFS-pick.",
       query: { metrics: ["revenue"], raw_dimensions: ["countries.name"] },
-      expectation: { kind: "refuse", statuses: ["unsafe_query", "invalid_query"], reason: "multiple paths to countries" },
+      disposition: "CLARIFY",
+      expectation: {
+        kind: "refuse",
+        statuses: ["ambiguous_query"],
+        reason: "multiple paths to countries",
+      },
     }),
     sc({
       id: "ambig/billing-vs-customer",

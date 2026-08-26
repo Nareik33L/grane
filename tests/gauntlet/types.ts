@@ -45,9 +45,24 @@ export type VerdictCode =
   | "PASS"
   | "PASS — SAFE REFUSAL"
   | "PASS — EXPLORATORY"
+  | "PASS — CLARIFY"
+  | "PASS — POLICY"
+  | "PASS — UNSUPPORTED"
   | "FAIL"
   | "CRITICAL FAIL"
   | "SECURITY CRITICAL";
+
+/**
+ * Expected kernel behaviour. A refusal must not pass a scenario whose
+ * expected disposition is EXECUTE or EXPLORE.
+ */
+export type Disposition =
+  | "EXECUTE"
+  | "EXPLORE"
+  | "CLARIFY"
+  | "REFUSE_SAFETY"
+  | "REFUSE_POLICY"
+  | "UNSUPPORTED";
 
 export type GoldSpec =
   | { kind: "scalar"; value: number; tolerance?: number; column?: string }
@@ -90,6 +105,11 @@ export interface Scenario {
   /** Query Model v1 request. Hostile tests may pass structurally invalid objects. */
   query?: SemanticQueryInput | Record<string, unknown>;
   expectation: Expectation;
+  /**
+   * Required behavioural class. Inferred from `expectation` when omitted.
+   * A refusal cannot pass EXECUTE / EXPLORE.
+   */
+  disposition?: Disposition | Disposition[];
   mode?: ScenarioMode;
   /** If Grane answers when it should refuse, use this severity. */
   guessSeverity?: "critical" | "security" | "standard";
@@ -132,6 +152,9 @@ export interface CategoryTally {
   pass: number;
   passRefusal: number;
   passExploratory: number;
+  passClarify: number;
+  passPolicy: number;
+  passUnsupported: number;
   fail: number;
   critical: number;
   security: number;
@@ -140,6 +163,12 @@ export interface CategoryTally {
 export interface Scorecard {
   scenarios: number;
   correctExecution: number;
+  correctExploration: number;
+  correctClarification: number;
+  correctRefuseSafety: number;
+  correctRefusePolicy: number;
+  unsupported: number;
+  /** @deprecated split into clarification / safety / policy / unsupported */
   correctRefusal: number;
   safeExploration: number;
   standardFailures: number;
@@ -158,3 +187,81 @@ export interface Scorecard {
 
 export const GAUNTLET_NOW = new Date("2024-03-15T12:00:00.000Z");
 export const GAUNTLET_TZ = "Europe/London";
+
+export function expectedDispositions(scenario: Pick<Scenario, "disposition" | "expectation" | "category" | "guessSeverity" | "agent">): Disposition[] {
+  if (scenario.disposition) {
+    return Array.isArray(scenario.disposition) ? scenario.disposition : [scenario.disposition];
+  }
+  return [inferDisposition(scenario)];
+}
+
+export function inferDisposition(
+  scenario: Pick<Scenario, "expectation" | "category" | "guessSeverity" | "agent">,
+): Disposition {
+  if (scenario.expectation.kind === "execute") return "EXECUTE";
+  if (scenario.expectation.kind === "explore") return "EXPLORE";
+  const statuses = scenario.expectation.kind === "refuse" ? (scenario.expectation.statuses ?? []) : [];
+  if (
+    scenario.guessSeverity === "security" ||
+    scenario.category === "permissions" ||
+    scenario.category === "cache" ||
+    scenario.category === "readonly" ||
+    scenario.category === "leakage" ||
+    statuses.includes("column_not_permitted") ||
+    statuses.includes("exploration_disabled")
+  ) {
+    return "REFUSE_POLICY";
+  }
+  if (statuses.includes("ambiguous_query") || scenario.category === "ambiguity") return "CLARIFY";
+  if (
+    statuses.includes("unsafe_query") ||
+    scenario.category === "grain" ||
+    scenario.category === "distinct" ||
+    scenario.category === "join"
+  ) {
+    return "REFUSE_SAFETY";
+  }
+  if (statuses.includes("undefined_metric") || statuses.includes("undefined_dimension")) return "CLARIFY";
+  if (
+    statuses.includes("invalid_query") ||
+    scenario.category === "mcp" ||
+    scenario.category === "hostile" ||
+    scenario.category === "time" ||
+    scenario.category === "schema_mutation"
+  ) {
+    return "UNSUPPORTED";
+  }
+  return "REFUSE_SAFETY";
+}
+
+export function dispositionFromRefusal(
+  status: string,
+  scenario: Pick<Scenario, "agent">,
+  message = "",
+): Disposition {
+  if (status === "ambiguous_query") return "CLARIFY";
+  if (status === "unsafe_query") return "REFUSE_SAFETY";
+  if (status === "column_not_permitted" || status === "exploration_disabled") return "REFUSE_POLICY";
+  if (status === "undefined_metric" || status === "undefined_dimension") {
+    return scenario.agent ? "REFUSE_POLICY" : "CLARIFY";
+  }
+  if (status === "invalid_query" && /ambiguous/i.test(message)) return "CLARIFY";
+  return "UNSUPPORTED";
+}
+
+export function passCodeForDisposition(disposition: Disposition): VerdictCode {
+  switch (disposition) {
+    case "EXECUTE":
+      return "PASS";
+    case "EXPLORE":
+      return "PASS — EXPLORATORY";
+    case "CLARIFY":
+      return "PASS — CLARIFY";
+    case "REFUSE_SAFETY":
+      return "PASS — SAFE REFUSAL";
+    case "REFUSE_POLICY":
+      return "PASS — POLICY";
+    case "UNSUPPORTED":
+      return "PASS — UNSUPPORTED";
+  }
+}

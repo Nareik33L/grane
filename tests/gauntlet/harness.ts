@@ -24,7 +24,11 @@ import {
 import type { GauntletWarehouse } from "./warehouse.js";
 import {
   GAUNTLET_NOW,
+  dispositionFromRefusal,
+  expectedDispositions,
+  passCodeForDisposition,
   type CustomContext,
+  type Disposition,
   type Expectation,
   type GoldSpec,
   type Scenario,
@@ -129,7 +133,31 @@ function compareGold(
   return null;
 }
 
-function guessCode(scenario: Scenario): VerdictCode {
+function alignCustomVerdict(scenario: Scenario, verdict: Verdict): Verdict {
+  if (!verdict.code.startsWith("PASS")) return verdict;
+  const expected = expectedDispositions(scenario);
+  const requiresExecution = expected.some((d) => d === "EXECUTE" || d === "EXPLORE");
+  const refusalPass =
+    verdict.code === "PASS — SAFE REFUSAL" ||
+    verdict.code === "PASS — CLARIFY" ||
+    verdict.code === "PASS — POLICY" ||
+    verdict.code === "PASS — UNSUPPORTED";
+  if (requiresExecution && expected.length === 1 && refusalPass) {
+    return {
+      code: "FAIL",
+      detail: `incorrect refusal; expected ${expected.join("|")}: ${verdict.detail}`,
+    };
+  }
+  if (refusalPass && !requiresExecution) {
+    const preferred =
+      expected.find((d) => d !== "EXECUTE" && d !== "EXPLORE") ?? "REFUSE_SAFETY";
+    return { code: passCodeForDisposition(preferred), detail: verdict.detail };
+  }
+  if (verdict.code === "PASS" && expected.length === 1 && expected[0] === "EXPLORE") {
+    return { code: "PASS — EXPLORATORY", detail: verdict.detail };
+  }
+  return verdict;
+}
   if (scenario.guessSeverity === "security") return "SECURITY CRITICAL";
   if (scenario.guessSeverity === "standard") return "FAIL";
   return "CRITICAL FAIL";
@@ -197,14 +225,17 @@ export async function runScenario(scenario: Scenario, harness: Harness): Promise
   const kernel = kernelFor(scenario, harness);
   if (scenario.custom && scenario.mode === "custom") {
     try {
-      return await scenario.custom({
-        kernel,
-        compileSql: null,
-        compileParams: null,
-        trust: null,
-        rows: null,
-        error: null,
-      });
+      return alignCustomVerdict(
+        scenario,
+        await scenario.custom({
+          kernel,
+          compileSql: null,
+          compileParams: null,
+          trust: null,
+          rows: null,
+          error: null,
+        }),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const leaks = errorLeaksSecrets(message);
@@ -240,10 +271,24 @@ export async function runScenario(scenario: Scenario, harness: Harness): Promise
     }
   }
 
-  if (!parsed.success && scenario.expectation.kind === "refuse") {
-    return { code: "PASS — SAFE REFUSAL", detail: "Query Model v1 rejected the payload" };
-  }
   if (!parsed.success) {
+    const expected = expectedDispositions(scenario);
+    if (expected.some((d) => d === "EXECUTE" || d === "EXPLORE")) {
+      return { code: "FAIL", detail: `invalid query: ${parsed.error.issues[0]?.message ?? "parse"}` };
+    }
+    if (expected.includes("UNSUPPORTED") || scenario.expectation.kind === "refuse") {
+      const disposition: Disposition = expected.includes("CLARIFY")
+        ? "CLARIFY"
+        : expected.includes("REFUSE_POLICY")
+          ? "REFUSE_POLICY"
+          : expected.includes("REFUSE_SAFETY")
+            ? "REFUSE_SAFETY"
+            : "UNSUPPORTED";
+      return {
+        code: passCodeForDisposition(disposition),
+        detail: `Query Model v1 rejected the payload: ${parsed.error.issues[0]?.message ?? "parse"}`,
+      };
+    }
     return { code: "FAIL", detail: `invalid query: ${parsed.error.issues[0]?.message ?? "parse"}` };
   }
 
@@ -275,17 +320,28 @@ export async function runScenario(scenario: Scenario, harness: Harness): Promise
 
     if (scenario.mode === "compile") {
       if (scenario.custom) {
-        return await scenario.custom({
-          kernel,
-          compileSql: sql,
-          compileParams: params,
-          trust,
-          rows: null,
-          error: null,
-        });
+        return alignCustomVerdict(
+          scenario,
+          await scenario.custom({
+            kernel,
+            compileSql: sql,
+            compileParams: params,
+            trust,
+            rows: null,
+            error: null,
+          }),
+        );
       }
       if (scenario.expectation.kind === "refuse") {
         return { code: guessCode(scenario), detail: "compiled when a refusal was required" };
+      }
+      const expected = expectedDispositions(scenario);
+      if (
+        expected.every(
+          (d) => d === "CLARIFY" || d === "REFUSE_SAFETY" || d === "REFUSE_POLICY" || d === "UNSUPPORTED",
+        )
+      ) {
+        return { code: guessCode(scenario), detail: `compiled when ${expected.join("|")} was required` };
       }
       if (scenario.expectation.kind === "explore") {
         if (trust === "governed") {
@@ -323,14 +379,17 @@ export async function runScenario(scenario: Scenario, harness: Harness): Promise
       goldError = compareGold(rows, gold, goldSpec);
     }
     if (scenario.custom) {
-      return await scenario.custom({
-        kernel,
-        compileSql: sql,
-        compileParams: params,
-        trust,
-        rows,
-        error: null,
-      });
+      return alignCustomVerdict(
+        scenario,
+        await scenario.custom({
+          kernel,
+          compileSql: sql,
+          compileParams: params,
+          trust,
+          rows,
+          error: null,
+        }),
+      );
     }
     return judgeExecute(
       scenario,
@@ -342,14 +401,17 @@ export async function runScenario(scenario: Scenario, harness: Harness): Promise
   } catch (err) {
     if (scenario.custom) {
       try {
-        return await scenario.custom({
-          kernel,
-          compileSql: sql,
-          compileParams: params,
-          trust,
-          rows,
-          error: err,
-        });
+        return alignCustomVerdict(
+          scenario,
+          await scenario.custom({
+            kernel,
+            compileSql: sql,
+            compileParams: params,
+            trust,
+            rows,
+            error: err,
+          }),
+        );
       } catch (inner) {
         return refuseOrFail(scenario, inner);
       }
@@ -364,21 +426,49 @@ function refuseOrFail(scenario: Scenario, err: unknown): Verdict {
   if (leaks.length) {
     return { code: "SECURITY CRITICAL", detail: `error leaked ${leaks.join(", ")}: ${message}` };
   }
+  const expected = expectedDispositions(scenario);
+  const wantsExecution = expected.some((d) => d === "EXECUTE" || d === "EXPLORE") && expected.length === 1;
   if (err instanceof GraneError) {
-    if (scenario.expectation?.kind === "refuse") {
-      const allowed = scenario.expectation.statuses;
-      if (!allowed || allowed.length === 0 || allowed.includes(err.refusal.status)) {
-        return {
-          code: "PASS — SAFE REFUSAL",
-          detail: `${err.refusal.status}: ${err.refusal.message}`,
-        };
-      }
+    const actual = dispositionFromRefusal(err.refusal.status, scenario, err.refusal.message);
+    if (wantsExecution) {
       return {
         code: "FAIL",
-        detail: `refused as ${err.refusal.status}, expected ${allowed.join("|")}`,
+        detail: `incorrect refusal ${err.refusal.status}: ${err.refusal.message}`,
+      };
+    }
+    if (scenario.expectation?.kind === "refuse") {
+      const allowed = scenario.expectation.statuses;
+      if (allowed && allowed.length > 0 && !allowed.includes(err.refusal.status)) {
+        return {
+          code: "FAIL",
+          detail: `refused as ${err.refusal.status}, expected ${allowed.join("|")}`,
+        };
+      }
+    }
+    if (!expected.includes(actual) && scenario.expectation?.kind === "refuse") {
+      // Status was allowed (or unspecified); retag to an expected refusal class.
+      const preferred = expected.find((d) => d !== "EXECUTE" && d !== "EXPLORE") ?? actual;
+      return {
+        code: passCodeForDisposition(preferred),
+        detail: `${err.refusal.status}: ${err.refusal.message}`,
+      };
+    }
+    if (expected.includes(actual)) {
+      return {
+        code: passCodeForDisposition(actual),
+        detail: `${err.refusal.status}: ${err.refusal.message}`,
+      };
+    }
+    if (scenario.expectation?.kind === "refuse") {
+      return {
+        code: passCodeForDisposition(expected.find((d) => d !== "EXECUTE" && d !== "EXPLORE") ?? actual),
+        detail: `${err.refusal.status}: ${err.refusal.message}`,
       };
     }
     return { code: "FAIL", detail: `incorrect refusal ${err.refusal.status}: ${err.refusal.message}` };
+  }
+  if (wantsExecution) {
+    return { code: "FAIL", detail: message };
   }
   if (scenario.expectation?.kind === "refuse") {
     return { code: "FAIL", detail: `non-structured error instead of refusal: ${message}` };

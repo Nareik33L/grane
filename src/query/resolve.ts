@@ -10,9 +10,9 @@ import {
 } from "./model.js";
 import type { FilterOperator, Scalar } from "../config/schema.js";
 import type { DatabaseSchema } from "../connectors/types.js";
-import { invalidQuery, unsafeQuery, GraneError, undefinedMetric, undefinedDimension } from "../errors.js";
+import { ambiguousQuery, invalidQuery, unsafeQuery, GraneError, undefinedMetric, undefinedDimension } from "../errors.js";
 import { explorationPolicy, type ExplorationPolicy } from "../explore/policy.js";
-import { resolveRelativeRange } from "./time.js";
+import { isValidCivilDate, MONTH_NUMBERS, resolveRelativeRange } from "./time.js";
 import type { AgentGrant } from "../auth/agents.js";
 import { dimensionAllowed, metricAllowed } from "../auth/agents.js";
 import {
@@ -63,6 +63,12 @@ export interface ResolvedTime {
   grain: TimeGrain | null;
   governed: boolean;
   qualified: string;
+  /**
+   * When false, metrics (and ratio components) disagree on their canonical
+   * time column. The compiler applies the window to each component separately
+   * rather than a shared outer WHERE.
+   */
+  shared: boolean;
 }
 
 export interface ResolvedRawMetric {
@@ -278,10 +284,12 @@ export function resolveQuery(
     let from = query.time.from;
     let to = query.time.to;
     if (query.time.period) {
+      const fiscalName = model.config.project.fiscal_year?.starts_month;
       const range = resolveRelativeRange(
         query.time.period,
         model.config.project.timezone,
         defaults.now,
+        { fiscalStartsMonth: fiscalName ? MONTH_NUMBERS[fiscalName] : undefined },
       );
       from = range.from;
       to = range.to;
@@ -291,6 +299,22 @@ export function resolveQuery(
     }
     if (!from || !to) {
       throw invalidQuery("time requires period, or both from and to.");
+    }
+    if (!isValidCivilDate(from)) {
+      throw invalidQuery(`time.from "${from}" is not a valid calendar date.`);
+    }
+    if (!isValidCivilDate(to)) {
+      throw invalidQuery(`time.to "${to}" is not a valid calendar date.`);
+    }
+    const componentTimes = uniqueTimeColumns(model, metrics);
+    const disagreeingTimes = componentTimes.length > 1;
+    if (query.time.grain && disagreeingTimes && !query.time.dimension) {
+      throw ambiguousQuery(
+        `Cannot group by a time grain when metrics use different time columns (${componentTimes
+          .map((c) => `${c.table}.${c.column}`)
+          .join(", ")}). Specify time.dimension, or omit grain.`,
+        { columns: componentTimes },
+      );
     }
     const resolvedTime = resolveTimeColumn(model, metrics, query.time.dimension, schema, policy);
     if (resolvedTime.governed && query.time.dimension) {
@@ -305,13 +329,26 @@ export function resolveQuery(
       resolvedTime.column,
       `time column "${resolvedTime.qualified}"`,
     );
+    let governedTime = resolvedTime.governed;
+    if (query.time.dimension && componentTimes.length > 0) {
+      const matchesCanonical = componentTimes.every(
+        (col) => col.table === resolvedTime.column.table && col.column === resolvedTime.column.column,
+      );
+      if (!matchesCanonical) {
+        governedTime = false;
+        notes.push(
+          `time.dimension "${resolvedTime.qualified}" is not the canonical time_dimension of the requested metrics; labelled ungoverned.`,
+        );
+      }
+    }
     time = {
       column: resolvedTime.column,
       from,
       to,
       grain: query.time.grain ?? null,
-      governed: resolvedTime.governed,
+      governed: governedTime,
       qualified: resolvedTime.qualified,
+      shared: !disagreeingTimes,
     };
   }
 
@@ -431,6 +468,12 @@ function assertSafeJoin(model: SemanticModel, baseTable: string, column: ColumnR
       `${purpose} (${column.table}.${column.column}) is not reachable from "${baseTable}". Add the relationship to relationships.yml.`,
     );
   }
+  if (path.ambiguous) {
+    throw ambiguousQuery(
+      `Joining ${purpose} is ambiguous: multiple fan-out-free paths from "${baseTable}" to "${column.table}" (${(path.alternatives ?? []).join("; ")}). Name the relationship you mean — guessing a path would silently change the numbers.`,
+      { from: baseTable, to: column.table, paths: path.alternatives },
+    );
+  }
   if (path.fansOut) {
     const hop = path.edges.find((e) => e.cardinality === "one_to_many")!;
     throw unsafeQuery(
@@ -439,6 +482,35 @@ function assertSafeJoin(model: SemanticModel, baseTable: string, column: ColumnR
         `Grane refuses this query. Define a metric at the "${column.table}" grain instead.`,
     );
   }
+}
+
+function uniqueTimeColumns(model: SemanticModel, metrics: Metric[]): ColumnRef[] {
+  const seen = new Set<string>();
+  const columns: ColumnRef[] = [];
+  for (const metric of expandMetricComponents(model, metrics)) {
+    const col = metric.timeDimension;
+    if (!col) continue;
+    const key = `${col.table}.${col.column}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    columns.push(col);
+  }
+  return columns;
+}
+
+function expandMetricComponents(model: SemanticModel, metrics: Metric[]): Metric[] {
+  const out: Metric[] = [];
+  for (const metric of metrics) {
+    if (metric.config.type === "ratio") {
+      const numerator = model.metrics.get(metric.config.numerator!);
+      const denominator = model.metrics.get(metric.config.denominator!);
+      if (numerator) out.push(numerator);
+      if (denominator) out.push(denominator);
+    } else {
+      out.push(metric);
+    }
+  }
+  return out;
 }
 
 function resolveTimeColumn(
@@ -469,19 +541,15 @@ function resolveTimeColumn(
   }
   const withTime = metrics.filter((m) => m.timeDimension);
   if (withTime.length === 0) {
-    throw invalidQuery(
-      `A time range was requested but none of the metrics define a time_dimension, and no time.dimension was provided.`,
-    );
-  }
-  const first = withTime[0]!.timeDimension!;
-  for (const metric of withTime.slice(1)) {
-    const other = metric.timeDimension!;
-    if (other.table !== first.table || other.column !== first.column) {
+    const components = expandMetricComponents(model, metrics).filter((m) => m.timeDimension);
+    if (components.length === 0) {
       throw invalidQuery(
-        `Metrics disagree on their canonical time dimension (${withTime[0]!.name}: ${first.table}.${first.column}, ${metric.name}: ${other.table}.${other.column}). Specify time.dimension explicitly.`,
+        `A time range was requested but none of the metrics define a time_dimension, and no time.dimension was provided.`,
       );
     }
+    return { column: components[0]!.timeDimension!, governed: true, qualified: formatColumnRef(components[0]!.timeDimension!) };
   }
+  const first = withTime[0]!.timeDimension!;
   return { column: first, governed: true, qualified: formatColumnRef(first) };
 }
 

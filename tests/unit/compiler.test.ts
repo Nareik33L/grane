@@ -166,9 +166,84 @@ describe("deterministic refusals", () => {
 
 import { exampleConfig } from "../fixtures.js";
 import { GraneKernel } from "../../src/kernel.js";
+import { gauntletConfig } from "../gauntlet/model.js";
+import { GAUNTLET_NOW } from "../gauntlet/types.js";
+import { SemanticModel } from "../../src/model/model.js";
 
 function exampleKernelWithTimezone(timezone: string): GraneKernel {
   const config = exampleConfig();
   config.project.timezone = timezone;
   return new GraneKernel(config);
 }
+
+function gauntletKernel(): GraneKernel {
+  return new GraneKernel(gauntletConfig(), { now: GAUNTLET_NOW });
+}
+
+describe("semi-additive, per-component time, trust, and ambiguous paths", () => {
+  const kernel = gauntletKernel();
+
+  it("compiles account_balance as last snapshot per account, not a raw SUM", () => {
+    const { compiled } = kernel.compile({ metrics: ["account_balance"] });
+    expect(compiled.sql).toContain('"last_account_balance"');
+    expect(compiled.sql).toMatch(/MAX\("daily_account_snapshots"\."snapshot_date"\)/);
+    expect(compiled.sql).toContain('SUM("daily_account_snapshots"."balance")');
+    expect(compiled.trust).toBe("governed");
+  });
+
+  it("applies conversion_rate's window to each component's own time column", () => {
+    const { compiled, resolved } = kernel.compile({
+      metrics: ["conversion_rate"],
+      time: { period: "last_month" },
+    });
+    expect(resolved.time?.shared).toBe(false);
+    expect(resolved.time?.from).toBe("2024-02-01");
+    expect(resolved.time?.to).toBe("2024-02-29");
+    expect(compiled.sql).toContain('"orders"."created_at"');
+    expect(compiled.sql).toContain('"orders"."completed_at"');
+    expect(compiled.sql).toMatch(/FILTER \(WHERE/i);
+    expect(compiled.sql).toMatch(/FILTER \(WHERE[\s\S]*completed_at/);
+    expect(compiled.sql).toMatch(/FILTER \(WHERE[\s\S]*created_at/);
+    expect(compiled.sql).not.toMatch(/\nWHERE /);
+  });
+
+  it("labels a non-canonical time.dimension as mixed and still filters on it", () => {
+    const { compiled, resolved } = kernel.compile({
+      metrics: ["revenue"],
+      time: { period: "last_month", dimension: "created_at" },
+    });
+    expect(resolved.trust).toBe("mixed");
+    expect(compiled.trust).toBe("mixed");
+    expect(resolved.ungoverned).toContain("created_at");
+    expect(compiled.sql).toContain('"orders"."created_at"');
+  });
+
+  it("refuses countries.name when three safe paths exist", () => {
+    try {
+      kernel.compile({ metrics: ["revenue"], raw_dimensions: ["countries.name"] });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as GraneError).refusal.status).toBe("ambiguous_query");
+      expect((err as GraneError).refusal.message).toMatch(/customers/);
+      expect((err as GraneError).refusal.message).toMatch(/billing_addresses/);
+      expect((err as GraneError).refusal.message).toMatch(/shipping_addresses/);
+    }
+  });
+
+  it("resolves this_fiscal_year from April when now is mid-March", () => {
+    const { resolved } = kernel.compile({
+      metrics: ["revenue"],
+      time: { period: "this_fiscal_year" },
+    });
+    expect(resolved.time?.from).toBe("2023-04-01");
+    expect(resolved.time?.to).toBe("2024-03-15");
+  });
+
+  it("marks orders → countries as ambiguous in the relationship graph", () => {
+    const model = new SemanticModel(gauntletConfig());
+    const path = model.graph.findPath("orders", "countries");
+    expect(path?.ambiguous).toBe(true);
+    expect(path?.alternatives?.length).toBeGreaterThanOrEqual(2);
+  });
+});
+

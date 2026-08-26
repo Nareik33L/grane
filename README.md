@@ -350,8 +350,10 @@ Grane Query Model — and scores all three against independently reviewed SQL. S
 
 `tests/gauntlet` is the internal robustness suite: a hostile warehouse and
 hundreds of scenarios designed to make Grane return the wrong number, bypass a
-permission, or label exploration as governed. A safe refusal is a pass. It is
-not the public benchmark. See [tests/gauntlet/README.md](tests/gauntlet/README.md).
+permission, or label exploration as governed. Each scenario has an expected
+disposition (`EXECUTE` / `EXPLORE` / `CLARIFY` / `REFUSE_SAFETY` /
+`REFUSE_POLICY` / `UNSUPPORTED`). A refusal cannot pass a scenario that should
+execute. See [tests/gauntlet/README.md](tests/gauntlet/README.md).
 
 ## License
 

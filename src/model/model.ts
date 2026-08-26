@@ -205,7 +205,7 @@ export class SemanticModel {
     for (const dimension of this.dimensions.values()) {
       const dimTable = this.entityTable(dimension.config.entity) ?? dimension.column.table;
       const path = this.graph.findPath(baseTable, dimTable);
-      if (path && !path.fansOut) names.push(dimension.name);
+      if (path && !path.fansOut && !path.ambiguous) names.push(dimension.name);
     }
     return names;
   }

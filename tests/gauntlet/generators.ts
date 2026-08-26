@@ -10,7 +10,7 @@ import { gauntletConfig } from "./model.js";
 import { SAFE_SLICES } from "./gold.js";
 import { BLOCKED_COLUMNS } from "./data.js";
 import { errorLeaksSecrets, injectionEscaped, isWriteSql, sqlContainsBlockedColumn } from "./sql-invariants.js";
-import type { Scenario } from "./types.js";
+import type { Disposition, Scenario } from "./types.js";
 import { semanticQuerySchema } from "../../src/query/model.js";
 import { GraneError } from "../../src/errors.js";
 
@@ -40,6 +40,7 @@ const PERIODS = [
   "this-month",
   "LAST_MONTH",
   "this_fiscal_year",
+  "last_fiscal_year",
   "fy2024",
   "q1",
   "ytd",
@@ -278,6 +279,7 @@ export function generateHostile(): Scenario[] {
         expectedSqlBehaviour: "Bind a parameter or refuse the payload.",
         guessSeverity: "security",
         query: { metrics: ["revenue"], filters: [{ field: "channel", operator: "=", value: value as never }] },
+        disposition: ["EXECUTE", "UNSUPPORTED", "CLARIFY"],
         expectation: { kind: "refuse", reason: "hostile filter" },
         custom: async (ctx) => {
           try {
@@ -312,6 +314,7 @@ export function generateMcpAbuse(): Scenario[] {
       expectedSqlBehaviour: "No SQL, or only a safe SELECT if extra keys are ignored.",
       guessSeverity: "security",
       query: payload as Record<string, unknown>,
+      disposition: ["EXECUTE", "UNSUPPORTED"],
       expectation: { kind: "refuse", statuses: ["invalid_query", "undefined_metric"], reason: "malformed" },
       custom: async (ctx) => {
         const parsed = semanticQuerySchema.safeParse(payload);
@@ -413,21 +416,42 @@ export function generateTimePeriods(): Scenario[] {
     "4w",
     "this-month",
     "LAST_MONTH",
+    "this_fiscal_year",
+    "last_fiscal_year",
   ]);
+  const clarify = new Set(["ytd", "q1", "fy2024"]);
   for (const period of PERIODS) {
+    const executable = known.has(period);
+    const needsClarify = clarify.has(period);
+    const disposition: Disposition = executable
+      ? "EXECUTE"
+      : needsClarify
+        ? "CLARIFY"
+        : "UNSUPPORTED";
     out.push(
       sc({
         id: `gen/time/period/${period || "empty"}`,
         category: "time",
         question: `Revenue period=${period || "(empty)"}`,
-        interpretation: known.has(period)
+        interpretation: executable
           ? "Supported relative period, resolved in Europe/London on completed_at."
-          : "Unknown period. Refuse, do not guess calendar math.",
-        expectedSqlBehaviour: known.has(period) ? "completed_at range." : "invalid_query",
+          : needsClarify
+            ? "Named period is ambiguous given fiscal-year config. Require clarification."
+            : "Unknown or invalid period. Structured invalid_query, not a guessed calendar.",
+        expectedSqlBehaviour: executable
+          ? "completed_at range."
+          : needsClarify
+            ? "ambiguous_query"
+            : "invalid_query",
         query: { metrics: ["revenue"], time: { period } },
-        expectation: known.has(period)
+        disposition,
+        expectation: executable
           ? { kind: "execute", trust: "governed", sqlMustInclude: ["completed_at"] }
-          : { kind: "refuse", statuses: ["invalid_query"], reason: "unknown period" },
+          : {
+              kind: "refuse",
+              statuses: needsClarify ? ["ambiguous_query"] : ["invalid_query"],
+              reason: needsClarify ? "ambiguous period" : "unknown period",
+            },
       }),
     );
   }
@@ -466,6 +490,7 @@ export function generateTimePeriods(): Scenario[] {
         interpretation: ok ? "Inclusive civil dates in the project timezone." : "Refuse malformed/inverted range.",
         expectedSqlBehaviour: ok ? "completed_at bounds." : "invalid_query",
         query: { metrics: ["revenue"], time: range },
+        disposition: ok ? "EXECUTE" : "UNSUPPORTED",
         expectation: ok
           ? { kind: "execute", trust: "governed" }
           : { kind: "refuse", statuses: ["invalid_query"], reason: label },
@@ -696,6 +721,19 @@ function retype(
 
 export function generateProperties(): Scenario[] {
   const rand = mulberry32(20240826);
+  const orderGrain = new Set([
+    "revenue",
+    "orders",
+    "ordering_customers",
+    "average_order_value",
+    "revenue_per_customer",
+    "successful_revenue",
+    "refunded_amount",
+    "conversion_rate",
+    "all_orders",
+    "avg_order_amount",
+  ]);
+  const safeRaw = new Set(["orders.discount_code", "orders.device_type", "orders.currency", "orders.channel"]);
   const out: Scenario[] = [];
   for (let i = 0; i < 220; i += 1) {
     const metric = pick(rand, METRICS);
@@ -705,6 +743,34 @@ export function generateProperties(): Scenario[] {
     const query = useRaw
       ? { metrics: [metric], raw_dimensions: [raw] }
       : { metrics: [metric], dimensions: [dim] };
+    let expectation: Scenario["expectation"];
+    let disposition: Disposition;
+    if (useRaw) {
+      const rawOk =
+        (orderGrain.has(metric) && (safeRaw.has(raw) || raw === "customers.country")) ||
+        (metric === "customers" && raw === "customers.country");
+      if (rawOk) {
+        expectation = { kind: "explore", trust: "mixed" };
+        disposition = "EXPLORE";
+      } else {
+        expectation = {
+          kind: "refuse",
+          statuses: ["unsafe_query", "invalid_query"],
+          reason: "unsafe raw slice",
+        };
+        disposition = "REFUSE_SAFETY";
+      }
+    } else if ((SAFE_SLICES[metric] ?? []).includes(dim)) {
+      expectation = { kind: "execute", trust: "governed" };
+      disposition = "EXECUTE";
+    } else {
+      expectation = {
+        kind: "refuse",
+        statuses: ["unsafe_query", "invalid_query"],
+        reason: "unsafe slice",
+      };
+      disposition = "REFUSE_SAFETY";
+    }
     out.push(
       sc({
         id: `gen/prop/${i}`,
@@ -713,7 +779,8 @@ export function generateProperties(): Scenario[] {
         interpretation: "Blocked fields never in SQL; writes never generated; governed never mixed.",
         expectedSqlBehaviour: "Invariants hold whether the query is answered or refused.",
         query,
-        expectation: { kind: "execute", trust: "governed" },
+        disposition,
+        expectation,
         custom: async (ctx) => {
           try {
             const { compiled, resolved } = ctx.kernel.compile(query);
@@ -723,11 +790,11 @@ export function generateProperties(): Scenario[] {
             if (resolved.trust === "governed" && resolved.ungoverned.length > 0) {
               return { code: "CRITICAL FAIL", detail: "governed trust with ungoverned fields" };
             }
-            if (resolved.ungoverned.length > 0 && resolved.trust === "governed") {
-              return { code: "CRITICAL FAIL", detail: "exploratory components labelled governed" };
-            }
             if (useRaw && resolved.trust === "governed") {
               return { code: "CRITICAL FAIL", detail: "raw dimension labelled governed" };
+            }
+            if (expectation.kind === "refuse") {
+              return { code: "CRITICAL FAIL", detail: "compiled a slice that must be refused" };
             }
             return resolved.trust === "governed"
               ? { code: "PASS", detail: "invariants held" }
@@ -736,6 +803,12 @@ export function generateProperties(): Scenario[] {
             if (err instanceof GraneError) {
               const leaks = errorLeaksSecrets(err.message);
               if (leaks.length) return { code: "SECURITY CRITICAL", detail: leaks.join() };
+              if (expectation.kind === "execute" || expectation.kind === "explore") {
+                return {
+                  code: "FAIL",
+                  detail: `incorrect refusal ${err.refusal.status}: ${err.refusal.message}`,
+                };
+              }
               return { code: "PASS — SAFE REFUSAL", detail: err.refusal.status };
             }
             return { code: "FAIL", detail: String(err) };

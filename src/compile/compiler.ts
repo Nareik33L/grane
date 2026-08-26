@@ -4,8 +4,8 @@ import { timeAlias } from "../query/resolve.js";
 import type { Edge } from "../model/graph.js";
 import type { FilterOperator, Scalar, MetricFilterItem } from "../config/schema.js";
 import { parseColumnRef, type ColumnRef } from "../model/refs.js";
-import { addDays, formatDate } from "../query/time.js";
-import { invalidQuery, unsafeQuery } from "../errors.js";
+import { exclusiveEnd } from "../query/time.js";
+import { ambiguousQuery, invalidQuery, unsafeQuery } from "../errors.js";
 import { getDialect, postgresDialect, type SqlDialect } from "../connectors/dialect.js";
 import { compilerNamespace } from "../connectors/create.js";
 
@@ -86,6 +86,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     if (!path) {
       throw invalidQuery(`No relationship path from "${baseTable}" to "${targetTable}" (${purpose}).`);
     }
+    if (path.ambiguous) {
+      throw ambiguousQuery(
+        `Joining "${targetTable}" (${purpose}) is ambiguous: multiple fan-out-free paths from "${baseTable}" (${(path.alternatives ?? []).join("; ")}). Name the relationship you mean.`,
+        { from: baseTable, to: targetTable, paths: path.alternatives },
+      );
+    }
     if (path.fansOut) {
       throw unsafeQuery(
         `Joining "${targetTable}" (${purpose}) would fan out rows at the "${baseTable}" grain.`,
@@ -127,10 +133,23 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       );
     }
 
+    if (path.ambiguous) {
+      throw ambiguousQuery(
+        `Metric "${metric.name}" has multiple fan-out-free paths from "${baseTable}" to "${measure.table}". Name the relationship you mean.`,
+        { from: baseTable, to: measure.table, paths: path.alternatives },
+      );
+    }
+
+    if (metric.config.additive === "semi") {
+      return compileSemiAdditiveMetric(metric);
+    }
+
+    const perMetricTime = perMetricTimeFilter(metric);
+
     if (!path.fansOut) {
       // Measure is on the base table or safely reachable: aggregate directly.
       joinPathTo(measure.table, `measure of metric "${metric.name}"`);
-      const filterClause = compileMetricFilters(metric.filters, params, col);
+      const filterClause = andFilters(compileMetricFilters(metric.filters, params, col), perMetricTime);
       const fn = aggregateFn(metric);
       return {
         expr: filterClause
@@ -140,10 +159,90 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     }
 
     // Fan-out path: deterministic pre-aggregation at the metric grain.
-    return compilePreAggregatedMetric(metric, path.edges);
+    return compilePreAggregatedMetric(metric, path.edges, perMetricTime);
   };
 
-  const compilePreAggregatedMetric = (metric: Metric, edges: Edge[]): MetricExpr => {
+  const compileSemiAdditiveMetric = (metric: Metric): MetricExpr => {
+    const measure = metric.measure!;
+    const entity = model.entities.get(metric.config.entity);
+    if (!entity) {
+      throw invalidQuery(`Entity "${metric.config.entity}" is not defined.`);
+    }
+    const pk = entity.config.primary_key;
+    const timeRef = metric.timeDimension;
+    if (!timeRef) {
+      throw unsafeQuery(
+        `Semi-additive metric "${metric.name}" requires a time_dimension so Grane can take last-as-of rather than summing across dates.`,
+      );
+    }
+    if (measure.table !== baseTable) {
+      throw unsafeQuery(
+        `Semi-additive metric "${metric.name}" must measure a column on the entity table ("${baseTable}"); last-as-of across a join is not supported.`,
+      );
+    }
+    if (metric.config.type !== "sum" && metric.config.type !== "min" && metric.config.type !== "max") {
+      throw unsafeQuery(
+        `Semi-additive metric "${metric.name}" of type "${metric.config.type}" is not supported; use sum, min, or max.`,
+      );
+    }
+
+    joinPathTo(measure.table, `measure of metric "${metric.name}"`);
+    const cteName = `last_${metric.name}`;
+    const pkExpr = `${ident(measure.table)}.${ident(pk)}`;
+    const timeExpr = col(timeRef);
+    const whereParts: string[] = [];
+    if (resolved.time) {
+      const toExclusive = exclusiveEnd(resolved.time.to);
+      whereParts.push(`${localTime(timeRef)} < ${dialect.castTimestamp(params.add(toExclusive))}`);
+      if (resolved.time.grain) {
+        whereParts.push(`${localTime(timeRef)} >= ${dialect.castTimestamp(params.add(resolved.time.from))}`);
+      }
+    }
+    const metricWhere = compileMetricFilters(metric.filters, params, col);
+    if (metricWhere) whereParts.push(metricWhere);
+
+    const grainExpr = resolved.time?.grain
+      ? dialect.dateTrunc(resolved.time.grain, localTime(timeRef))
+      : null;
+    const cteSql = [
+      `${ident(cteName)} AS (`,
+      `  SELECT ${pkExpr} AS ${ident("_key")}, MAX(${timeExpr}) AS ${ident("_as_of")}` +
+        (grainExpr ? `, ${grainExpr} AS ${ident("_period")}` : ""),
+      `  FROM ${qualify(measure.table)}`,
+      ...(whereParts.length > 0 ? [`  WHERE ${whereParts.join(" AND ")}`] : []),
+      `  GROUP BY ${pkExpr}` + (grainExpr ? `, ${grainExpr}` : ""),
+      `)`,
+    ].join("\n");
+    ctes.push(cteSql);
+    cteJoins.push(
+      `JOIN ${ident(cteName)} ON ${ident(cteName)}.${ident("_key")} = ${pkExpr} AND ${ident(cteName)}.${ident("_as_of")} = ${timeExpr}`,
+    );
+    preAggregations.push({
+      metric: metric.name,
+      cte: cteName,
+      measureTable: measure.table,
+      keyColumn: `${measure.table}.${pk}`,
+    });
+    return { expr: `${aggregateFn(metric)}(${col(measure)})` };
+  };
+
+  const timeBoundsSql = (ref: ColumnRef): string => {
+    const expr = localTime(ref);
+    const from = resolved.time!.from;
+    const toExclusive = exclusiveEnd(resolved.time!.to);
+    return `${expr} >= ${dialect.castTimestamp(params.add(from))} AND ${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`;
+  };
+
+  const perMetricTimeFilter = (metric: Metric): string | null => {
+    if (!resolved.time || resolved.time.shared) return null;
+    if (!metric.timeDimension) return null;
+    return timeBoundsSql(metric.timeDimension);
+  };
+
+  const anySemiAdditive = resolved.metrics.some((metric) => isSemiAdditive(model, metric));
+  const skipOuterTime = Boolean(resolved.time && (!resolved.time.shared || anySemiAdditive));
+
+  const compilePreAggregatedMetric = (metric: Metric, edges: Edge[], extraTimeFilter: string | null): MetricExpr => {
     if (metric.config.type === "count_distinct") {
       throw unsafeQuery(
         `Metric "${metric.name}" is a count_distinct across a one_to_many relationship; it cannot be safely pre-aggregated in V0.1.`,
@@ -232,7 +331,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       keyColumn: `${firstEdge.toTable}.${firstEdge.toColumn}`,
     });
 
-    const outerFilterClause = compileMetricFilters(outerFilters, params, col);
+    const outerFilterClause = andFilters(compileMetricFilters(outerFilters, params, col), extraTimeFilter);
     if (outerFilterClause) {
       const cteVal = `${ident(cteName)}.${ident("value")}`;
       if (metric.config.type === "avg") {
@@ -321,19 +420,10 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
   // ---- WHERE ----
   const where: string[] = [];
-  if (resolved.time) {
+  if (resolved.time && !skipOuterTime) {
     const expr = localTime(resolved.time.column);
     const from = resolved.time.from;
-    const toExclusive = formatDate(
-      addDays(
-        {
-          year: Number(resolved.time.to.slice(0, 4)),
-          month: Number(resolved.time.to.slice(5, 7)),
-          day: Number(resolved.time.to.slice(8, 10)),
-        },
-        1,
-      ),
-    );
+    const toExclusive = exclusiveEnd(resolved.time.to);
     where.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
     where.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
   }
@@ -425,6 +515,23 @@ function aggregateFn(metric: Metric): "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" {
 function directAggregate(metric: Metric, measureExpr: string): string {
   if (metric.config.type === "count_distinct") return `COUNT(DISTINCT ${measureExpr})`;
   return `${aggregateFn(metric)}(${measureExpr})`;
+}
+
+function andFilters(...parts: Array<string | null | undefined>): string | null {
+  const ok = parts.filter((part): part is string => Boolean(part && part.length > 0));
+  return ok.length > 0 ? ok.join(" AND ") : null;
+}
+
+function isSemiAdditive(model: SemanticModel, metric: Metric): boolean {
+  if (metric.config.additive === "semi") return true;
+  if (metric.config.type === "ratio") {
+    const numerator = model.metrics.get(metric.config.numerator!);
+    const denominator = model.metrics.get(metric.config.denominator!);
+    return Boolean(
+      (numerator && isSemiAdditive(model, numerator)) || (denominator && isSemiAdditive(model, denominator)),
+    );
+  }
+  return false;
 }
 
 function compileMetricFilters(

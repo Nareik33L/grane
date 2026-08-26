@@ -77,6 +77,35 @@ export const GOLD_SQL = {
     WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM daily_account_snapshots s2 WHERE s2.account_id = s.account_id)
   `,
   naiveSnapshotSum: `SELECT SUM(balance)::DOUBLE AS v FROM daily_account_snapshots`,
+  revenueFebruaryCreatedAt: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+  `,
+  conversionLastMonth: `
+    SELECT (
+      COUNT(id) FILTER (
+        WHERE status = 'completed'
+          AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+          AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+      )::DOUBLE
+      / NULLIF(
+        COUNT(id) FILTER (
+          WHERE (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+            AND (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+        ),
+        0
+      )
+    ) AS v
+    FROM orders
+  `,
+  revenueThisFiscalYear: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2023-04-01'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
 };
 
 /**

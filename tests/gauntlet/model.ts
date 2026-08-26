@@ -147,6 +147,7 @@ export function gauntletConfig(overrides: Record<string, unknown> = {}): GraneCo
         type: "sum",
         sql: "${daily_account_snapshots.balance}",
         time_dimension: "${daily_account_snapshots.snapshot_date}",
+        additive: "semi",
       },
       inventory: {
         description: "Non-additive inventory level at product grain.",

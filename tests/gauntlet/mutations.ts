@@ -19,6 +19,7 @@ export async function withDisabledFanout<T>(kernel: GraneKernel, fn: () => Promi
     return {
       ...path,
       fansOut: false,
+      ambiguous: path.ambiguous,
       edges: path.edges.map((edge) => ({
         ...edge,
         cardinality: edge.cardinality === "one_to_many" ? "many_to_one" : edge.cardinality,
