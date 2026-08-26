@@ -77,6 +77,50 @@ describe("LookML", () => {
     expect(contribution.metrics.revenue?.filters).toEqual({ "orders.status": "completed" });
     expect(contribution.dimensions.country?.sql).toBe("${customers.country}");
     expect(contribution.relationships.orders_to_customers.from).toBe("orders.customer_id");
+    expect(contribution.entities.orders?.primary_key).toBe("id");
+  });
+
+  it("uses primary_key: yes instead of the first number dimension", () => {
+    const contribution = loadLookmlProvider({ path: lookmlShop }, { projectDir: lookmlShop });
+    expect(contribution.entities.orders?.primary_key).toBe("id");
+    expect(contribution.dimensions.net_amount?.sql).toBe("${orders.net_amount}");
+  });
+
+  it("maps LookML view.field joins onto warehouse table.column", () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-lkml-"));
+    writeFileSync(
+      join(dir, "shop.lkml"),
+      `
+view: order_facts {
+  sql_table_name: public.orders ;;
+  dimension: pk {
+    primary_key: yes
+    sql: \${TABLE}.id ;;
+  }
+  measure: revenue { type: sum sql: \${TABLE}.net_amount ;; }
+}
+view: customer {
+  sql_table_name: customers ;;
+  dimension: id { primary_key: yes sql: \${TABLE}.id ;; }
+}
+explore: order_facts {
+  join: customer {
+    sql_on: \${order_facts.customer_id} = \${customer.id} ;;
+    relationship: many_to_one
+  }
+}
+`,
+    );
+    const contribution = loadLookmlProvider({ path: dir }, { projectDir: dir });
+    expect(contribution.entities.order_facts?.table).toBe("orders");
+    expect(contribution.entities.order_facts?.primary_key).toBe("id");
+    expect(contribution.relationships.order_facts_to_customer).toEqual(
+      expect.objectContaining({
+        from: "orders.customer_id",
+        to: "customers.id",
+        type: "many_to_one",
+      }),
+    );
   });
 });
 

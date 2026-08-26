@@ -1,7 +1,13 @@
 view: orders {
   sql_table_name: orders ;;
 
+  dimension: net_amount {
+    type: number
+    sql: ${TABLE}.net_amount ;;
+  }
+
   dimension: id {
+    primary_key: yes
     type: number
     sql: ${TABLE}.id ;;
   }
@@ -31,6 +37,7 @@ view: customers {
   sql_table_name: customers ;;
 
   dimension: id {
+    primary_key: yes
     type: number
     sql: ${TABLE}.id ;;
   }
