@@ -36,9 +36,19 @@ deterministic infrastructure in the middle.
 
 ## Fast path
 
-After `grane validate` succeeds, register Grane with whichever MCP client you
-use. The command is the same shape for every agent; only the last-mile config
-file (or UI) changes.
+**First time?** Run the bundled shop, then connect a local desktop client:
+
+```bash
+npx grane-analytics demo
+npx grane-analytics -p example/analytics-duckdb mcp connect cursor
+```
+
+Ask: *Why did revenue fall last month?* Script: [example/DEMO.md](../example/DEMO.md).
+ChatGPT (HTTPS only) is not this path.
+
+After `grane validate` succeeds on your own project, register Grane with
+whichever MCP client you use. The command is the same shape for every agent;
+only the last-mile config file (or UI) changes.
 
 ```bash
 grane mcp doctor                 # project + optional MCP handshake
@@ -67,16 +77,16 @@ to edit files yourself.
 
 Do these three steps once, regardless of which chat product you use.
 
-### 1. Install and build Grane
+### 1. Install Grane
 
 ```bash
-git clone <your-grane-repo>
-cd grane
-npm install
-npm run build
+npm install -g grane-analytics
+# or from a clone: npm install && npm run build
+# try the bundled shop first: npx grane-analytics demo
 ```
 
-Or run the published Docker image if you prefer containers.
+The CLI command is `grane`. Node 20+. Or run the published Docker image if
+you prefer containers.
 
 ### 2. Point Grane at your database
 
@@ -189,6 +199,7 @@ If Grane runs on a server with HTTPS:
 
 Ask in natural language, for example:
 
+> Why did revenue fall last month?
 > What metrics are defined in Grane?
 > What was revenue by country last month?
 

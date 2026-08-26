@@ -19,7 +19,8 @@ exploration:
   enabled: true
   schemas:
     - public
-  exclude: []
+  exclude:
+    - customers.email
 
 # audit:
 #   enabled: true

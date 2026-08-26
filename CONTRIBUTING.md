@@ -8,6 +8,7 @@ not be accepted.
 
 ```bash
 npm install
+npm run demo
 npm run test:unit
 docker compose -f example/docker-compose.yml up -d --wait
 npm test

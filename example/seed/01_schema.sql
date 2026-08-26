@@ -23,13 +23,14 @@ CREATE TABLE products (
 );
 
 CREATE TABLE orders (
-  id           serial PRIMARY KEY,
-  customer_id  integer NOT NULL REFERENCES customers (id),
-  status       text NOT NULL,            -- 'completed' | 'cancelled' | 'pending'
-  channel      text NOT NULL,            -- 'web' | 'mobile' | 'partner'
-  net_amount   numeric(10, 2) NOT NULL,
-  created_at   timestamptz NOT NULL,
-  completed_at timestamptz
+  id            serial PRIMARY KEY,
+  customer_id   integer NOT NULL REFERENCES customers (id),
+  status        text NOT NULL,            -- 'completed' | 'cancelled' | 'pending'
+  channel       text NOT NULL,            -- 'web' | 'mobile' | 'partner'
+  discount_code text,                     -- ungoverned; last-month partner uses PARTNER20
+  net_amount    numeric(10, 2) NOT NULL,
+  created_at    timestamptz NOT NULL,
+  completed_at  timestamptz
 );
 
 CREATE TABLE order_items (

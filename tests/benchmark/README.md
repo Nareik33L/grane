@@ -20,17 +20,19 @@ answers are separate reviewed SQL in the same file, executed against the same
 
 ```bash
 npm install
-npm install -D @duckdb/node-api   # the benchmark's only extra dependency
+npm run demo                 # builds example/analytics-duckdb/warehouse.duckdb
 npm run test:benchmark
 ```
 
 Without `@duckdb/node-api` the suite skips with a message rather than failing, so
-CI can run it without making DuckDB a default runtime install.
+CI can run it without making DuckDB a default runtime install. If the warehouse
+file is missing, the harness builds it from `example/seed/duckdb.sql`.
 
 Relative periods are anchored to the newest timestamp in the warehouse, not to
-wall-clock now, and the project timezone is pinned to UTC. The example database
-is seeded relative to its build time, so anchoring to the data keeps the numbers
-stable and keeps "last month" populated however long after the build it runs.
+wall-clock now, and the project timezone is pinned to UTC. The demo seed is
+relative to `CURRENT_DATE` so a human asking "last month" always has rows;
+anchoring the benchmark to the data keeps scores stable if a previously built
+file is reused.
 
 ## Reading the scores
 

@@ -113,8 +113,15 @@ Queries and refusals are appended to `.grane/audit.jsonl` (see
 ## Example database
 
 ```bash
-docker compose -f example/docker-compose.yml up -d --wait
-grane -p example/analytics serve
+npx grane-analytics demo
+grane -p example/analytics-duckdb mcp connect cursor
 ```
 
-Then connect your agent and ask: *"What was revenue by country last month?"*
+Ask: *"Why did revenue fall last month?"* See [example/DEMO.md](../example/DEMO.md).
+
+Postgres (optional):
+
+```bash
+docker compose -f example/docker-compose.yml up -d --wait
+npx grane-analytics demo --postgres
+```

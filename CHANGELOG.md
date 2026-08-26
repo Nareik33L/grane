@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Canonical onboarding path: `npx grane-analytics demo` (or `npm run demo`)
+  builds a local DuckDB shop, previews governed vs mixed-trust queries, and
+  prints the question *Why did revenue fall last month?* Last-month revenue
+  falls on the partner channel; `orders.discount_code` is the allowed raw
+  investigation field; `customers.email` is excluded; `product_category` is
+  refused. Script: `example/DEMO.md`.
+- Demo seed is deterministic (no random 365-day orders). `warehouse.duckdb`
+  is generated in Node; it is not committed. `python3 example/scripts/build_duckdb.py`
+  still rebuilds the file and Parquet exports.
+
 ## 0.6.5
 
 - Deterministic kernel capabilities used by the Gauntlet:
