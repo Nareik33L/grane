@@ -65,6 +65,7 @@ describe("dimension availability and grain safety", () => {
   it("finds safe join paths and flags fan-out paths", () => {
     const safe = model.graph.findPath("orders", "customers");
     expect(safe?.fansOut).toBe(false);
+    expect(safe?.ambiguous).toBeFalsy();
     const fanning = model.graph.findPath("orders", "payments");
     expect(fanning?.fansOut).toBe(true);
     expect(model.graph.findPath("orders", "nonexistent")).toBeNull();

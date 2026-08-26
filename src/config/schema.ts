@@ -77,6 +77,13 @@ export const metricConfigSchema = z
     denominator: z.string().optional(),
     filters: metricFiltersSchema.optional(),
     time_dimension: z.string().optional(),
+    /**
+     * How the measure combines across the time dimension.
+     * `full` (default) may be summed across dates. `semi` is last-as-of
+     * (last snapshot per entity key, then summed across keys). `none` is
+     * reserved for non-additive measures.
+     */
+    additive: z.enum(["full", "semi", "none"]).optional(),
     unit: z.string().optional(),
     status: metricStatusSchema.default("approved"),
     synonyms: z.array(z.string()).default([]),

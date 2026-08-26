@@ -23,7 +23,8 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:benchmark": "vitest run tests/benchmark"
+    "test:benchmark": "vitest run tests/benchmark",
+    "test:gauntlet": "vitest run tests/gauntlet"
   },
   "keywords": [
     "analytics",

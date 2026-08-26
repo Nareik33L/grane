@@ -12,6 +12,7 @@ export type RefusalStatus =
   | "exploration_disabled"
   | "column_not_permitted"
   | "invalid_query"
+  | "ambiguous_query"
   | "unsafe_query"
   | "config_error";
 
@@ -80,6 +81,10 @@ export function columnNotPermitted(requested: string): GraneError {
 
 export function invalidQuery(message: string, details?: unknown): GraneError {
   return new GraneError({ status: "invalid_query", message, details });
+}
+
+export function ambiguousQuery(message: string, details?: unknown): GraneError {
+  return new GraneError({ status: "ambiguous_query", message, details });
 }
 
 export function unsafeQuery(message: string, details?: unknown): GraneError {

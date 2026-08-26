@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { filterOperatorSchema } from "../config/schema.js";
+import { isValidCivilDate } from "./time.js";
 
 /**
  * Grane Query Model v1 — the versioned semantic contract between agents and
@@ -16,7 +17,10 @@ const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
 const dateString = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "dates must use YYYY-MM-DD format");
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "dates must use YYYY-MM-DD format")
+  .refine((value) => isValidCivilDate(value), {
+    message: "dates must be valid calendar dates (YYYY-MM-DD)",
+  });
 
 export const queryFilterSchema = z.object({
   /** A governed dimension name, or a table.column raw warehouse field. */

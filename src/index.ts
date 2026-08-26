@@ -28,7 +28,7 @@ export {
 } from "./query/model.js";
 export { trustHeadline, TRUST_HEADLINES } from "./query/trust.js";
 export { resolveQuery, type ResolvedQuery } from "./query/resolve.js";
-export { resolveRelativeRange, todayInTimeZone } from "./query/time.js";
+export { resolveRelativeRange, todayInTimeZone, isValidCivilDate } from "./query/time.js";
 export { compileQuery, type CompiledQuery } from "./compile/compiler.js";
 export { executeCompiled, type QueryResult, type Provenance } from "./execute/executor.js";
 export { inferRelationships, type DatabaseSchema } from "./connectors/types.js";
@@ -45,7 +45,7 @@ export {
   runDoctor,
 } from "./mcp/connect/index.js";
 export type { ClientId, Transport } from "./mcp/connect/index.js";
-export { GraneError, type Refusal } from "./errors.js";
+export { GraneError, type Refusal, ambiguousQuery, invalidQuery, unsafeQuery } from "./errors.js";
 export { explorationPolicy } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";

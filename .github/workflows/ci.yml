@@ -19,4 +19,9 @@ jobs:
       # The A/B/C thesis benchmark. DuckDB is a devDependency, so this runs
       # without making it a default runtime install.
       - run: npm run test:benchmark
+      # Internal robustness gauntlet. Findings are the report; this job fails
+      # only when the harness is broken or a known defect-class mutation is
+      # not detected. 100% is not the goal.
+      - run: npm run test:gauntlet
+      - run: npm run test:gauntlet
       - run: npm run build

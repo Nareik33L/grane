@@ -10,6 +10,9 @@ import { configError } from "../errors.js";
  * one_to_many multiplies rows of the starting table — a fan-out. Join paths
  * used to attach dimensions must be fan-out free; measure paths may cross
  * one_to_many edges only via deterministic pre-aggregation.
+ *
+ * When two or more fan-out-free paths reach the same table, Grane refuses
+ * rather than BFS-picking one. Guessing a path silently changes the numbers.
  */
 
 export interface Edge {
@@ -26,12 +29,25 @@ export interface JoinPath {
   edges: Edge[];
   /** True if any traversed edge is one_to_many (row-multiplying). */
   fansOut: boolean;
+  /**
+   * True when two or more fan-out-free paths exist. Callers must refuse
+   * rather than use `edges` as a guess.
+   */
+  ambiguous?: boolean;
+  /** Human-readable path descriptions when `ambiguous` is true. */
+  alternatives?: string[];
 }
 
 function invert(cardinality: Cardinality): Cardinality {
   if (cardinality === "many_to_one") return "one_to_many";
   if (cardinality === "one_to_many") return "many_to_one";
   return "one_to_one";
+}
+
+export function describeJoinPath(path: JoinPath): string {
+  if (path.edges.length === 0) return "(same table)";
+  const tables = [path.edges[0]!.fromTable, ...path.edges.map((e) => e.toTable)];
+  return tables.join(" → ");
 }
 
 export class RelationshipGraph {
@@ -76,15 +92,55 @@ export class RelationshipGraph {
   }
 
   /**
-   * Find the shortest join path between two tables via BFS.
-   * Fan-out-free paths are preferred; a fanning path is returned only when no
-   * safe path exists (callers decide whether pre-aggregation applies).
+   * Find a join path between two tables.
+   *
+   * Fan-out-free paths are preferred. If two or more safe paths exist, the
+   * result is marked `ambiguous` — callers must not guess. A fanning path is
+   * returned only when no safe path exists (callers decide whether
+   * pre-aggregation applies).
    */
   findPath(fromTable: string, toTable: string): JoinPath | null {
     if (fromTable === toTable) return { edges: [], fansOut: false };
-    const safe = this.bfs(fromTable, toTable, true);
-    if (safe) return safe;
+    const safe = this.collectSafePaths(fromTable, toTable, 8, 8);
+    if (safe.length > 1) {
+      return {
+        edges: safe[0]!.edges,
+        fansOut: false,
+        ambiguous: true,
+        alternatives: safe.map(describeJoinPath),
+      };
+    }
+    if (safe.length === 1) return safe[0]!;
     return this.bfs(fromTable, toTable, false);
+  }
+
+  /**
+   * Enumerate simple fan-out-free paths, stopping after `limit` matches or
+   * `maxDepth` hops. Used to detect ambiguity without walking the full graph.
+   */
+  collectSafePaths(fromTable: string, toTable: string, limit = 8, maxDepth = 8): JoinPath[] {
+    if (fromTable === toTable) return [{ edges: [], fansOut: false }];
+    const found: JoinPath[] = [];
+    const visit = (table: string, edges: Edge[], visited: Set<string>): void => {
+      if (found.length >= limit) return;
+      if (edges.length >= maxDepth) return;
+      for (const edge of this.edgesFrom(table)) {
+        if (edge.cardinality === "one_to_many") continue;
+        if (visited.has(edge.toTable)) continue;
+        const next = [...edges, edge];
+        if (edge.toTable === toTable) {
+          found.push({ edges: next, fansOut: false });
+          if (found.length >= limit) return;
+          continue;
+        }
+        visited.add(edge.toTable);
+        visit(edge.toTable, next, visited);
+        visited.delete(edge.toTable);
+        if (found.length >= limit) return;
+      }
+    };
+    visit(fromTable, [], new Set([fromTable]));
+    return found;
   }
 
   private bfs(fromTable: string, toTable: string, safeOnly: boolean): JoinPath | null {

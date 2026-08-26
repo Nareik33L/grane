@@ -1,7 +1,32 @@
 # Changelog
 
+## 0.6.5
+
+- Deterministic kernel capabilities used by the Gauntlet:
+  - Semi-additive metrics (`additive: semi`) take last-as-of per entity key
+    rather than summing snapshot rows across time.
+  - Ratio (and other) metrics with disagreeing `time_dimension`s apply the
+    query window to each component on its own timestamp via `FILTER`, not a
+    shared outer `WHERE`.
+  - An explicit `time.dimension` that is not the metrics' canonical time is
+    labelled `mixed` and still executes.
+  - Multiple fan-out-free join paths refuse with `ambiguous_query` rather
+    than BFS-guessing.
+  - `this_fiscal_year` / `last_fiscal_year` resolve from
+    `project.fiscal_year.starts_month`. `ytd` / `q1` / `fyYYYY` require
+    clarification when a fiscal year is configured. Unknown periods and
+    impossible civil dates (`2023-02-29`) are structured `invalid_query`.
+- Gauntlet scenarios carry an expected disposition (`EXECUTE`, `EXPLORE`,
+  `CLARIFY`, `REFUSE_SAFETY`, `REFUSE_POLICY`, `UNSUPPORTED`). A refusal
+  cannot pass an `EXECUTE` / `EXPLORE` scenario.
+
 ## 0.6.4
 
+- Internal **Grane Gauntlet** (`tests/gauntlet`, `npm run test:gauntlet`): a
+  hostile DuckDB warehouse and ~900 scenarios that try to make Grane return
+  the wrong number, silently fan out, bypass a permission, or label
+  exploration as governed. Independent gold SQL and fixture reductions;
+  a safe refusal is a pass. Not the public A/B/C benchmark.
 - First-week path on your own Postgres: `grane discover --write-relationships`
   merges inferred foreign keys into `relationships.yml` without clobbering
   existing keys. `grane init` scaffolds five-metric comments, audit, and
