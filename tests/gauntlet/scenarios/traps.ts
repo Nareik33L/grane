@@ -450,7 +450,8 @@ function permissionTraps(): Scenario[] {
       question: "Does catalog() list customers.email?",
       interpretation: "Blocked fields are not discoverable.",
       expectedSqlBehaviour: "Absent from exploration.columns.",
-      expectation: { kind: "refuse", reason: "n/a" },
+      disposition: "EXECUTE",
+      expectation: { kind: "execute", trust: "governed" },
       custom: async (ctx) => {
         const catalog = JSON.parse(ctx.catalogText ?? "{}") as {
           exploration?: { columns?: Array<{ table: string; column: string }> };
