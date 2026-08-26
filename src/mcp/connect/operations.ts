@@ -2,10 +2,12 @@ import { existsSync } from "node:fs";
 import { effectiveScope, listClients, resolveClient } from "./clients.js";
 import {
   formatSnippet,
+  getNamedServer,
   listServerNames,
   mergeServerEntry,
   readJsoncFile,
   removeServerEntry,
+  serverEntryHttpUrl,
   writeJsonFile,
 } from "./config-file.js";
 import { buildServerEntry, resolveTransport } from "./entry.js";
@@ -66,6 +68,25 @@ export function connectMcp(req: ConnectRequest): ConnectResult {
   const existing = readJsoncFile(path);
   const config = mergeServerEntry(existing, client.serversKey, req.serverName, entry);
   if (!req.dryRun) writeJsonFile(path, config);
+
+  if (transport === "stdio" && client.scope === "both") {
+    const otherScope = scope === "project" ? "global" : "project";
+    const otherPath = client.configPath(paths, otherScope);
+    if (otherPath && otherPath !== path && existsSync(otherPath)) {
+      const otherExisting = readJsoncFile(otherPath);
+      const leftoverUrl = serverEntryHttpUrl(
+        getNamedServer(otherExisting, client.serversKey, req.serverName),
+        client.httpField,
+      );
+      if (leftoverUrl) {
+        const replaced = mergeServerEntry(otherExisting, client.serversKey, req.serverName, entry);
+        if (!req.dryRun) writeJsonFile(otherPath, replaced);
+        warnings.push(
+          `Replaced HTTP entry (${leftoverUrl}) in ${otherPath} with stdio. Cursor was connecting to that URL instead of launching Grane.`,
+        );
+      }
+    }
+  }
 
   return {
     client: client.id,

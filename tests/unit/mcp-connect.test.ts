@@ -297,6 +297,41 @@ describe("connect / print / list / remove", () => {
     expect(result.warnings.some((w) => w.includes("credentials"))).toBe(true);
   });
 
+  it("replaces a leftover Cursor HTTP entry in the other config scope", () => {
+    const workspace = tempDir();
+    const home = tempDir();
+    mkdirSync(join(home, ".cursor"), { recursive: true });
+    writeFileSync(
+      join(home, ".cursor", "mcp.json"),
+      JSON.stringify({
+        mcpServers: { grane: { url: "http://localhost:8080/mcp" } },
+      }),
+    );
+    const result = connectMcp({
+      client: "cursor",
+      transport: "stdio",
+      projectDir: "/analytics",
+      workspaceDir: workspace,
+      homeDir: home,
+      platform: "linux",
+      env: {},
+      serverName: "grane",
+      port: 8080,
+      scope: "project",
+      includeEnv: false,
+      dryRun: false,
+      launch,
+    });
+    const globalPath = join(home, ".cursor", "mcp.json");
+    const globalConfig = JSON.parse(readFileSync(globalPath, "utf8")) as {
+      mcpServers: Record<string, { command?: string; url?: string; args?: string[] }>;
+    };
+    expect(globalConfig.mcpServers.grane?.url).toBeUndefined();
+    expect(globalConfig.mcpServers.grane?.command).toBe("grane");
+    expect(globalConfig.mcpServers.grane?.args).toContain("--stdio");
+    expect(result.warnings.some((w) => w.includes(globalPath) && w.includes("8080"))).toBe(true);
+  });
+
   it("does not write ChatGPT config; prints HTTPS instructions", () => {
     const result = connectMcp({
       client: "chatgpt",

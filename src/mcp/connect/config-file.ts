@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseJsonc } from "./jsonc.js";
-import type { McpServerEntry, ServersKey } from "./types.js";
+import type { HttpField, McpServerEntry, ServersKey } from "./types.js";
 
 export function readJsoncFile(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
@@ -46,6 +46,25 @@ export function removeServerEntry(
   delete servers[name];
   next[serversKey] = servers;
   return { config: next, removed: true };
+}
+
+/** URL if this MCP server entry is HTTP (Cursor/Claude `url`, Gemini `httpUrl`, VS Code `type: http`). */
+export function serverEntryHttpUrl(entry: unknown, httpField: HttpField): string | undefined {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  const rec = entry as Record<string, unknown>;
+  if (rec.type === "http" && typeof rec.url === "string") return rec.url;
+  const value = rec[httpField];
+  return typeof value === "string" ? value : undefined;
+}
+
+export function getNamedServer(
+  config: Record<string, unknown>,
+  serversKey: ServersKey,
+  name: string,
+): unknown {
+  const current = config[serversKey];
+  if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+  return (current as Record<string, unknown>)[name];
 }
 
 export function listServerNames(config: Record<string, unknown>, serversKey: ServersKey): string[] {

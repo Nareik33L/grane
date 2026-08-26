@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2
+
+- `grane mcp connect` with stdio replaces a leftover HTTP entry of the same
+  name in the other Cursor/VS Code/Gemini config (project vs `~/.cursor/mcp.json`).
+  That stops Cursor connecting to `localhost:8080` after a previous `grane serve`.
+
 ## 0.6.1
 
 - Agent dimension allow-lists apply to governed filters, `time.dimension`,
