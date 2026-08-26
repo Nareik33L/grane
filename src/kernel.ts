@@ -312,7 +312,7 @@ export class GraneKernel {
 
   compile(input: SemanticQueryInput): { resolved: ResolvedQuery; compiled: CompiledQuery } {
     const resolved = this.resolve(input);
-    const compiled = compileQuery(this.model, resolved);
+    const compiled = compileQuery(this.model, resolved, this.schemaCache);
     return { resolved, compiled };
   }
 

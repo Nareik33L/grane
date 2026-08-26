@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, formatDate, isValidCivilDate, resolveRelativeRange, startOfFiscalYear, todayInTimeZone } from "../../src/query/time.js";
+import { addDays, formatDate, isValidCivilDate, resolveRelativeRange, startOfFiscalYear, startOfQuarter, startOfWeek, todayInTimeZone } from "../../src/query/time.js";
 import { GraneError } from "../../src/errors.js";
 
 // A fixed instant: 2026-08-25T23:30:00Z.
@@ -118,6 +118,47 @@ describe("deterministic time resolution", () => {
     expect(resolveRelativeRange("ytd", "UTC", NOW)).toEqual({
       from: "2026-01-01",
       to: "2026-08-25",
+    });
+  });
+
+  it("resolves calendar weeks from project.week.starts", () => {
+    expect(startOfWeek({ year: 2024, month: 3, day: 15 }, "monday")).toEqual({
+      year: 2024,
+      month: 3,
+      day: 11,
+    });
+    expect(startOfWeek({ year: 2024, month: 3, day: 15 }, "sunday")).toEqual({
+      year: 2024,
+      month: 3,
+      day: 10,
+    });
+    expect(resolveRelativeRange("this_week", "Europe/London", GAUNTLET_NOW, { weekStarts: "monday" })).toEqual({
+      from: "2024-03-11",
+      to: "2024-03-15",
+    });
+    expect(resolveRelativeRange("this_week", "Europe/London", GAUNTLET_NOW, { weekStarts: "sunday" })).toEqual({
+      from: "2024-03-10",
+      to: "2024-03-15",
+    });
+    expect(resolveRelativeRange("last_week", "Europe/London", GAUNTLET_NOW, { weekStarts: "monday" })).toEqual({
+      from: "2024-03-04",
+      to: "2024-03-10",
+    });
+    expect(resolveRelativeRange("last_week", "Europe/London", GAUNTLET_NOW, { weekStarts: "sunday" })).toEqual({
+      from: "2024-03-03",
+      to: "2024-03-09",
+    });
+  });
+
+  it("resolves unambiguous calendar quarters without touching q1", () => {
+    expect(startOfQuarter({ year: 2024, month: 3, day: 15 })).toEqual({ year: 2024, month: 1, day: 1 });
+    expect(resolveRelativeRange("this_quarter", "Europe/London", GAUNTLET_NOW)).toEqual({
+      from: "2024-01-01",
+      to: "2024-03-15",
+    });
+    expect(resolveRelativeRange("last_quarter", "Europe/London", GAUNTLET_NOW)).toEqual({
+      from: "2023-10-01",
+      to: "2023-12-31",
     });
   });
 

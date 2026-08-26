@@ -239,6 +239,24 @@ describe("semi-additive, per-component time, trust, and ambiguous paths", () => 
     expect(resolved.time?.to).toBe("2024-03-15");
   });
 
+  it("resolves this_week from Monday when project.week.starts is monday", () => {
+    const { resolved } = kernel.compile({
+      metrics: ["revenue"],
+      time: { period: "this_week" },
+    });
+    expect(resolved.time?.from).toBe("2024-03-11");
+    expect(resolved.time?.to).toBe("2024-03-15");
+  });
+
+  it("resolves this_quarter as calendar Q1, not fiscal Q1", () => {
+    const { resolved } = kernel.compile({
+      metrics: ["revenue"],
+      time: { period: "this_quarter" },
+    });
+    expect(resolved.time?.from).toBe("2024-01-01");
+    expect(resolved.time?.to).toBe("2024-03-15");
+  });
+
   it("marks orders → countries as ambiguous in the relationship graph", () => {
     const model = new SemanticModel(gauntletConfig());
     const path = model.graph.findPath("orders", "countries");

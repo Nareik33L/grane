@@ -12,7 +12,9 @@
 import {
   completedOrders,
   CUSTOMERS,
+  DAILY_ACCOUNT_SNAPSHOTS,
   distinctCompletedCustomerIds,
+  lastAsOfTotal,
   ORDER_ITEMS,
   PRODUCT_CATEGORY_MAP,
   refundsTotal,
@@ -21,6 +23,39 @@ import {
   successfulPaymentsTotal,
 } from "./data.js";
 import { GAUNTLET_TZ } from "./types.js";
+
+/** Independent last-as-of SQL: last civil date on or before `asOf`, optionally inside `[from, asOf]`. */
+export function lastAsOfSql(asOf: string, windowFrom?: string): string {
+  const upper = asOf === "9999-12-31" ? "" : ` AND s2.snapshot_date <= DATE '${asOf}'`;
+  const window = windowFrom ? ` AND s2.snapshot_date >= DATE '${windowFrom}'` : "";
+  const outerUpper = asOf === "9999-12-31" ? "" : ` AND s.snapshot_date <= DATE '${asOf}'`;
+  const outerWindow = windowFrom ? ` AND s.snapshot_date >= DATE '${windowFrom}'` : "";
+  return `
+    SELECT SUM(s.balance)::DOUBLE AS v
+    FROM daily_account_snapshots s
+    WHERE s.snapshot_date = (
+      SELECT MAX(s2.snapshot_date) FROM daily_account_snapshots s2
+      WHERE s2.account_id = s.account_id${upper}${window}
+    )${outerUpper}${outerWindow}
+  `;
+}
+
+export function lastAsOfByAccountSql(asOf: string, windowFrom?: string): string {
+  const upper = asOf === "9999-12-31" ? "" : ` AND s2.snapshot_date <= DATE '${asOf}'`;
+  const window = windowFrom ? ` AND s2.snapshot_date >= DATE '${windowFrom}'` : "";
+  const outerUpper = asOf === "9999-12-31" ? "" : ` AND s.snapshot_date <= DATE '${asOf}'`;
+  const outerWindow = windowFrom ? ` AND s.snapshot_date >= DATE '${windowFrom}'` : "";
+  return `
+    SELECT a.name AS account_name, SUM(s.balance)::DOUBLE AS account_balance
+    FROM daily_account_snapshots s
+    JOIN accounts a ON a.id = s.account_id
+    WHERE s.snapshot_date = (
+      SELECT MAX(s2.snapshot_date) FROM daily_account_snapshots s2
+      WHERE s2.account_id = s.account_id${upper}${window}
+    )${outerUpper}${outerWindow}
+    GROUP BY 1
+  `;
+}
 
 export const GOLD = {
   revenueTotal: revenueTotal(),
@@ -36,8 +71,8 @@ export const GOLD = {
   revenueUs: revenueByCustomerCountry().get("US") ?? 0,
   revenueDe: revenueByCustomerCountry().get("DE") ?? 0,
   revenueNullCountry: revenueByCustomerCountry().get(null) ?? 0,
-  snapshotBalanceIfSummed: 1000 + 1100 + 900 + 400,
-  snapshotLatestTotal: 900 + 400,
+  snapshotBalanceIfSummed: DAILY_ACCOUNT_SNAPSHOTS.reduce((s, r) => s + (r.balance ?? 0), 0),
+  snapshotLatestTotal: lastAsOfTotal("9999-12-31"),
   chainFValue: 42,
 } as const;
 
@@ -72,11 +107,118 @@ export const GOLD_SQL = {
       AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-07-01'
       AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-08-01'
   `,
-  latestSnapshotBalance: `
-    SELECT SUM(balance)::DOUBLE AS v FROM daily_account_snapshots s
-    WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM daily_account_snapshots s2 WHERE s2.account_id = s.account_id)
-  `,
+  latestSnapshotBalance: lastAsOfSql("9999-12-31"),
   naiveSnapshotSum: `SELECT SUM(balance)::DOUBLE AS v FROM daily_account_snapshots`,
+  snapshotAsOfMar1: lastAsOfSql("2024-03-01"),
+  snapshotAsOfMar14: lastAsOfSql("2024-03-14"),
+  snapshotAsOfMar15: lastAsOfSql("2024-03-15"),
+  snapshotLastMonthCarry: lastAsOfSql("2024-02-29"),
+  snapshotLastMonthInWindow: lastAsOfSql("2024-02-29", "2024-02-01"),
+  snapshotEmptyYear: lastAsOfSql("2020-12-31"),
+  snapshotDstSpring: lastAsOfSql("2024-03-31"),
+  snapshotDstAutumn: lastAsOfSql("2024-10-27"),
+  snapshotByAccountLatest: lastAsOfByAccountSql("9999-12-31"),
+  snapshotByAccountAsOfMar14: lastAsOfByAccountSql("2024-03-14"),
+  snapshotAcmeLatest: `
+    SELECT SUM(s.balance)::DOUBLE AS v
+    FROM daily_account_snapshots s
+    JOIN accounts a ON a.id = s.account_id
+    WHERE a.name = 'Acme'
+      AND s.snapshot_date = (
+        SELECT MAX(s2.snapshot_date) FROM daily_account_snapshots s2 WHERE s2.account_id = s.account_id
+      )
+  `,
+  snapshotTwinCoLatest: `
+    SELECT SUM(s.balance)::DOUBLE AS v
+    FROM daily_account_snapshots s
+    JOIN accounts a ON a.id = s.account_id
+    WHERE a.name = 'TwinCo'
+      AND s.snapshot_date = (
+        SELECT MAX(s2.snapshot_date) FROM daily_account_snapshots s2 WHERE s2.account_id = s.account_id
+      )
+  `,
+  snapshotRawCountryLatest: `
+    SELECT a.country AS country, SUM(s.balance)::DOUBLE AS account_balance
+    FROM daily_account_snapshots s
+    JOIN accounts a ON a.id = s.account_id
+    WHERE s.snapshot_date = (
+      SELECT MAX(s2.snapshot_date) FROM daily_account_snapshots s2 WHERE s2.account_id = s.account_id
+    )
+    GROUP BY 1
+  `,
+  revenueFebruaryWebGb: `
+    SELECT SUM(o.net_amount)::DOUBLE AS v
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.id
+    WHERE o.status = 'completed'
+      AND o.channel = 'web'
+      AND c.country = 'GB'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+  `,
+  aovFebruary: `
+    SELECT (
+      SUM(net_amount) FILTER (
+        WHERE status = 'completed'
+          AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+          AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+      )::DOUBLE
+      / NULLIF(
+        COUNT(id) FILTER (
+          WHERE status = 'completed'
+            AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+            AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+        ),
+        0
+      )
+    ) AS v
+    FROM orders
+  `,
+  conversionLastMonthByChannel: `
+    SELECT channel,
+      (
+        COUNT(id) FILTER (
+          WHERE status = 'completed'
+            AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+            AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+        )::DOUBLE
+        / NULLIF(
+          COUNT(id) FILTER (
+            WHERE (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+              AND (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+          ),
+          0
+        )
+      ) AS conversion_rate
+    FROM orders
+    GROUP BY 1
+  `,
+  revenueFebruaryByCountry: `
+    SELECT c.country AS customer_country, SUM(o.net_amount)::DOUBLE AS revenue
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.id
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+    GROUP BY 1
+  `,
+  revenueFebruaryDiscount: `
+    SELECT o.discount_code AS discount_code, SUM(o.net_amount)::DOUBLE AS revenue
+    FROM orders o
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+    GROUP BY 1
+  `,
+  revenueThisFiscalYearByType: `
+    SELECT c.customer_type AS customer_type, SUM(o.net_amount)::DOUBLE AS revenue
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.id
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2023-04-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+    GROUP BY 1
+  `,
   revenueFebruaryCreatedAt: `
     SELECT SUM(net_amount)::DOUBLE AS v FROM orders
     WHERE status = 'completed'
@@ -105,6 +247,42 @@ export const GOLD_SQL = {
     WHERE status = 'completed'
       AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2023-04-01'
       AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
+  revenueThisWeekMonday: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-03-11'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
+  revenueThisWeekSunday: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-03-10'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
+  revenueLastWeekMonday: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-03-04'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-11'
+  `,
+  revenueLastWeekSunday: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-03-03'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-10'
+  `,
+  revenueThisQuarter: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-01-01'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
+  revenueLastQuarter: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2023-10-01'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-01-01'
   `,
 };
 

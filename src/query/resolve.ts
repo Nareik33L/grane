@@ -289,7 +289,7 @@ export function resolveQuery(
         query.time.period,
         model.config.project.timezone,
         defaults.now,
-        { fiscalStartsMonth: fiscalName ? MONTH_NUMBERS[fiscalName] : undefined },
+        { fiscalStartsMonth: fiscalName ? MONTH_NUMBERS[fiscalName] : undefined, weekStarts: model.config.project.week.starts },
       );
       from = range.from;
       to = range.to;

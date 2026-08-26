@@ -37,6 +37,7 @@ export const CATEGORIES = [
   "cache",
   "leakage",
   "properties",
+  "composition",
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];

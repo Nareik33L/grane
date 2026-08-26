@@ -11,6 +11,8 @@ import { BLOCKED_COLUMNS } from "../data.js";
 import type { Scenario } from "../types.js";
 import { GAUNTLET_NOW } from "../types.js";
 import { tryExecuteRawSql } from "../harness.js";
+import { compositionTraps } from "./composition.js";
+import { semiAdditiveTraps } from "./semi.js";
 
 function sc(partial: Scenario): Scenario {
   return { mode: "execute", guessSeverity: "critical", ...partial };
@@ -21,6 +23,7 @@ export function trapScenarios(): Scenario[] {
     ...joinTraps(),
     ...grainTraps(),
     ...metricTraps(),
+    ...semiAdditiveTraps(),
     ...timeTraps(),
     ...permissionTraps(),
     ...explorationTraps(),
@@ -29,6 +32,7 @@ export function trapScenarios(): Scenario[] {
     ...provenanceTraps(),
     ...readonlyTraps(),
     ...agentTraps(),
+    ...compositionTraps(),
   ];
 }
 
@@ -256,7 +260,7 @@ function metricTraps(): Scenario[] {
       category: "metrics",
       question: "Account Balance (no date).",
       interpretation:
-        "Semi-additive last-as-of: last snapshot per account, then SUM across accounts (1300, not 3400).",
+        "Semi-additive last-as-of: last snapshot per account, then SUM across accounts. Must not SUM every historical row.",
       expectedSqlBehaviour: "Last snapshot per account_id via MAX(snapshot_date), then SUM(balance).",
       query: { metrics: ["account_balance"] },
       disposition: "EXECUTE",
@@ -383,6 +387,116 @@ function timeTraps(): Scenario[] {
         trust: "governed",
         gold: { kind: "sql", sql: GOLD_SQL.revenueThisFiscalYear },
       },
+    }),
+    sc({
+      id: "time/this-week-monday",
+      category: "time",
+      question: "Revenue this week (week starts Monday).",
+      interpretation: "15 Mar 2024 is Friday. Monday week is 11–15 Mar. Order 5 is Sunday 10 Mar, so it is NOT in this week.",
+      expectedSqlBehaviour: "completed_at from 2024-03-11 through 2024-03-15.",
+      query: { metrics: ["revenue"], time: { period: "this_week" } },
+      disposition: "EXECUTE",
+      expectation: { kind: "execute", trust: "governed", gold: { kind: "sql", sql: GOLD_SQL.revenueThisWeekMonday } },
+      custom: async (ctx) => {
+        if (ctx.error) return { code: "FAIL", detail: String(ctx.error) };
+        const value = ctx.rows?.[0]?.["revenue"];
+        if (value != null && Number(value) !== 0) {
+          return { code: "CRITICAL FAIL", detail: `Monday this_week returned ${String(value)}; expected empty/0` };
+        }
+        return { code: "PASS", detail: "this_week Monday excludes 10 Mar" };
+      },
+    }),
+    sc({
+      id: "time/this-week-sunday",
+      category: "time",
+      question: "Revenue this week when week.starts is sunday.",
+      interpretation: "Sunday week containing 15 Mar starts 10 Mar. Order 5 (75) is in this week. Must not ignore week.starts.",
+      expectedSqlBehaviour: "completed_at from 2024-03-10 through 2024-03-15.",
+      config: (base) => ({
+        ...base,
+        project: { ...base.project, week: { starts: "sunday" } },
+      }),
+      query: { metrics: ["revenue"], time: { period: "this_week" } },
+      disposition: "EXECUTE",
+      expectation: {
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.revenueThisWeekSunday },
+      },
+    }),
+    sc({
+      id: "time/last-week-monday",
+      category: "time",
+      question: "Revenue last week (Monday start).",
+      interpretation: "Previous Monday week is 4–10 Mar, so Sunday 10 Mar order 5 (75) is last week, not this week.",
+      expectedSqlBehaviour: "completed_at 2024-03-04..2024-03-10.",
+      query: { metrics: ["revenue"], time: { period: "last_week" } },
+      disposition: "EXECUTE",
+      expectation: {
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.revenueLastWeekMonday },
+      },
+    }),
+    sc({
+      id: "time/last-week-sunday",
+      category: "time",
+      question: "Revenue last week when week.starts is sunday.",
+      interpretation: "Sunday last week is 3–9 Mar. Order 5 on 10 Mar is this week, not last week.",
+      expectedSqlBehaviour: "completed_at 2024-03-03..2024-03-09.",
+      config: (base) => ({
+        ...base,
+        project: { ...base.project, week: { starts: "sunday" } },
+      }),
+      query: { metrics: ["revenue"], time: { period: "last_week" } },
+      disposition: "EXECUTE",
+      expectation: { kind: "execute", trust: "governed", gold: { kind: "sql", sql: GOLD_SQL.revenueLastWeekSunday } },
+      custom: async (ctx) => {
+        if (ctx.error) return { code: "FAIL", detail: String(ctx.error) };
+        const value = ctx.rows?.[0]?.["revenue"];
+        if (value != null && Number(value) !== 0) {
+          return { code: "CRITICAL FAIL", detail: `Sunday last_week returned ${String(value)}; 10 Mar must not be included` };
+        }
+        return { code: "PASS", detail: "last_week Sunday excludes 10 Mar" };
+      },
+    }),
+    sc({
+      id: "time/this-quarter",
+      category: "time",
+      question: "Revenue this quarter (calendar Q1).",
+      interpretation: "Unambiguous calendar quarter: 1 Jan 2024 through 15 Mar 2024. Not fiscal Q1 (April).",
+      expectedSqlBehaviour: "completed_at 2024-01-01..2024-03-15. q1 remains clarify.",
+      query: { metrics: ["revenue"], time: { period: "this_quarter" } },
+      disposition: "EXECUTE",
+      expectation: {
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.revenueThisQuarter },
+      },
+    }),
+    sc({
+      id: "time/last-quarter",
+      category: "time",
+      question: "Revenue last quarter (calendar Q4 2023).",
+      interpretation: "1 Oct 2023 through 31 Dec 2023. Order 9 on 31 Dec is included.",
+      expectedSqlBehaviour: "completed_at 2023-10-01..2023-12-31.",
+      query: { metrics: ["revenue"], time: { period: "last_quarter" } },
+      disposition: "EXECUTE",
+      expectation: {
+        kind: "execute",
+        trust: "governed",
+        gold: { kind: "sql", sql: GOLD_SQL.revenueLastQuarter },
+      },
+    }),
+    sc({
+      id: "time/q1-still-clarify",
+      category: "time",
+      question: "Revenue q1.",
+      interpretation: "q1 stays ambiguous while a fiscal year is configured, even though this_quarter executes.",
+      expectedSqlBehaviour: "ambiguous_query.",
+      query: { metrics: ["revenue"], time: { period: "q1" } },
+      disposition: "CLARIFY",
+      expectation: { kind: "refuse", statuses: ["ambiguous_query"], reason: "calendar vs fiscal q1" },
     }),
   ];
 }

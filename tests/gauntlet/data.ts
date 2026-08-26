@@ -257,6 +257,11 @@ export const REFUNDS = [
 export const ACCOUNTS = [
   { id: 1, name: "Acme", country: "US" },
   { id: 2, name: "Globex", country: "GB" },
+  { id: 3, name: "Initech", country: "DE" },
+  { id: 4, name: "ClosedCo", country: "JP" },
+  { id: 5, name: "NullCo", country: "US" },
+  { id: 6, name: "TwinCo", country: "GB" },
+  { id: 7, name: "DstCo", country: "IE" },
 ];
 
 /** Alice sits in two accounts — metrics across the bridge must not double-count. */
@@ -351,12 +356,86 @@ export const EXCHANGE_RATES = [
   { date: "2024-01-20", from_currency: "USD", to_currency: "GBP", rate: 0.81 }, // duplicate date — dirty
 ];
 
-export const DAILY_ACCOUNT_SNAPSHOTS = [
+export interface SnapshotRow {
+  account_id: number;
+  snapshot_date: string;
+  balance: number | null;
+}
+
+/**
+ * Pathological last-as-of fixture.
+ *
+ * 1 Acme: history through 15 Mar 2024 (last 900). Leap-day row on 29 Feb.
+ * 2 Globex: gap from 31 Jan to 15 Mar (missing February).
+ * 3 Initech: created mid-March; first snapshot 10 Mar.
+ * 4 ClosedCo: last snapshot 28 Feb; no March row (entity gone).
+ * 5 NullCo: last snapshot balance is NULL.
+ * 6 TwinCo: two rows on the same civil date (dirty intra-day).
+ * 7 DstCo: UK DST spring (31 Mar) and autumn (27 Oct) civil dates.
+ */
+export const DAILY_ACCOUNT_SNAPSHOTS: SnapshotRow[] = [
+  { account_id: 1, snapshot_date: "2024-02-01", balance: 800 },
+  { account_id: 1, snapshot_date: "2024-02-29", balance: 850 },
   { account_id: 1, snapshot_date: "2024-03-01", balance: 1000 },
   { account_id: 1, snapshot_date: "2024-03-02", balance: 1100 },
   { account_id: 1, snapshot_date: "2024-03-15", balance: 900 },
+  { account_id: 2, snapshot_date: "2024-01-31", balance: 350 },
   { account_id: 2, snapshot_date: "2024-03-15", balance: 400 },
+  { account_id: 3, snapshot_date: "2024-03-10", balance: 50 },
+  { account_id: 3, snapshot_date: "2024-03-15", balance: 75 },
+  { account_id: 4, snapshot_date: "2024-02-28", balance: 200 },
+  { account_id: 5, snapshot_date: "2024-03-01", balance: 10 },
+  { account_id: 5, snapshot_date: "2024-03-15", balance: null },
+  { account_id: 6, snapshot_date: "2024-03-15", balance: 30 },
+  { account_id: 6, snapshot_date: "2024-03-15", balance: 70 },
+  { account_id: 7, snapshot_date: "2024-03-30", balance: 100 },
+  { account_id: 7, snapshot_date: "2024-03-31", balance: 110 },
+  { account_id: 7, snapshot_date: "2024-10-26", balance: 120 },
+  { account_id: 7, snapshot_date: "2024-10-27", balance: 130 },
 ];
+
+/** Last snapshot date on or before `asOf` (inclusive YYYY-MM-DD). */
+export function lastAsOfPerAccount(
+  asOf: string,
+  windowFrom?: string,
+): Map<number, { date: string; balance: number | null }> {
+  const byAccount = new Map<number, SnapshotRow[]>();
+  for (const row of DAILY_ACCOUNT_SNAPSHOTS) {
+    if (row.snapshot_date > asOf) continue;
+    if (windowFrom && row.snapshot_date < windowFrom) continue;
+    const list = byAccount.get(row.account_id) ?? [];
+    list.push(row);
+    byAccount.set(row.account_id, list);
+  }
+  const out = new Map<number, { date: string; balance: number | null }>();
+  for (const [id, rows] of byAccount) {
+    const maxDate = rows.reduce((latest, row) => (row.snapshot_date > latest ? row.snapshot_date : latest), "");
+    const atMax = rows.filter((row) => row.snapshot_date === maxDate);
+    const numeric = atMax.filter((row) => row.balance != null).map((row) => row.balance as number);
+    out.set(id, { date: maxDate, balance: numeric.length === 0 ? null : sum(numeric) });
+  }
+  return out;
+}
+
+/** SUM of last-as-of balances; NULL last snapshots do not contribute. */
+export function lastAsOfTotal(asOf: string, windowFrom?: string): number {
+  let total = 0;
+  for (const row of lastAsOfPerAccount(asOf, windowFrom).values()) {
+    if (row.balance != null) total += row.balance;
+  }
+  return total;
+}
+
+export function lastAsOfByAccountName(asOf: string, windowFrom?: string): Map<string, number | null> {
+  const names = new Map(ACCOUNTS.map((a) => [a.id, a.name]));
+  const out = new Map<string, number | null>();
+  for (const [id, row] of lastAsOfPerAccount(asOf, windowFrom)) {
+    const name = names.get(id);
+    if (!name) continue;
+    out.set(name, row.balance);
+  }
+  return out;
+}
 
 export const SALES_REGIONS = [
   { country: "GB", region: "EMEA" },

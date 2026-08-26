@@ -39,9 +39,13 @@ const PERIODS = [
   "4w",
   "this-month",
   "LAST_MONTH",
-  "this_fiscal_year",
-  "last_fiscal_year",
-  "fy2024",
+    "this_fiscal_year",
+    "last_fiscal_year",
+    "this_week",
+    "last_week",
+    "this_quarter",
+    "last_quarter",
+    "fy2024",
   "q1",
   "ytd",
   "not_a_period",
@@ -418,6 +422,10 @@ export function generateTimePeriods(): Scenario[] {
     "LAST_MONTH",
     "this_fiscal_year",
     "last_fiscal_year",
+    "this_week",
+    "last_week",
+    "this_quarter",
+    "last_quarter",
   ]);
   const clarify = new Set(["ytd", "q1", "fy2024"]);
   for (const period of PERIODS) {

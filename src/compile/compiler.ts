@@ -8,6 +8,7 @@ import { exclusiveEnd } from "../query/time.js";
 import { ambiguousQuery, invalidQuery, unsafeQuery } from "../errors.js";
 import { getDialect, postgresDialect, type SqlDialect } from "../connectors/dialect.js";
 import { compilerNamespace } from "../connectors/create.js";
+import type { DatabaseSchema } from "../connectors/types.js";
 
 /**
  * The deterministic query compiler.
@@ -64,7 +65,11 @@ export function quoteIdent(name: string): string {
   return postgresDialect.ident(name);
 }
 
-export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): CompiledQuery {
+export function compileQuery(
+  model: SemanticModel,
+  resolved: ResolvedQuery,
+  warehouseSchema?: DatabaseSchema | null,
+): CompiledQuery {
   const dialect = getDialect(model.config.connection.type);
   const schema = compilerNamespace(model.config.connection);
   const timezone = model.config.project.timezone;
@@ -74,7 +79,22 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   const col = (ref: ColumnRef): string => `${ident(ref.table)}.${ident(ref.column)}`;
   const qualify = (table: string): string => dialect.qualifyTable(schema, table);
 
-  const localTime = (ref: ColumnRef): string => dialect.localizeTime(col(ref), timezone);
+  const localTime = (ref: ColumnRef): string => {
+    if (isCivilDateColumn(warehouseSchema, ref)) return col(ref);
+    return dialect.localizeTime(col(ref), timezone);
+  };
+
+  const weekStarts = model.config.project.week.starts;
+  const trunc = (grain: string, expr: string): string => {
+    if (grain === "week" && weekStarts === "sunday") {
+      if (dialect.type === "clickhouse") return `toStartOfWeek(${expr}, 0)`;
+      if (dialect.type === "mysql") {
+        return `DATE_SUB(DATE(${expr}), INTERVAL DAYOFWEEK(${expr}) - 1 DAY)`;
+      }
+      return `(${dialect.dateTrunc("week", `(${expr} + INTERVAL '1 day')`)} - INTERVAL '1 day')`;
+    }
+    return dialect.dateTrunc(grain, expr);
+  };
 
   // ---- Join planning for the outer query (dimensions, filters, time, direct measures) ----
   const joinedTables = new Set<string>([baseTable]);
@@ -202,7 +222,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     if (metricWhere) whereParts.push(metricWhere);
 
     const grainExpr = resolved.time?.grain
-      ? dialect.dateTrunc(resolved.time.grain, localTime(timeRef))
+      ? trunc(resolved.time.grain, localTime(timeRef))
       : null;
     const cteSql = [
       `${ident(cteName)} AS (`,
@@ -403,7 +423,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
   if (resolved.time?.grain) {
     const alias = timeAlias(resolved.time.grain);
-    const expr = dialect.dateTrunc(resolved.time.grain, localTime(resolved.time.column));
+    const expr = trunc(resolved.time.grain, localTime(resolved.time.column));
     selects.push(`${expr} AS ${ident(alias)}`);
     groupBy.push(String(selects.length));
   }
@@ -609,4 +629,15 @@ function compileOperator(
       return `${columnExpr} ${op} ${params.add(value as Scalar)}`;
     }
   }
+}
+
+/** Civil DATE columns must not be timezone-shifted; last-as-of is a calendar date. */
+function isCivilDateColumn(schema: DatabaseSchema | null | undefined, ref: ColumnRef): boolean {
+  if (!schema) return false;
+  const table = schema.tables.find((item) => item.name === ref.table);
+  const column = table?.columns.find((item) => item.name === ref.column);
+  if (!column) return false;
+  const type = column.dataType.toLowerCase();
+  if (type.includes("timestamp") || type.includes("datetime") || type.includes("time")) return false;
+  return type === "date" || /\bdate\b/.test(type);
 }

@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { allScenarios } from "./catalog.js";
 import { GOLD, GOLD_SQL, tablesMatchScalar } from "./gold.js";
 import { createKernel, runScenario, type Harness } from "./harness.js";
-import { withDisabledFanout, withEmptyExclude } from "./mutations.js";
+import { withDisabledFanout, withEmptyExclude, withNaiveSemiAdditive } from "./mutations.js";
 import { buildScorecard } from "./scoring.js";
 import type { ScenarioResult } from "./types.js";
 import { createGauntletWarehouse, duckdbAvailable } from "./warehouse.js";
@@ -57,6 +57,10 @@ describe.skipIf(!available)("grane gauntlet", () => {
     const pay = Number((await warehouse.runGold(GOLD_SQL.successfulPayments))[0]?.["v"]);
     if (!tablesMatchScalar(pay, GOLD.successfulPayments)) {
       goldFailures.push(`payments TS ${GOLD.successfulPayments} !== SQL ${pay}`);
+    }
+    const snap = Number((await warehouse.runGold(GOLD_SQL.latestSnapshotBalance))[0]?.["v"]);
+    if (!tablesMatchScalar(snap, GOLD.snapshotLatestTotal)) {
+      goldFailures.push(`snapshot last-as-of TS ${GOLD.snapshotLatestTotal} !== SQL ${snap}`);
     }
 
     const scenarios = allScenarios();
@@ -115,6 +119,7 @@ describe.skipIf(!available)("grane gauntlet", () => {
       "cache",
       "leakage",
       "properties",
+      "composition",
     ]) {
       expect(cats.has(required as never), `missing category ${required}`).toBe(true);
     }
@@ -150,6 +155,16 @@ describe.skipIf(!available)("grane gauntlet", () => {
     expect(
       verdict.code === "CRITICAL FAIL" || verdict.code === "SECURITY CRITICAL" || verdict.code === "FAIL",
       `gauntlet stayed green under a missing cardinality check: ${verdict.code} ${verdict.detail}`,
+    ).toBe(true);
+  });
+
+  it("detects last-as-of compiled as a naive SUM (mutation testing)", async () => {
+    const scenario = results.find((r) => r.scenario.id === "semi/unbounded-not-naive-sum")?.scenario;
+    expect(scenario).toBeTruthy();
+    const verdict = await withNaiveSemiAdditive(harness.kernel, () => runScenario(scenario!, harness));
+    expect(
+      verdict.code === "CRITICAL FAIL" || verdict.code === "SECURITY CRITICAL" || verdict.code === "FAIL",
+      `gauntlet stayed green when semi-additive last-as-of was disabled: ${verdict.code} ${verdict.detail}`,
     ).toBe(true);
   });
 

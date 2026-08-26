@@ -39,6 +39,10 @@ export const SUPPORTED_RELATIVE_PERIODS = [
   "last_year",
   "this_fiscal_year",
   "last_fiscal_year",
+  "this_week",
+  "last_week",
+  "this_quarter",
+  "last_quarter",
   "<N>d",
   "last_<N>d",
   "<N>w",
@@ -131,6 +135,8 @@ export interface DateRange {
 export interface RelativeRangeOptions {
   /** 1–12. Required for this_fiscal_year / last_fiscal_year. */
   fiscalStartsMonth?: number;
+  /** Calendar week start. Default monday. Used by this_week / last_week. */
+  weekStarts?: "monday" | "sunday";
 }
 
 /**
@@ -138,7 +144,8 @@ export interface RelativeRangeOptions {
  *
  * Supported: `<N>d` (N days ending today), `<N>w`, `<N>m` (calendar months
  * ending today), `today`, `yesterday`, `this_month`, `last_month`,
- * `this_year`, `last_year`, `this_fiscal_year`, `last_fiscal_year`.
+ * `this_year`, `last_year`, `this_week`, `last_week`, `this_quarter`,
+ * `last_quarter`, `this_fiscal_year`, `last_fiscal_year`.
  */
 export function resolveRelativeRange(
   spec: string,
@@ -173,6 +180,16 @@ export function resolveRelativeRange(
         from: formatDate({ year: today.year - 1, month: 1, day: 1 }),
         to: formatDate({ year: today.year - 1, month: 12, day: 31 }),
       };
+    case "this_week":
+      return resolveThisWeek(today, options.weekStarts ?? "monday");
+    case "last_week":
+      return resolveLastWeek(today, options.weekStarts ?? "monday");
+    case "this_quarter":
+      return { from: formatDate(startOfQuarter(today)), to: formatDate(today) };
+    case "last_quarter": {
+      const lastEnd = addDays(startOfQuarter(today), -1);
+      return { from: formatDate(startOfQuarter(lastEnd)), to: formatDate(lastEnd) };
+    }
     case "this_fiscal_year":
       return resolveThisFiscalYear(today, spec, options.fiscalStartsMonth);
     case "last_fiscal_year":
@@ -263,4 +280,26 @@ function resolveQ1(today: CalendarDate, fiscalStartsMonth: number | undefined): 
   const start = { year: today.year, month: 1, day: 1 };
   const quarterEnd = { year: today.year, month: 3, day: 31 };
   return { from: formatDate(start), to: formatDate(minDate(today, quarterEnd)) };
+}
+
+/** First day of the calendar week containing `date`. */
+export function startOfWeek(date: CalendarDate, starts: "monday" | "sunday"): CalendarDate {
+  const dow = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
+  const daysFromStart = starts === "sunday" ? dow : (dow + 6) % 7;
+  return addDays(date, -daysFromStart);
+}
+
+/** 1 Jan / 1 Apr / 1 Jul / 1 Oct of the calendar quarter containing `date`. */
+export function startOfQuarter(date: CalendarDate): CalendarDate {
+  const month = Math.floor((date.month - 1) / 3) * 3 + 1;
+  return { year: date.year, month, day: 1 };
+}
+
+function resolveThisWeek(today: CalendarDate, starts: "monday" | "sunday"): DateRange {
+  return { from: formatDate(startOfWeek(today, starts)), to: formatDate(today) };
+}
+
+function resolveLastWeek(today: CalendarDate, starts: "monday" | "sunday"): DateRange {
+  const thisStart = startOfWeek(today, starts);
+  return { from: formatDate(addDays(thisStart, -7)), to: formatDate(addDays(thisStart, -1)) };
 }

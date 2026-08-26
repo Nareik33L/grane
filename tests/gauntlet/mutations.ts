@@ -43,6 +43,23 @@ export async function withEmptyExclude<T>(kernel: GraneKernel, fn: () => Promise
   }
 }
 
+export async function withNaiveSemiAdditive<T>(kernel: GraneKernel, fn: () => Promise<T>): Promise<T> {
+  const restored: Array<{ metric: { config: { additive?: "full" | "semi" | "none" } }; additive: "semi" }> = [];
+  for (const metric of kernel.model.metrics.values()) {
+    if (metric.config.additive === "semi") {
+      restored.push({ metric, additive: "semi" });
+      metric.config.additive = "full";
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const item of restored) {
+      item.metric.config.additive = item.additive;
+    }
+  }
+}
+
 export async function expectGauntletToCatch(
   harness: Harness,
   scenario: Scenario,

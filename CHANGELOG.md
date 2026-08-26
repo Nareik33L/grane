@@ -16,6 +16,13 @@
     `project.fiscal_year.starts_month`. `ytd` / `q1` / `fyYYYY` require
     clarification when a fiscal year is configured. Unknown periods and
     impossible civil dates (`2023-02-29`) are structured `invalid_query`.
+  - Civil `DATE` columns are last-as-of'd as calendar dates (no timezone
+    shift). `this_week` / `last_week` honour `project.week.starts`.
+    `this_quarter` / `last_quarter` are unambiguous calendar quarters.
+- Gauntlet: the original 908 scenarios stay as regression tests. New
+  last-as-of adversarial cases, a `composition` category (COMPOSITION HELL)
+  with independent gold, and week/quarter coverage. A mutation that compiles
+  semi-additive metrics as a naive SUM must fail the suite.
 - Gauntlet scenarios carry an expected disposition (`EXECUTE`, `EXPLORE`,
   `CLARIFY`, `REFUSE_SAFETY`, `REFUSE_POLICY`, `INVALID`, `UNSUPPORTED`).
   A refusal cannot pass an `EXECUTE` / `EXPLORE` scenario.

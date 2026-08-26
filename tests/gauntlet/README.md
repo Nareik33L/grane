@@ -94,6 +94,12 @@ Do not delete, weaken, or rewrite scenarios merely to raise the score.
 Do not turn executable failures into refusals.
 Do not reclassify a scenario merely because Grane currently cannot satisfy it.
 
+The original 908 scenarios are permanent regression tests. New coverage is
+additive: last-as-of adversarial cases (`tests/gauntlet/scenarios/semi.ts`)
+and COMPOSITION HELL (`composition` category) combine features that already
+work in isolation. Every composition has gold from TypeScript fixtures or
+reviewed SQL, never from Grane.
+
 ## Ground truth
 
 Every numeric check has two independent sources, neither of which is Grane:
