@@ -1,6 +1,6 @@
 # Connect an AI agent to Grane
 
-Grane is the analytics layer between **your AI agent** and **your database**.
+Grane is the analytics harness between **your AI agent** and **your warehouse**.
 This guide is client-agnostic: it applies to ChatGPT, Claude, Gemini, Cursor,
 or any MCP-compatible agent.
 

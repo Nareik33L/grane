@@ -49,7 +49,7 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
     { name: info.name, version: info.version },
     {
       instructions:
-        "Grane is a deterministic semantic-first analytics layer. Use catalog() to discover approved " +
+        "Grane is a deterministic analytics harness. Use catalog() to discover approved " +
         "metrics and dimensions, then query() with a Grane Query Model v1 request. Grane compiles " +
         "the SQL itself; never write SQL." +
         explorationHint +
