@@ -50,10 +50,19 @@ export const metricFiltersSchema = z.union([
   z.array(metricFilterListItem),
 ]);
 
+/** Where a governed definition was loaded from. Native YAML is `native`; dbt/MetricFlow is `dbt`. */
+export const definitionSourceSchema = z.object({
+  provider: z.string(),
+  /** Project-relative file or artifact the definition was read from. */
+  path: z.string().optional(),
+});
+export type DefinitionSource = z.infer<typeof definitionSourceSchema>;
+
 export const entityConfigSchema = z.object({
   table: z.string(),
   primary_key: z.string().default("id"),
   description: z.string().optional(),
+  source: definitionSourceSchema.optional(),
 });
 export type EntityConfig = z.infer<typeof entityConfigSchema>;
 
@@ -71,6 +80,7 @@ export const metricConfigSchema = z
     unit: z.string().optional(),
     status: metricStatusSchema.default("approved"),
     synonyms: z.array(z.string()).default([]),
+    source: definitionSourceSchema.optional(),
   })
   .refine((m) => (m.type === "ratio" ? Boolean(m.numerator && m.denominator) : Boolean(m.sql)), {
     message:
@@ -83,6 +93,7 @@ export const dimensionConfigSchema = z.object({
   entity: z.string(),
   sql: z.string(),
   type: z.enum(["string", "number", "boolean", "timestamp", "date"]).optional(),
+  source: definitionSourceSchema.optional(),
 });
 export type DimensionConfig = z.infer<typeof dimensionConfigSchema>;
 
@@ -90,6 +101,7 @@ export const relationshipConfigSchema = z.object({
   from: z.string(),
   to: z.string(),
   type: cardinalitySchema,
+  source: definitionSourceSchema.optional(),
 });
 export type RelationshipConfig = z.infer<typeof relationshipConfigSchema>;
 
@@ -187,11 +199,30 @@ export const explorationConfigSchema = z.object({
 });
 export type ExplorationConfig = z.infer<typeof explorationConfigSchema>;
 
+/**
+ * Extra semantic inputs. Native YAML in the Grane project is always loaded.
+ * Additional providers (dbt/MetricFlow today; Cube, LookML, … later) contribute
+ * the same entity/metric/dimension/relationship maps so agents query one kernel.
+ */
+export const semanticProviderConfigSchema = z
+  .object({
+    type: z.string().min(1),
+    /** Root of the upstream project (dbt_project.yml, cube.js, …). */
+    project: z.string().optional(),
+    /** dbt MetricFlow artifact (defaults to <project>/target/semantic_manifest.json). */
+    semantic_manifest: z.string().optional(),
+    /** dbt manifest.json for physical relation names (defaults to <project>/target/manifest.json). */
+    dbt_manifest: z.string().optional(),
+  })
+  .passthrough();
+export type SemanticProviderConfig = z.infer<typeof semanticProviderConfigSchema>;
+
 export const graneConfigSchema = z.object({
   project: projectConfigSchema.prefault({}),
   connection: connectionConfigSchema.prefault({}),
   limits: limitsConfigSchema.prefault({}),
   exploration: explorationConfigSchema.prefault({}),
+  providers: z.array(semanticProviderConfigSchema).default([]),
   entities: z.record(z.string(), entityConfigSchema).default({}),
   metrics: z.record(z.string(), metricConfigSchema).default({}),
   dimensions: z.record(z.string(), dimensionConfigSchema).default({}),

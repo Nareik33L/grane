@@ -26,7 +26,8 @@ see `tests/benchmark/README.md`.
 
 In scope: metrics, dimensions, relationships, validation, the SQL compiler,
 join/grain safety, provenance, controlled exploration of raw warehouse
-columns, MCP, CLI, and database connectors.
+columns, semantic providers (native YAML, dbt/MetricFlow, and future loaders),
+MCP, CLI, and database connectors.
 
 Out of scope: dashboards, chart builders, a built-in chatbot, hosted
 analytics, unrestricted agent-written SQL, or anything that makes Grane

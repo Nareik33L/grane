@@ -31,7 +31,10 @@ function projectDir(): string {
 
 function loadKernel(): GraneKernel {
   const loaded = loadConfig(projectDir());
-  return new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
+  return new GraneKernel(loaded.config, {
+    projectDir: loaded.projectDir,
+    providerWarnings: loaded.warnings,
+  });
 }
 
 function fail(err: unknown): never {
@@ -161,6 +164,14 @@ program
       console.log(`${validMetrics}/${report.metrics.length} metrics valid`);
       console.log(`${report.dimensionCount} dimensions defined`);
       console.log(`${report.relationshipCount} relationships defined`);
+      const providers = kernel.serverInfo().semantic_providers;
+      console.log(`providers     ${providers.join(", ")}`);
+      if (kernel.providerWarnings.length > 0) {
+        console.log("");
+        for (const warning of kernel.providerWarnings) {
+          console.log(`WARNING ${warning}`);
+        }
+      }
       if (!options.offline) console.log(`schema checks: live`);
       if (!report.ok) process.exit(1);
     } catch (err) {
@@ -288,6 +299,7 @@ program
       const catalog = await kernel.catalog();
       console.log("Grane MCP Server\n");
       console.log(`Database      ${kernel.config.connection.type}`);
+      console.log(`Providers     ${kernel.serverInfo().semantic_providers.join(", ")}`);
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
       if (catalog.exploration.enabled) {

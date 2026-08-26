@@ -1,0 +1,64 @@
+semantic_models:
+  - name: orders
+    description: Customer orders at order grain.
+    model: ref('orders')
+    defaults:
+      agg_time_dimension: completed_at
+    entities:
+      - name: order
+        type: primary
+        expr: id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: completed_at
+        type: time
+        expr: completed_at
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+        expr: status
+      - name: channel
+        type: categorical
+        expr: channel
+    measures:
+      - name: revenue
+        description: Net revenue from completed orders.
+        agg: sum
+        expr: net_amount
+        create_metric: true
+        filter: "{{ Dimension('order__status') }} = 'completed'"
+      - name: orders
+        description: Number of completed orders.
+        agg: count
+        expr: id
+        create_metric: true
+        filter: "{{ Dimension('order__status') }} = 'completed'"
+
+  - name: payments
+    model: ref('payments')
+    defaults:
+      agg_time_dimension: paid_at
+    entities:
+      - name: payment
+        type: primary
+        expr: id
+      - name: order
+        type: foreign
+        expr: order_id
+    dimensions:
+      - name: paid_at
+        type: time
+        expr: paid_at
+      - name: payment_status
+        type: categorical
+        expr: status
+    measures:
+      - name: payments_received
+        description: Successfully collected payments.
+        agg: sum
+        expr: amount
+        create_metric: true
+        filter: "{{ Dimension('payment__payment_status') }} = 'succeeded'"

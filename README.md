@@ -95,6 +95,8 @@ MCP tool reference: **[docs/mcp-setup.md](docs/mcp-setup.md)**
 
 Warehouse connections: **[docs/warehouses.md](docs/warehouses.md)**
 
+Semantic providers (dbt / MetricFlow): **[docs/providers.md](docs/providers.md)**
+
 ## Quickstart (with the example database)
 
 ```bash
@@ -205,6 +207,22 @@ relationships:
 
 `grane validate` checks every reference against the live schema, verifies
 types, and detects unsafe fan-out before an agent ever runs a query.
+
+## Existing semantic models (dbt / MetricFlow)
+
+If the company already defines Revenue in dbt, do not copy it into Grane YAML.
+Add a provider and Grane imports the MetricFlow graph at load time:
+
+```yaml
+# grane.yml
+providers:
+  - type: dbt
+    project: ../jaffle_shop
+```
+
+Native YAML still works for metrics dbt does not have. Duplicate names are
+refused. See **[docs/providers.md](docs/providers.md)**. A runnable example
+is `example/analytics-from-dbt` (DuckDB warehouse + `example/dbt-shop`).
 
 ## The MCP surface
 

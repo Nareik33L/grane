@@ -38,7 +38,13 @@ limits:
 #     - users.password_hash
 #     - customers.ssn
 
-# Entities are the business objects your metrics are counted at (their grain).
+# Extra governed definitions you already maintain elsewhere (dbt/MetricFlow today).
+# Native YAML in this directory is always loaded; providers add to it.
+# providers:
+#   - type: dbt
+#     project: ../jaffle_shop
+#     # semantic_manifest: ../jaffle_shop/target/semantic_manifest.json
+
 entities: {}
 # Example:
 # entities:

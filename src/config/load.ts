@@ -3,22 +3,29 @@ import { isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { graneConfigSchema, type GraneConfig } from "./schema.js";
 import { configError } from "../errors.js";
+import { mergeContributions } from "../providers/merge.js";
+import { loadConfiguredProviders } from "../providers/registry.js";
+import { emptyContribution, type SemanticContribution } from "../providers/types.js";
 
 /**
  * A Grane project is a directory containing grane.yml plus any number of
  * additional YAML files (metrics.yml, dimensions.yml, relationships.yml, ...).
  * All files are parsed and merged by top-level key, so users are free to
  * organise definitions across files however they like.
+ *
+ * Optional `providers:` entries (dbt/MetricFlow, later Cube/LookML/…) are
+ * loaded afterwards and merged into the same maps.
  */
 
 export interface LoadedConfig {
   config: GraneConfig;
   projectDir: string;
   files: string[];
+  warnings: string[];
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
-const SINGLETON_KEYS = ["project", "connection", "limits", "exploration"] as const;
+const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "providers"] as const;
 
 /** Resolve the project directory: the given dir, or ./analytics under it if grane.yml lives there. */
 export function findProjectDir(startDir: string): string {
@@ -47,6 +54,25 @@ function interpolateEnv(value: unknown): unknown {
     );
   }
   return value;
+}
+
+function nativeContribution(config: GraneConfig): SemanticContribution {
+  const stamp = <T extends { source?: { provider: string; path?: string } }>(value: T): T =>
+    value.source ? value : { ...value, source: { provider: "native" } };
+  const contribution = emptyContribution();
+  for (const [name, entity] of Object.entries(config.entities)) {
+    contribution.entities[name] = stamp(entity);
+  }
+  for (const [name, metric] of Object.entries(config.metrics)) {
+    contribution.metrics[name] = stamp(metric);
+  }
+  for (const [name, dimension] of Object.entries(config.dimensions)) {
+    contribution.dimensions[name] = stamp(dimension);
+  }
+  for (const [name, relationship] of Object.entries(config.relationships)) {
+    contribution.relationships[name] = stamp(relationship);
+  }
+  return contribution;
 }
 
 export function loadConfig(projectDir: string): LoadedConfig {
@@ -123,7 +149,26 @@ export function loadConfig(projectDir: string): LoadedConfig {
     throw configError(`Invalid Grane configuration:\n${issues}`, parsed.error.issues);
   }
 
-  const config = parsed.data;
+  const native = nativeContribution(parsed.data);
+  const extras = loadConfiguredProviders(parsed.data.providers, { projectDir: dir });
+  const combined = mergeContributions([native, ...extras]);
+
+  const withMaps = {
+    ...parsed.data,
+    entities: combined.entities,
+    metrics: combined.metrics,
+    dimensions: combined.dimensions,
+    relationships: combined.relationships,
+  };
+  const finalParsed = graneConfigSchema.safeParse(withMaps);
+  if (!finalParsed.success) {
+    const issues = finalParsed.error.issues
+      .map((i) => `  ${i.path.join(".")}: ${i.message}`)
+      .join("\n");
+    throw configError(`Invalid semantic provider output:\n${issues}`, finalParsed.error.issues);
+  }
+
+  const config = finalParsed.data;
   const duckPath = config.connection.path;
   if (
     config.connection.type === "duckdb" &&
@@ -135,5 +180,5 @@ export function loadConfig(projectDir: string): LoadedConfig {
     config.connection.path = resolve(dir, duckPath);
   }
 
-  return { config, projectDir: dir, files };
+  return { config, projectDir: dir, files, warnings: combined.warnings };
 }

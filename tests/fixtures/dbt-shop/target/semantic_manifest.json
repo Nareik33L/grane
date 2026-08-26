@@ -1,0 +1,42 @@
+{
+  "semantic_models": [
+    {
+      "name": "orders",
+      "description": "Orders from the semantic manifest",
+      "defaults": { "agg_time_dimension": "completed_at" },
+      "node_relation": {
+        "alias": "orders",
+        "schema_name": "public",
+        "database": "analytics",
+        "relation_name": "analytics.public.orders"
+      },
+      "primary_entity": "order",
+      "entities": [
+        { "name": "order", "type": "primary", "expr": "id" },
+        { "name": "customer", "type": "foreign", "expr": "customer_id" }
+      ],
+      "dimensions": [
+        { "name": "completed_at", "type": "time", "expr": "completed_at" },
+        { "name": "status", "type": "categorical", "expr": "status" }
+      ],
+      "measures": [
+        {
+          "name": "order_total",
+          "agg": "sum",
+          "expr": "net_amount",
+          "create_metric": false
+        }
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "name": "manifest_revenue",
+      "description": "Revenue from semantic_manifest.json",
+      "type": "SIMPLE",
+      "type_params": {
+        "measure": { "name": "order_total" }
+      }
+    }
+  ]
+}

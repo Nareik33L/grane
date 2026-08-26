@@ -1,0 +1,10 @@
+metrics:
+  - name: average_order_value
+    description: Average net revenue per completed order.
+    type: ratio
+    label: AOV
+    type_params:
+      numerator:
+        name: revenue
+      denominator:
+        name: orders

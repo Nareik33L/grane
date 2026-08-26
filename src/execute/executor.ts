@@ -12,7 +12,7 @@ export interface Provenance {
   governed: string[];
   ungoverned: string[];
   warning: string | null;
-  metrics: Record<string, { definition_version: string }>;
+  metrics: Record<string, { definition_version: string; source?: { provider: string; path?: string } }>;
   generated_sql: string;
   params: Scalar[];
   executed_at: string;
@@ -58,7 +58,10 @@ export async function executeCompiled(
     metrics: Object.fromEntries(
       Object.entries(compiled.metricVersions).map(([name, version]) => [
         name,
-        { definition_version: version },
+        {
+          definition_version: version,
+          ...(compiled.metricSources[name] ? { source: compiled.metricSources[name] } : {}),
+        },
       ]),
     ),
     generated_sql: compiled.sql,

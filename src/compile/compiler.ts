@@ -44,6 +44,7 @@ export interface CompiledQuery {
   params: Scalar[];
   plan: QueryPlan;
   metricVersions: Record<string, string>;
+  metricSources: Record<string, { provider: string; path?: string }>;
   trust: ResolvedQuery["trust"];
   governed: string[];
   ungoverned: string[];
@@ -111,6 +112,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   const cteJoins: string[] = [];
   const preAggregations: PreAggregation[] = [];
   const metricVersions: Record<string, string> = {};
+  const metricSources: Record<string, { provider: string; path?: string }> = {};
 
   interface MetricExpr {
     expr: string;
@@ -249,6 +251,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
   const compileMetricExpr = (metric: Metric): string => {
     metricVersions[metric.name] = metric.definitionVersion;
+    if (metric.config.source) metricSources[metric.name] = metric.config.source;
     if (metric.config.type === "ratio") {
       const numerator = model.metrics.get(metric.config.numerator!);
       const denominator = model.metrics.get(metric.config.denominator!);
@@ -259,6 +262,8 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       }
       metricVersions[numerator.name] = numerator.definitionVersion;
       metricVersions[denominator.name] = denominator.definitionVersion;
+      if (numerator.config.source) metricSources[numerator.name] = numerator.config.source;
+      if (denominator.config.source) metricSources[denominator.name] = denominator.config.source;
       const num = compileScalarMetric(numerator).expr;
       const den = compileScalarMetric(denominator).expr;
       return `${dialect.castNumeric(num)} / NULLIF(${dialect.castNumeric(den)}, 0)`;
@@ -391,6 +396,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       ],
     },
     metricVersions,
+    metricSources,
     trust: resolved.trust,
     governed: resolved.governed,
     ungoverned: resolved.ungoverned,

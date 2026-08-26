@@ -9,6 +9,8 @@ export {
   type DimensionConfig,
   type RelationshipConfig,
   type ExplorationConfig,
+  type SemanticProviderConfig,
+  type DefinitionSource,
 } from "./config/schema.js";
 export { SemanticModel, type Metric, type Dimension } from "./model/model.js";
 export { RelationshipGraph } from "./model/graph.js";
@@ -43,3 +45,5 @@ export { GraneError, type Refusal } from "./errors.js";
 export { explorationPolicy } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";
+export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES } from "./providers/registry.js";
+export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

@@ -1,0 +1,20 @@
+# Grane project that does not redefine metrics. It points at the example
+# DuckDB warehouse and reads MetricFlow YAML from ../dbt-shop.
+
+project:
+  name: grane-from-dbt
+  timezone: UTC
+
+connection:
+  type: duckdb
+  path: ../analytics-duckdb/warehouse.duckdb
+  schema: main
+
+exploration:
+  enabled: true
+  schemas:
+    - main
+
+providers:
+  - type: dbt
+    project: ../dbt-shop

@@ -21,6 +21,7 @@ export interface ServerInfo {
   database: string;
   capabilities: string[];
   exploration: { enabled: boolean };
+  semantic_providers: string[];
 }
 
 export interface CatalogMetric {
@@ -34,6 +35,7 @@ export interface CatalogMetric {
   time_dimension: string | null;
   definition_version: string;
   available_dimensions: string[];
+  source: { provider: string; path?: string };
 }
 
 export interface CatalogDimension {
@@ -41,12 +43,14 @@ export interface CatalogDimension {
   description: string | null;
   entity: string;
   type: string | null;
+  source: { provider: string; path?: string };
 }
 
 export interface CatalogEntity {
   name: string;
   table: string;
   description: string | null;
+  source: { provider: string; path?: string };
 }
 
 export interface CatalogExploration {
@@ -74,7 +78,13 @@ export interface ExplainResult {
   base_table: string;
   metrics: Record<
     string,
-    { description: string | null; type: string; definition_version: string; status: string }
+    {
+      description: string | null;
+      type: string;
+      definition_version: string;
+      status: string;
+      source: { provider: string; path?: string };
+    }
   >;
   plan: CompiledQuery["plan"];
   generated_sql: string;
@@ -85,6 +95,7 @@ export interface ExplainResult {
 export interface KernelOptions {
   projectDir?: string;
   schema?: DatabaseSchema;
+  providerWarnings?: string[];
 }
 
 /**
@@ -95,6 +106,7 @@ export class GraneKernel {
   readonly model: SemanticModel;
   readonly config: GraneConfig;
   readonly projectDir: string | undefined;
+  readonly providerWarnings: string[];
   private connector: WarehouseConnector | null = null;
   private schemaCache: DatabaseSchema | null = null;
 
@@ -103,12 +115,20 @@ export class GraneKernel {
     this.model = new SemanticModel(config);
     this.projectDir = options.projectDir;
     this.schemaCache = options.schema ?? null;
+    this.providerWarnings = options.providerWarnings ?? [];
   }
 
   serverInfo(): ServerInfo {
     const capabilities = ["metrics", "dimensions", "filters", "time_grains", "ordering", "provenance"];
     if (this.config.exploration.enabled) {
       capabilities.push("exploration", "raw_dimensions", "raw_metrics");
+    }
+    const semantic_providers = [
+      "native",
+      ...this.config.providers.map((p) => p.type.trim().toLowerCase()),
+    ];
+    if (this.config.providers.length > 0) {
+      capabilities.push("semantic_providers");
     }
     return {
       name: "grane",
@@ -117,6 +137,7 @@ export class GraneKernel {
       database: this.config.connection.type,
       capabilities,
       exploration: { enabled: this.config.exploration.enabled },
+      semantic_providers: [...new Set(semantic_providers)],
     };
   }
 
@@ -172,6 +193,7 @@ export class GraneKernel {
         time_dimension: m.timeDimension ? `${m.timeDimension.table}.${m.timeDimension.column}` : null,
         definition_version: m.definitionVersion,
         available_dimensions: this.model.availableDimensions(m),
+        source: m.config.source ?? { provider: "native" },
       }));
     const dimensions = [...this.model.dimensions.values()]
       .filter((d) => !filter || filter.dimensions.includes(d.name))
@@ -180,6 +202,7 @@ export class GraneKernel {
         description: d.config.description ?? null,
         entity: d.config.entity,
         type: d.config.type ?? null,
+        source: d.config.source ?? { provider: "native" },
       }));
     const entities = [...this.model.entities.values()]
       .filter((e) => !filter || filter.entities.includes(e.name))
@@ -187,6 +210,7 @@ export class GraneKernel {
         name: e.name,
         table: e.config.table,
         description: e.config.description ?? null,
+        source: e.config.source ?? { provider: "native" },
       }));
     return { server: this.serverInfo(), metrics, dimensions, entities };
   }
@@ -255,6 +279,7 @@ export class GraneKernel {
             type: m.config.type,
             definition_version: m.definitionVersion,
             status: m.config.status,
+            source: m.config.source ?? { provider: "native" },
           },
         ]),
       ),

@@ -1,0 +1,5 @@
+name: grane_example_shop
+profile: grane_example_shop
+model-paths: ["models"]
+config-version: 2
+version: "1.0.0"
