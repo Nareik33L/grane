@@ -309,11 +309,19 @@ npm install
 npm run test:unit                                        # no database needed
 docker compose -f example/docker-compose.yml up -d --wait
 npm test                                                 # unit + integration
+
+npm install -D @duckdb/node-api
+npm run test:benchmark                                   # A/B/C thesis benchmark
 ```
 
 See [docs/warehouses.md](docs/warehouses.md) for supported warehouses
 (Postgres, MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Redshift,
 Databricks); extra drivers are optional installs.
+
+`tests/benchmark` asks the same questions of the DuckDB example shop three ways
+— direct warehouse SQL, SQL written from a well-written `SKILL.md`, and the
+Grane Query Model — and scores all three against independently reviewed SQL. See
+[tests/benchmark/README.md](tests/benchmark/README.md).
 
 ## License
 

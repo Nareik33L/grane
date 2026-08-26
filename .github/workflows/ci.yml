@@ -16,4 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:unit
+      # The A/B/C thesis benchmark. DuckDB is a devDependency, so this runs
+      # without making it a default runtime install.
+      - run: npm run test:benchmark
       - run: npm run build
