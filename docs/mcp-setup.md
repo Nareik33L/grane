@@ -99,8 +99,11 @@ auth:
       token: ${ANALYST_AGENT_TOKEN}
 ```
 
-Omit `metrics` / `dimensions` to grant the full governed catalog. An agent's
-`exploration: false` cannot turn exploration on if it is globally disabled.
+Omit `metrics` / `dimensions` to grant the full governed catalog. Allow-lists
+apply to the catalog (including each metric's `available_dimensions`), grouping
+dimensions, governed filters, and `time.dimension`. Unknown names suggest only
+granted fields. An agent's `exploration: false` cannot turn exploration on if
+it is globally disabled.
 
 ## Example database
 

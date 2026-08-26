@@ -17,6 +17,16 @@ export async function serveStdio(kernel: GraneKernel): Promise<void> {
   await server.connect(transport);
 }
 
+async function drainRequest(req: IncomingMessage): Promise<void> {
+  try {
+    for await (const _chunk of req) {
+      /* discard so keep-alive clients can finish the request */
+    }
+  } catch {
+    /* client hung up */
+  }
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -71,10 +81,16 @@ export async function serveHttp(kernel: GraneKernel, port: number): Promise<Http
     if (requireAuth) {
       const result = authenticateAgent(kernel.config, bearerTokenFromHeaders(req.headers));
       if (result === "missing" || result === "invalid") {
-        writeJson(res, 401, {
-          error: "unauthorized",
-          message: "Grane HTTP MCP requires a bearer token (Authorization: Bearer <agent token>).",
-        });
+        await drainRequest(req);
+        writeJson(
+          res,
+          401,
+          {
+            error: "unauthorized",
+            message: "Grane HTTP MCP requires a bearer token (Authorization: Bearer <agent token>).",
+          },
+          { "www-authenticate": 'Bearer realm="grane"' },
+        );
         return;
       }
       bound = kernel.bindAgent(result);

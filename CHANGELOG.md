@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Agent dimension allow-lists apply to governed filters, `time.dimension`,
+  catalog `available_dimensions`, and `undefined_dimension` suggestions.
+  HTTP 401 responses include `WWW-Authenticate` and drain the request body.
+
 ## 0.6.0
 
 - Query Model v1 accepts `time.period` (`last_month`, `30d`, `last_30d`, …)

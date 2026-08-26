@@ -23,6 +23,20 @@ import {
   type RawColumn,
 } from "../explore/raw.js";
 
+function refuseDeniedDimension(
+  agent: AgentGrant | undefined,
+  requested: string,
+  resolved: string,
+): void {
+  if (!dimensionAllowed(agent, resolved) && !dimensionAllowed(agent, requested)) {
+    throw undefinedDimension(requested, agent?.dimensions ?? []);
+  }
+}
+
+function similarDimensions(agent: AgentGrant | undefined, fallback: string[]): string[] {
+  return agent?.dimensions && agent.dimensions.length > 0 ? agent.dimensions : fallback;
+}
+
 /**
  * Resolution turns a semantic query (names) into model objects, applying the
  * deterministic-refusal rules: unknown names, mixed grains and fan-out joins
@@ -125,7 +139,7 @@ export function resolveQuery(
     try {
       metric = model.resolveMetric(name);
     } catch (err) {
-      if (err instanceof GraneError && err.refusal.status === "undefined_metric" && agent?.metrics) {
+      if (err instanceof GraneError && err.refusal.status === "undefined_metric" && agent?.metrics?.length) {
         throw undefinedMetric(name, agent.metrics);
       }
       throw err;
@@ -198,10 +212,16 @@ export function resolveQuery(
 
   // --- Governed dimensions (must join without fan-out) ---
   const dimensions = query.dimensions.map((name) => {
-    const dimension = resolveGovernedDimension(model, name, schema);
-    if (!dimensionAllowed(agent, dimension.name) && !dimensionAllowed(agent, name)) {
-      throw undefinedDimension(name, agent?.dimensions ?? [...model.dimensions.keys()]);
+    let dimension;
+    try {
+      dimension = resolveGovernedDimension(model, name, schema);
+    } catch (err) {
+      if (err instanceof GraneError && err.refusal.status === "undefined_dimension" && agent?.dimensions?.length) {
+        throw undefinedDimension(name, similarDimensions(agent, []));
+      }
+      throw err;
     }
+    refuseDeniedDimension(agent, name, dimension.name);
     assertSafeJoin(model, baseTable, dimension.column, `dimension "${dimension.name}"`);
     return dimension;
   });
@@ -216,7 +236,15 @@ export function resolveQuery(
 
   // --- Filters: governed dimension or raw table.column ---
   const filters: ResolvedFilter[] = query.filters.map((filter) => {
-    const resolved = resolveFilterField(model, filter.field, schema, policy);
+    let resolved;
+    try {
+      resolved = resolveFilterField(model, filter.field, schema, policy);
+    } catch (err) {
+      if (err instanceof GraneError && err.refusal.status === "undefined_dimension" && agent?.dimensions?.length) {
+        throw undefinedDimension(filter.field, similarDimensions(agent, []));
+      }
+      throw err;
+    }
     assertSafeJoin(
       model,
       baseTable,
@@ -232,6 +260,8 @@ export function resolveQuery(
     }
     if (!resolved.governed) {
       notes.push(`Filter field "${resolved.field}" is not defined in the Grane semantic model.`);
+    } else {
+      refuseDeniedDimension(agent, filter.field, resolved.field);
     }
     return {
       column: resolved.column,
@@ -263,6 +293,9 @@ export function resolveQuery(
       throw invalidQuery("time requires period, or both from and to.");
     }
     const resolvedTime = resolveTimeColumn(model, metrics, query.time.dimension, schema, policy);
+    if (resolvedTime.governed && query.time.dimension) {
+      refuseDeniedDimension(agent, query.time.dimension, resolvedTime.qualified);
+    }
     if (from > to) {
       throw invalidQuery(`time.from (${from}) is after time.to (${to}).`);
     }

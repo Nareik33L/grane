@@ -27,14 +27,31 @@ function authConfig() {
   return config;
 }
 
+function financeKernel() {
+  return new GraneKernel(authConfig()).bindAgent({
+    id: "finance",
+    metrics: ["revenue", "orders"],
+    dimensions: ["country"],
+    exploration: false,
+  });
+}
+
+function expectUndefinedDimension(fn: () => unknown, requested: string) {
+  try {
+    fn();
+    expect.unreachable();
+  } catch (err) {
+    const refusal = (err as GraneError).refusal;
+    expect(refusal.status).toBe("undefined_dimension");
+    expect(refusal.requested).toBe(requested);
+    expect(refusal.similar).toEqual(["country"]);
+    expect(refusal.similar).not.toContain("channel");
+  }
+}
+
 describe("per-agent grants", () => {
   it("hides disallowed metrics from the catalog", () => {
-    const kernel = new GraneKernel(authConfig()).bindAgent({
-      id: "finance",
-      metrics: ["revenue", "orders"],
-      dimensions: ["country"],
-      exploration: false,
-    });
+    const kernel = financeKernel();
     const names = kernel.governedCatalog().metrics.map((m) => m.name);
     expect(names).toEqual(expect.arrayContaining(["revenue", "orders"]));
     expect(names).not.toContain("payments_received");
@@ -42,19 +59,63 @@ describe("per-agent grants", () => {
     expect(kernel.config.exploration.enabled).toBe(false);
   });
 
+  it("hides disallowed dimensions from the catalog and available_dimensions", () => {
+    const kernel = financeKernel();
+    const catalog = kernel.governedCatalog();
+    expect(catalog.dimensions.map((d) => d.name)).toEqual(["country"]);
+    for (const metric of catalog.metrics) {
+      expect(metric.available_dimensions.every((name) => name === "country")).toBe(true);
+      expect(metric.available_dimensions).not.toContain("channel");
+    }
+  });
+
   it("refuses a metric the agent is not granted", () => {
-    const kernel = new GraneKernel(authConfig()).bindAgent({
-      id: "finance",
-      metrics: ["revenue", "orders"],
-      dimensions: ["country"],
-      exploration: false,
-    });
+    const kernel = financeKernel();
     try {
       kernel.compile({ metrics: ["payments_received"] });
       expect.unreachable();
     } catch (err) {
       expect((err as GraneError).refusal.status).toBe("undefined_metric");
     }
+  });
+
+  it("refuses grouping, filters, and time.dimension outside the allow-list", () => {
+    const kernel = financeKernel();
+    expectUndefinedDimension(
+      () => kernel.compile({ metrics: ["revenue"], dimensions: ["channel"] }),
+      "channel",
+    );
+    expectUndefinedDimension(
+      () =>
+        kernel.compile({
+          metrics: ["revenue"],
+          filters: [{ field: "channel", operator: "=", value: "web" }],
+        }),
+      "channel",
+    );
+    expectUndefinedDimension(
+      () =>
+        kernel.compile({
+          metrics: ["revenue"],
+          time: { period: "30d", dimension: "completed_at" },
+        }),
+      "completed_at",
+    );
+    expectUndefinedDimension(
+      () =>
+        kernel.compile({
+          metrics: ["revenue"],
+          filters: [{ field: "not_a_dimension", operator: "=", value: "x" }],
+        }),
+      "not_a_dimension",
+    );
+  });
+
+  it("still compiles implicit metric time without granting the time dimension", () => {
+    const kernel = financeKernel();
+    const { resolved } = kernel.compile({ metrics: ["revenue"], time: { period: "30d" } });
+    expect(resolved.trust).toBe("governed");
+    expect(resolved.time).not.toBeNull();
   });
 
   it("lets a full-catalog agent compile revenue", () => {
@@ -82,6 +143,7 @@ describe("HTTP bearer auth", () => {
 
     const denied = await fetch(`http://127.0.0.1:${port}/mcp`, { method: "POST", body: "{}" });
     expect(denied.status).toBe(401);
+    expect(denied.headers.get("www-authenticate")).toMatch(/Bearer/i);
 
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     expect(health.status).toBe(200);

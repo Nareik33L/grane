@@ -227,7 +227,7 @@ export class GraneKernel {
         synonyms: m.config.synonyms,
         time_dimension: m.timeDimension ? `${m.timeDimension.table}.${m.timeDimension.column}` : null,
         definition_version: m.definitionVersion,
-        available_dimensions: this.model.availableDimensions(m),
+        available_dimensions: this.model.availableDimensions(m).filter((name) => dimensionAllowed(this.agent, name)),
         source: m.config.source ?? { provider: "native" },
       }))
       .filter((m) => metricAllowed(this.agent, m.name));
