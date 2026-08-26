@@ -26,7 +26,7 @@ see `tests/benchmark/README.md`.
 
 In scope: metrics, dimensions, relationships, validation, the SQL compiler,
 join/grain safety, provenance, controlled exploration of raw warehouse
-columns, semantic providers (native YAML, dbt/MetricFlow, and future loaders),
+columns, semantic connectors (dbt, Cube, LookML, Apache Ossie, auto-detect),
 MCP, CLI, and database connectors.
 
 Out of scope: dashboards, chart builders, a built-in chatbot, hosted

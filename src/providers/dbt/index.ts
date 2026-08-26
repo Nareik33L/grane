@@ -1,5 +1,4 @@
-import { existsSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
 import { configError } from "../../errors.js";
 import type { SemanticProviderConfig } from "../../config/schema.js";
 import type { ProviderContext, SemanticContribution } from "../types.js";
@@ -7,44 +6,33 @@ import { emptyContribution } from "../types.js";
 import { mapMetricFlowGraph } from "./map.js";
 import { applyRelationNames, parseDbtManifestRelations, parseDbtYamlFiles, parseSemanticManifest } from "./parse.js";
 import type { MetricFlowGraph } from "./graph.js";
-
-function resolveFrom(ctx: ProviderContext, path: string | undefined): string | undefined {
-  if (!path) return undefined;
-  return isAbsolute(path) ? path : resolve(ctx.projectDir, path);
-}
-
-function isFile(path: string | undefined): path is string {
-  return Boolean(path && existsSync(path) && statSync(path).isFile());
-}
-
-function isDir(path: string | undefined): path is string {
-  return Boolean(path && existsSync(path) && statSync(path).isDirectory());
-}
+import { isDir, isFile, resolveFrom, specRoot } from "../helpers.js";
 
 /**
  * Read an existing dbt/MetricFlow project (YAML and/or semantic_manifest.json)
  * and contribute Grane entities, metrics, dimensions and relationships.
  */
 export function loadDbtProvider(spec: SemanticProviderConfig, ctx: ProviderContext): SemanticContribution {
-  const project = resolveFrom(ctx, spec.project);
+  const project = specRoot(spec, ctx);
+  const projectDir = isDir(project) ? project : undefined;
   const semanticManifest =
     resolveFrom(ctx, spec.semantic_manifest) ??
-    (project ? join(project, "target", "semantic_manifest.json") : undefined);
+    (projectDir ? join(projectDir, "target", "semantic_manifest.json") : isFile(project) && project.endsWith(".json") ? project : undefined);
   const dbtManifest =
-    resolveFrom(ctx, spec.dbt_manifest) ?? (project ? join(project, "target", "manifest.json") : undefined);
+    resolveFrom(ctx, spec.dbt_manifest) ?? (projectDir ? join(projectDir, "target", "manifest.json") : undefined);
 
-  if (!project && !isFile(semanticManifest)) {
+  if (!projectDir && !isFile(semanticManifest)) {
     throw configError(
-      `dbt provider requires "project" (a dbt project directory) or "semantic_manifest" (semantic_manifest.json).`,
+      `dbt connector requires "path"/"project" (a dbt project directory) or "semantic_manifest" (semantic_manifest.json).`,
     );
   }
-  if (spec.project && !isDir(project)) {
-    throw configError(`dbt provider project path does not exist or is not a directory: ${spec.project}`);
+  if ((spec.project || spec.path) && project && !isDir(project) && !isFile(semanticManifest)) {
+    throw configError(`dbt connector path does not exist or is not a directory: ${spec.project ?? spec.path}`);
   }
 
   let graph: MetricFlowGraph = { models: [], metrics: [], warnings: [] };
-  if (isDir(project)) {
-    graph = parseDbtYamlFiles(project);
+  if (projectDir) {
+    graph = parseDbtYamlFiles(projectDir);
   }
   if (isFile(semanticManifest)) {
     const fromManifest = parseSemanticManifest(semanticManifest);
@@ -61,7 +49,7 @@ export function loadDbtProvider(spec: SemanticProviderConfig, ctx: ProviderConte
   if (graph.models.length === 0 && graph.metrics.length === 0) {
     const contribution = emptyContribution();
     contribution.warnings.push(
-      `dbt provider found no MetricFlow semantic models or metrics under ${spec.project ?? spec.semantic_manifest}.`,
+      `dbt connector found no MetricFlow semantic models or metrics under ${spec.path ?? spec.project ?? spec.semantic_manifest}.`,
     );
     return contribution;
   }

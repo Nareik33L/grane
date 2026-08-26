@@ -155,8 +155,8 @@ metrics:
 
   it("errors on unknown provider types without guessing", () => {
     expect(() =>
-      loadProvider({ type: "cube" }, { projectDir: fixtureShop }),
-    ).toThrow(/Unknown semantic provider "cube"/);
+      loadProvider({ type: "powerbi" }, { projectDir: fixtureShop }),
+    ).toThrow(/Unknown semantic connector "powerbi"/);
   });
 
   it("mergeContributions is used by the registry path", () => {

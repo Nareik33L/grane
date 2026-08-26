@@ -1,0 +1,37 @@
+cubes:
+  - name: orders
+    sql_table: orders
+    description: Customer orders
+    joins:
+      - name: customers
+        relationship: many_to_one
+        sql: "{CUBE}.customer_id = {customers}.id"
+    measures:
+      - name: revenue
+        sql: net_amount
+        type: sum
+        title: Revenue
+      - name: count
+        type: count
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: status
+        sql: status
+        type: string
+      - name: completed_at
+        sql: completed_at
+        type: time
+
+  - name: customers
+    sql_table: customers
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: country
+        sql: country
+        type: string

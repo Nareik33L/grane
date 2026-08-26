@@ -123,10 +123,22 @@ export class GraneKernel {
     if (this.config.exploration.enabled) {
       capabilities.push("exploration", "raw_dimensions", "raw_metrics");
     }
-    const semantic_providers = [
-      "native",
-      ...this.config.providers.map((p) => p.type.trim().toLowerCase()),
-    ];
+    const names = new Set<string>(["native"]);
+    for (const spec of this.config.providers) {
+      const type = (spec.type ?? "auto").trim().toLowerCase();
+      if (type && type !== "auto") names.add(type);
+    }
+    for (const collection of [
+      this.config.metrics,
+      this.config.entities,
+      this.config.dimensions,
+      this.config.relationships,
+    ]) {
+      for (const item of Object.values(collection)) {
+        if (item.source?.provider) names.add(item.source.provider);
+      }
+    }
+    const semantic_providers = [...names];
     if (this.config.providers.length > 0) {
       capabilities.push("semantic_providers");
     }

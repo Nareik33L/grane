@@ -38,12 +38,11 @@ limits:
 #     - users.password_hash
 #     - customers.ssn
 
-# Extra governed definitions you already maintain elsewhere (dbt/MetricFlow today).
-# Native YAML in this directory is always loaded; providers add to it.
+# Extra governed definitions you already maintain. Omit type to auto-detect.
 # providers:
+#   - path: ../jaffle_shop          # dbt, Cube, LookML, Ossie, …
 #   - type: dbt
 #     project: ../jaffle_shop
-#     # semantic_manifest: ../jaffle_shop/target/semantic_manifest.json
 
 entities: {}
 # Example:

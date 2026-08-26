@@ -1,5 +1,5 @@
-# Grane project that does not redefine metrics. It points at the example
-# DuckDB warehouse and reads MetricFlow YAML from ../dbt-shop.
+# Grane project that does not redefine metrics. Auto-detects dbt/MetricFlow
+# under ../dbt-shop and reads the example DuckDB warehouse.
 
 project:
   name: grane-from-dbt
@@ -16,5 +16,4 @@ exploration:
     - main
 
 providers:
-  - type: dbt
-    project: ../dbt-shop
+  - path: ../dbt-shop

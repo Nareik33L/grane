@@ -45,5 +45,5 @@ export { GraneError, type Refusal } from "./errors.js";
 export { explorationPolicy } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";
-export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES } from "./providers/registry.js";
+export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

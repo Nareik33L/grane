@@ -201,17 +201,22 @@ export type ExplorationConfig = z.infer<typeof explorationConfigSchema>;
 
 /**
  * Extra semantic inputs. Native YAML in the Grane project is always loaded.
- * Additional providers (dbt/MetricFlow today; Cube, LookML, … later) contribute
- * the same entity/metric/dimension/relationship maps so agents query one kernel.
+ * `providers` are universal connectors: point them at a dbt, Cube, LookML,
+ * Apache Ossie, or generic fragment path. Omit `type` to auto-detect.
  */
 export const semanticProviderConfigSchema = z
   .object({
-    type: z.string().min(1),
-    /** Root of the upstream project (dbt_project.yml, cube.js, …). */
+    /** Connector kind. Omit (or `auto`) to sniff the path. */
+    type: z.string().optional(),
+    /** Directory or file to read. Preferred over `project`. */
+    path: z.string().optional(),
+    /** Alias of `path` (dbt project root, Cube schema folder, …). */
     project: z.string().optional(),
-    /** dbt MetricFlow artifact (defaults to <project>/target/semantic_manifest.json). */
+    /** Single document (Ossie YAML/JSON, semantic_manifest.json, …). */
+    file: z.string().optional(),
+    /** dbt MetricFlow artifact (defaults to <path>/target/semantic_manifest.json). */
     semantic_manifest: z.string().optional(),
-    /** dbt manifest.json for physical relation names (defaults to <project>/target/manifest.json). */
+    /** dbt manifest.json for physical relation names (defaults to <path>/target/manifest.json). */
     dbt_manifest: z.string().optional(),
   })
   .passthrough();

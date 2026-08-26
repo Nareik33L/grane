@@ -1,96 +1,121 @@
-# Semantic providers
+# Semantic connectors
 
-Grane compiles analytics from a single in-memory model: entities, metrics,
-dimensions, relationships. That model can be **native YAML** in the Grane
-project, or it can be **read from a system you already maintain**.
+Grane compiles analytics from one in-memory model: entities, metrics,
+dimensions, relationships. That model can come from **native YAML** in the
+Grane project, or from **whatever semantic system the company already has**.
 
 ```text
-dbt / MetricFlow / future providers
+dbt / Cube / LookML / Ossie / fragment / …
         ↓
-Grane semantic provider
+Grane connector (auto-detect)
         ↓
 entities, metrics, dimensions, relationships
         ↓
 deterministic compiler
 ```
 
-You should not have to define Revenue twice. Point Grane at the existing
-project; add native YAML only for things that system does not govern.
+Point Grane at the folder. You should not have to redefine Revenue.
 
-## Native YAML (always on)
+## Auto-detect
 
-Files next to `grane.yml` (`metrics.yml`, `dimensions.yml`, …) are the native
-provider. Nothing else is required.
-
-## dbt / MetricFlow
+Omit `type`. Grane sniffs the path:
 
 ```yaml
 # grane.yml
 providers:
-  - type: dbt
-    project: ../jaffle_shop          # directory with dbt_project.yml
-    # semantic_manifest: ../jaffle_shop/target/semantic_manifest.json
-    # dbt_manifest: ../jaffle_shop/target/manifest.json
+  - path: ../analytics
 ```
 
-Grane reads, in order:
+It recognises:
 
-1. MetricFlow YAML in the dbt project — both the legacy top-level
-   `semantic_models:` spec and the dbt 1.12+ `models:` / `semantic_model:` spec.
-2. `target/semantic_manifest.json` when YAML is absent (or when you pass
-   `semantic_manifest` without a project).
-3. `target/manifest.json` when present, for physical relation aliases.
-
-It does **not** run dbt or MetricFlow at query time. Definitions are imported
-at `grane validate` / `grane serve` load, then Grane compiles SQL itself.
-
-Imported names show up in `catalog()` with `source.provider: "dbt"` and in
-query provenance.
-
-### What maps
-
-| MetricFlow | Grane |
+| Kind | How it is detected |
 | --- | --- |
-| Semantic model + primary entity | Entity (table + primary key) |
-| Dimensions | Dimensions |
-| Simple metrics / measures (`sum`, `count`, `count_distinct`, `average`, `min`, `max`) | Metrics |
-| Ratio metrics | Ratio metrics |
-| Foreign/unique entities shared across models | `many_to_one` relationships |
+| **dbt / MetricFlow** | `dbt_project.yml`, `semantic_models:`, model-embedded `semantic_model:`, or `target/semantic_manifest.json` |
+| **Cube** | YAML `cubes:` (schema files) or `cube.js` |
+| **LookML** | `*.lkml` / `*.lookml` views and explores |
+| **Apache Ossie** | `*.ossie.yaml`, `osi_document.json`, or `semantic_model` + `datasets` |
+| **Fragment** | Generic Grane maps (`entities` / `metrics` / `dimensions` / `relationships`) dumped by any other tool |
+| **Malloy** | `*.malloy` (detected; export Ossie/Cube/fragment until a Malloy compiler is added) |
 
-Simple MetricFlow filters of the form
-`{{ Dimension('order__status') }} = 'completed'` become metric filters.
-Untranslatable Jinja, derived/cumulative/conversion metrics, and non-column
-`expr` values are **skipped with a warning** — Grane will not invent the
-missing logic.
+A path can match more than one kind. Auto-load merges them; duplicate names are
+still an error.
 
-### Mix with native YAML
+Force a reader when sniffing is ambiguous:
 
 ```yaml
 providers:
-  - type: dbt
-    project: ../jaffle_shop
+  - type: cube
+    path: ../cube
+  - type: ossie
+    file: ./model.ossie.yaml
+```
 
-# Extra governed slice dbt does not define:
+Aliases: `metricflow` → dbt, `looker` → lookml, `osi` → ossie, `grane` → fragment.
+
+## Native YAML (always on)
+
+Files next to `grane.yml` are always loaded. Use them for metrics the upstream
+system does not govern.
+
+## What each reader maps
+
+All readers contribute the same four maps. Grane does **not** call dbt, Cube,
+Looker, or MetricFlow at query time. Import happens at load; Grane compiles SQL.
+
+Unsupported constructs (derived metrics, subqueries, untranslatable filters)
+are **skipped with a warning**, not guessed.
+
+### dbt / MetricFlow
+
+See the original MetricFlow notes: simple metrics, ratios, entity joins,
+`{{ Dimension('order__status') }} = 'completed'` filters.
+
+### Cube
+
+`sql_table` cubes, `sum` / `count` / `countDistinct` / `avg` / `min` / `max`
+measures, dimensions, and `{CUBE}.fk = {other}.pk` joins.
+
+### LookML
+
+`view` + `sql_table_name`, `dimension` / `dimension_group`, `measure` with
+simple `${TABLE}.column` SQL, `explore` joins with `sql_on`.
+
+### Apache Ossie
+
+Datasets → entities, dimension fields → dimensions, `SUM(table.column)`-style
+metrics, `from`/`to`/`from_columns`/`to_columns` relationships. This is the
+vendor-neutral interchange hatch: if a tool can emit Ossie, Grane can read it.
+
+### Fragment
+
+If a system can write Grane-shaped YAML/JSON, that is enough:
+
+```yaml
+metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: ${orders.net_amount}
+```
+
+## Mix with native YAML
+
+```yaml
+providers:
+  - path: ../jaffle_shop
+
 dimensions:
   device:
     entity: order
     sql: ${orders.device_type}
 ```
 
-The same metric, dimension, entity, or relationship **name** from two
-providers is an error. Rename or delete one definition.
-
-## Other modelling systems
-
-`providers[].type` is an extension point. `dbt` (alias `metricflow`) is
-implemented. A Cube, LookML, or Malloy loader is the same interface: read
-the upstream project, contribute the four maps, let the kernel compile.
-
-Unknown types fail at load with the list of supported providers.
+The same name from two connectors is an error.
 
 ## Example
 
 ```bash
-# DuckDB shop whose metrics live in example/dbt-shop, not in Grane YAML
 npx grane-analytics -p example/analytics-from-dbt validate --offline
 ```
+
+`example/analytics-from-dbt` can also be written as `providers: [{ path: ../dbt-shop }]`.
