@@ -24,7 +24,7 @@ import {
 } from "../explore/raw.js";
 
 function refuseDeniedDimension(
-  agent: AgentGrant | undefined,
+  agent: AgentGrant | null | undefined,
   requested: string,
   resolved: string,
 ): void {
@@ -33,7 +33,7 @@ function refuseDeniedDimension(
   }
 }
 
-function similarDimensions(agent: AgentGrant | undefined, fallback: string[]): string[] {
+function similarDimensions(agent: AgentGrant | null | undefined, fallback: string[]): string[] {
   return agent?.dimensions && agent.dimensions.length > 0 ? agent.dimensions : fallback;
 }
 
