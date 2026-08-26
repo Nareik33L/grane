@@ -17,6 +17,7 @@ import {
   sqlRef,
   str,
   tableName,
+  walkFiles,
   walkYamlFiles,
 } from "./helpers.js";
 
@@ -47,6 +48,92 @@ function parseJoinSql(
   return { from: `${leftTable}.${left.column}`, to: `${rightTable}.${right.column}` };
 }
 
+function extractBrace(text: string, openAt: number): string | null {
+  if (text[openAt] !== "{") return null;
+  let depth = 1;
+  let i = openAt + 1;
+  while (i < text.length && depth > 0) {
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") depth -= 1;
+    i += 1;
+  }
+  return text.slice(openAt + 1, i - 1);
+}
+
+function jsField(body: string, key: string): string | undefined {
+  const match = body.match(new RegExp(`${key}\\s*:\\s*[\`'"]([^\\\`'"]*)[\`'"]`));
+  return match?.[1];
+}
+
+function jsBool(body: string, key: string): boolean {
+  return new RegExp(`${key}\\s*:\\s*true\\b`).test(body);
+}
+
+function jsNamedObjects(body: string): { name: string; body: string }[] {
+  const out: { name: string; body: string }[] = [];
+  const re = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(body))) {
+    const openAt = match.index + match[0].length - 1;
+    const inner = extractBrace(body, openAt);
+    if (inner === null) continue;
+    out.push({ name: match[1]!, body: inner });
+    re.lastIndex = openAt + inner.length + 1;
+  }
+  return out;
+}
+
+function jsSection(body: string, key: string): string | null {
+  const match = body.match(new RegExp(`${key}\\s*:\\s*\\{`));
+  if (!match || match.index === undefined) return null;
+  return extractBrace(body, match.index + match[0].length - 1);
+}
+
+/** Parse cube('name', { ... }) JavaScript. Never evals. */
+export function parseCubeJavaScript(text: string): Record<string, unknown>[] {
+  const cubes: Record<string, unknown>[] = [];
+  const re = /cube\s*\(\s*([`'"])([^`'"]+)\1\s*,/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const after = match.index + match[0].length;
+    const openAt = text.indexOf("{", after);
+    if (openAt < 0) continue;
+    const body = extractBrace(text, openAt);
+    if (body === null) continue;
+    const name = match[2]!;
+    const sqlTable = jsField(body, "sql_table") ?? jsField(body, "sql_table_name");
+    const sql = jsField(body, "sql");
+    const dimensions = jsNamedObjects(jsSection(body, "dimensions") ?? "").map((d) => ({
+      name: d.name,
+      sql: jsField(d.body, "sql") ?? d.name,
+      type: jsField(d.body, "type"),
+      primary_key: jsBool(d.body, "primary_key"),
+      title: jsField(d.body, "title"),
+    }));
+    const measures = jsNamedObjects(jsSection(body, "measures") ?? "").map((m) => ({
+      name: m.name,
+      sql: jsField(m.body, "sql"),
+      type: jsField(m.body, "type") ?? "count",
+      title: jsField(m.body, "title"),
+    }));
+    const joins = jsNamedObjects(jsSection(body, "joins") ?? "").map((j) => ({
+      name: j.name,
+      sql: (jsField(j.body, "sql") ?? "").replace(/\$\{([^}]+)\}/g, "{$1}"),
+      relationship: jsField(j.body, "relationship"),
+    }));
+    cubes.push({
+      name,
+      sql_table: sqlTable,
+      sql,
+      description: jsField(body, "description") ?? jsField(body, "title"),
+      dimensions,
+      measures,
+      joins,
+    });
+  }
+  return cubes;
+}
+
 const CUBE_AGG: Record<string, "sum" | "count" | "count_distinct" | "avg" | "min" | "max"> = {
   sum: "sum",
   count: "count",
@@ -64,10 +151,19 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
     throw configError(`Cube connector needs path/project pointing at a Cube schema directory or YAML file.`);
   }
   const out = emptyContribution();
-  const files = isFile(root) ? [root] : walkYamlFiles(root);
+  const files = isFile(root)
+    ? [root]
+    : [...walkYamlFiles(root), ...walkFiles(root, (name) => /\.js$/i.test(name))];
   const cubes: { name: string; table: string; path: string }[] = [];
 
+  const docs: { rel: string; doc: Record<string, unknown> }[] = [];
   for (const file of files) {
+    const rel = isDir(root) ? relative(root, file) : file;
+    if (/\.js$/i.test(file)) {
+      const parsed = parseCubeJavaScript(readText(file));
+      if (parsed.length > 0) docs.push({ rel, doc: { cubes: parsed } });
+      continue;
+    }
     let doc: unknown;
     try {
       doc = parseYaml(readText(file));
@@ -75,8 +171,10 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
       out.warnings.push(`Skipped ${file}: ${(err as Error).message}`);
       continue;
     }
-    if (!isRecord(doc)) continue;
-    const rel = isDir(root) ? relative(root, file) : file;
+    if (isRecord(doc)) docs.push({ rel, doc });
+  }
+
+  for (const { rel, doc } of docs) {
     for (const cube of asArray(doc.cubes)) {
       if (!isRecord(cube)) continue;
       const name = str(cube.name);
@@ -161,15 +259,7 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
     }
   }
 
-  for (const file of files) {
-    let doc: unknown;
-    try {
-      doc = parseYaml(readText(file));
-    } catch {
-      continue;
-    }
-    if (!isRecord(doc)) continue;
-    const rel = isDir(root) ? relative(root, file) : file;
+  for (const { rel, doc } of docs) {
     for (const cube of asArray(doc.cubes)) {
       if (!isRecord(cube)) continue;
       const name = str(cube.name);
@@ -179,7 +269,14 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
       for (const join of asArray(cube.joins)) {
         if (!isRecord(join)) continue;
         const parsed = str(join.sql) ? parseJoinSql(str(join.sql)!, name, self.table) : null;
-        const relTypeRaw = (str(join.relationship) ?? "many_to_one").toLowerCase().replace(/belongs_to/, "many_to_one").replace(/has_many/, "one_to_many").replace(/has_one/, "one_to_one");
+        const relTypeRaw = (str(join.relationship) ?? "many_to_one")
+          .toLowerCase()
+          .replace(/belongs_to/, "many_to_one")
+          .replace(/belongsto/, "many_to_one")
+          .replace(/has_many/, "one_to_many")
+          .replace(/hasmany/, "one_to_many")
+          .replace(/has_one/, "one_to_one")
+          .replace(/hasone/, "one_to_one");
         const relType =
           relTypeRaw === "one_to_many" || relTypeRaw === "one_to_one" || relTypeRaw === "many_to_one"
             ? relTypeRaw
@@ -188,7 +285,9 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
           out.warnings.push(`Skipping Cube join on "${name}": could not parse sql "${str(join.sql)}".`);
           continue;
         }
-        const key = str(join.name) ? `${name}_to_${str(join.name)}` : `${parsed.from.split(".")[0]}_to_${parsed.to.split(".")[0]}`;
+        const key = str(join.name)
+          ? `${name}_to_${str(join.name)}`
+          : `${parsed.from.split(".")[0]}_to_${parsed.to.split(".")[0]}`;
         if (key in out.relationships) continue;
         out.relationships[key] = withSource(
           { from: parsed.from, to: parsed.to, type: relType },

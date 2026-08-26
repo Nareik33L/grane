@@ -64,6 +64,7 @@ export function detectConnectorKinds(root: string): ConnectorKind[] {
     }
     if (ext === ".lkml" || ext === ".lookml") kinds.add("lookml");
     if (ext === ".malloy") kinds.add("malloy");
+    if (ext === ".js" && /\bcube\s*\(/.test(readText(root))) kinds.add("cube");
     if (/\.ya?ml$/i.test(name) || name.endsWith(".json")) {
       try {
         const doc = name.endsWith(".json") ? JSON.parse(readText(root)) : yamlDoc(root);
@@ -84,6 +85,16 @@ export function detectConnectorKinds(root: string): ConnectorKind[] {
   if (isFile(join(root, "dbt_project.yml")) || isFile(join(root, "dbt_project.yaml"))) kinds.add("dbt");
   if (isFile(join(root, "target", "semantic_manifest.json"))) kinds.add("dbt");
   if (isFile(join(root, "cube.js")) || isFile(join(root, "cube.py"))) kinds.add("cube");
+  for (const file of walkFiles(root, (name) => /\.js$/i.test(name))) {
+    try {
+      if (/\bcube\s*\(/.test(readText(file))) {
+        kinds.add("cube");
+        break;
+      }
+    } catch {
+      // ignore unreadable files while sniffing
+    }
+  }
 
   for (const file of walkYamlFiles(root)) {
     const doc = yamlDoc(file);

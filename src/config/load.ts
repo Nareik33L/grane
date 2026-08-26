@@ -6,6 +6,7 @@ import { configError } from "../errors.js";
 import { mergeContributions } from "../providers/merge.js";
 import { loadConfiguredProviders } from "../providers/registry.js";
 import { emptyContribution, type SemanticContribution } from "../providers/types.js";
+import { validateAuthConfig } from "../auth/agents.js";
 
 /**
  * A Grane project is a directory containing grane.yml plus any number of
@@ -13,8 +14,8 @@ import { emptyContribution, type SemanticContribution } from "../providers/types
  * All files are parsed and merged by top-level key, so users are free to
  * organise definitions across files however they like.
  *
- * Optional `providers:` entries (dbt/MetricFlow, later Cube/LookML/…) are
- * loaded afterwards and merged into the same maps.
+ * Optional `providers:` entries (dbt/MetricFlow, Cube, LookML, Ossie, Malloy)
+ * are loaded afterwards and merged into the same maps.
  */
 
 export interface LoadedConfig {
@@ -25,7 +26,7 @@ export interface LoadedConfig {
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
-const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "providers"] as const;
+const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "auth", "providers"] as const;
 
 /** Resolve the project directory: the given dir, or ./analytics under it if grane.yml lives there. */
 export function findProjectDir(startDir: string): string {
@@ -141,6 +142,15 @@ export function loadConfig(projectDir: string): LoadedConfig {
     }
   }
 
+  const auth = merged["auth"] as Record<string, unknown> | undefined;
+  const agents = auth && Array.isArray(auth.agents) ? auth.agents : [];
+  for (const agent of agents) {
+    if (agent && typeof agent === "object" && !Array.isArray(agent) && "token" in agent) {
+      const record = agent as Record<string, unknown>;
+      record.token = interpolateEnv(record.token);
+    }
+  }
+
   const parsed = graneConfigSchema.safeParse(merged);
   if (!parsed.success) {
     const issues = parsed.error.issues
@@ -169,6 +179,21 @@ export function loadConfig(projectDir: string): LoadedConfig {
   }
 
   const config = finalParsed.data;
+  validateAuthConfig(config);
+  for (const agent of config.auth.agents) {
+    for (const name of agent.metrics ?? []) {
+      if (!(name in config.metrics)) {
+        combined.warnings.push(`auth agent "${agent.id}" allows metric "${name}", which is not a defined metric.`);
+      }
+    }
+    for (const name of agent.dimensions ?? []) {
+      if (!(name in config.dimensions)) {
+        combined.warnings.push(
+          `auth agent "${agent.id}" allows dimension "${name}", which is not a defined dimension.`,
+        );
+      }
+    }
+  }
   const duckPath = config.connection.path;
   if (
     config.connection.type === "duckdb" &&

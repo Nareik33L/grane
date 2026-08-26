@@ -200,13 +200,25 @@ function addMetric(
   provider: string,
 ): void {
   const type = metric.type.toLowerCase();
-  if (type === "derived" || type === "cumulative" || type === "conversion") {
+  if (type === "cumulative" || type === "conversion") {
     out.warnings.push(
       `Skipping metric "${metric.name}": MetricFlow type "${metric.type}" is not compiled by Grane yet.`,
     );
     return;
   }
-  if (type === "ratio") {
+  if (type === "derived") {
+    const ratio = parseDerivedRatio(metric.expr);
+    if (!ratio) {
+      out.warnings.push(
+        `Skipping metric "${metric.name}": MetricFlow derived expr is not a simple metric/metric ratio.`,
+      );
+      return;
+    }
+    metric.numerator = ratio.numerator;
+    metric.denominator = ratio.denominator;
+    // Fall through to ratio handling below.
+  }
+  if (type === "ratio" || type === "derived") {
     const numerator = metric.numerator;
     const denominator = metric.denominator;
     if (!numerator || !denominator) {
@@ -280,4 +292,15 @@ function guessModelForMetric(metric: MfMetric, models: MfSemanticModel[]): MfSem
 function tableFromSql(sql: string | undefined): string | undefined {
   const match = sql?.match(/\$\{([A-Za-z_][A-Za-z0-9_]*)\./);
   return match?.[1];
+}
+
+/** `{{ Metric('a') }} / {{ Metric('b') }}` or `a / b` → a Grane ratio. */
+export function parseDerivedRatio(expr: string | undefined): { numerator: string; denominator: string } | null {
+  if (!expr) return null;
+  const cleaned = expr
+    .replace(/\{\{\s*Metric\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\}\}/gi, "$1")
+    .replace(/\s+/g, "");
+  const match = cleaned.match(/^([A-Za-z_][A-Za-z0-9_]*)\/([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (!match) return null;
+  return { numerator: match[1]!, denominator: match[2]! };
 }

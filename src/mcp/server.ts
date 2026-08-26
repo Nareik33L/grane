@@ -51,7 +51,8 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
       instructions:
         "Grane is a deterministic analytics harness. Use catalog() to discover approved " +
         "metrics and dimensions, then query() with a Grane Query Model v1 request. Grane compiles " +
-        "the SQL itself; never write SQL." +
+        "the SQL itself; never write SQL. For relative windows send time.period (last_month, 30d) " +
+        "instead of computing from/to dates." +
         explorationHint +
         " If Grane refuses a request (e.g. undefined_metric), report that rather than inventing a definition.",
     },
@@ -82,9 +83,10 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
   const querySchemaDescription =
     "A Grane Query Model v1 request: { metrics?: string[], dimensions?: string[], " +
     "raw_dimensions?: string[] (table.column), raw_metrics?: [{field: 'table.column', type, alias?}], " +
-    "filters?: [{field, operator, value}], time?: {from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', " +
-    "grain?: day|week|month|quarter|year, dimension?}, order?: [{field, direction}], limit?: number }. " +
-    "Provide at least one governed metric or one raw_metric.";
+    "filters?: [{field, operator, value}], time?: {period: 'last_month'|'30d'|…, grain?, dimension?} " +
+    "or {from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', grain?, dimension?}, " +
+    "order?: [{field, direction}], limit?: number }. " +
+    "Provide at least one governed metric or one raw_metric. Prefer time.period over computing dates.";
 
   server.registerTool(
     "validate",

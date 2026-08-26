@@ -35,7 +35,7 @@ It recognises:
 | **LookML** | `*.lkml` / `*.lookml` views and explores |
 | **Apache Ossie** | `*.ossie.yaml`, `osi_document.json`, or `semantic_model` + `datasets` |
 | **Fragment** | Generic Grane maps (`entities` / `metrics` / `dimensions` / `relationships`) dumped by any other tool |
-| **Malloy** | `*.malloy` (detected; export Ossie/Cube/fragment until a Malloy compiler is added) |
+| **Malloy** | `*.malloy` `source: name is table('t') extend { … }` (simple measures, dimensions, `join_one`) |
 
 A path can match more than one kind. Auto-load merges them; duplicate names are
 still an error.
@@ -68,17 +68,28 @@ are **skipped with a warning**, not guessed.
 ### dbt / MetricFlow
 
 See the original MetricFlow notes: simple metrics, ratios, entity joins,
-`{{ Dimension('order__status') }} = 'completed'` filters.
+`{{ Dimension('order__status') }} = 'completed'` filters. Derived metrics that
+are a simple `metric / metric` ratio are imported; cumulative and conversion
+metrics are skipped with a warning.
 
 ### Cube
 
-`sql_table` cubes, `sum` / `count` / `countDistinct` / `avg` / `min` / `max`
-measures, dimensions, and `{CUBE}.fk = {other}.pk` joins.
+`sql_table` cubes in YAML **or** `cube('name', { … })` JavaScript. `sum` / `count` /
+`countDistinct` / `avg` / `min` / `max` measures, dimensions, and
+`{CUBE}.fk = {other}.pk` (or `${CUBE}` JS) joins. JavaScript is parsed, never
+eval'd. SQL-subquery cubes are bound to the cube name with a warning.
 
 ### LookML
 
 `view` + `sql_table_name`, `dimension` / `dimension_group`, `measure` with
-simple `${TABLE}.column` SQL, `explore` joins with `sql_on`.
+simple `${TABLE}.column` SQL, `explore` joins with `sql_on`. `derived_table`
+views bind to a warehouse relation named after the view (materialize the PDT;
+Grane will not run the LookML SQL).
+
+### Malloy
+
+`source: orders is table('orders') extend { dimension: … measure: x is sum(col)
+join_one: customers on customer_id }`. Nested queries and SQL blocks are skipped.
 
 ### Apache Ossie
 

@@ -10,8 +10,11 @@ import {
 } from "./model.js";
 import type { FilterOperator, Scalar } from "../config/schema.js";
 import type { DatabaseSchema } from "../connectors/types.js";
-import { invalidQuery, unsafeQuery, GraneError } from "../errors.js";
+import { invalidQuery, unsafeQuery, GraneError, undefinedMetric, undefinedDimension } from "../errors.js";
 import { explorationPolicy, type ExplorationPolicy } from "../explore/policy.js";
+import { resolveRelativeRange } from "./time.js";
+import type { AgentGrant } from "../auth/agents.js";
+import { dimensionAllowed, metricAllowed } from "../auth/agents.js";
 import {
   resolveRawColumn,
   assertNumericRawMetric,
@@ -80,6 +83,10 @@ export interface ResolveOptions {
   defaultRows: number;
   maxRows: number;
   schema?: DatabaseSchema | null;
+  /** Clock used to resolve `time.period`. Defaults to now. */
+  now?: Date;
+  /** Authenticated agent grant; null/undefined means unrestricted. */
+  agent?: AgentGrant | null;
 }
 
 export function resolveQuery(
@@ -100,6 +107,7 @@ export function resolveQuery(
   const notes: string[] = [];
   const policy = explorationPolicy(model.config);
   const schema = defaults.schema ?? null;
+  const agent = defaults.agent ?? null;
 
   if (query.metrics.length === 0 && query.raw_metrics.length === 0) {
     throw invalidQuery("Provide at least one governed metric or one raw_metric.");
@@ -113,7 +121,18 @@ export function resolveQuery(
 
   // --- Governed metrics (synonyms resolve; unknown names refuse) ---
   const metrics = query.metrics.map((name) => {
-    const metric = model.resolveMetric(name);
+    let metric;
+    try {
+      metric = model.resolveMetric(name);
+    } catch (err) {
+      if (err instanceof GraneError && err.refusal.status === "undefined_metric" && agent?.metrics) {
+        throw undefinedMetric(name, agent.metrics);
+      }
+      throw err;
+    }
+    if (!metricAllowed(agent, metric.name) && !metricAllowed(agent, name)) {
+      throw undefinedMetric(name, agent?.metrics ?? []);
+    }
     if (metric.name !== name) notes.push(`"${name}" resolved to metric "${metric.name}".`);
     if (metric.config.status === "deprecated") {
       notes.push(`Metric "${metric.name}" is deprecated.`);
@@ -180,6 +199,9 @@ export function resolveQuery(
   // --- Governed dimensions (must join without fan-out) ---
   const dimensions = query.dimensions.map((name) => {
     const dimension = resolveGovernedDimension(model, name, schema);
+    if (!dimensionAllowed(agent, dimension.name) && !dimensionAllowed(agent, name)) {
+      throw undefinedDimension(name, agent?.dimensions ?? [...model.dimensions.keys()]);
+    }
     assertSafeJoin(model, baseTable, dimension.column, `dimension "${dimension.name}"`);
     return dimension;
   });
@@ -223,9 +245,26 @@ export function resolveQuery(
   // --- Time ---
   let time: ResolvedTime | null = null;
   if (query.time) {
+    let from = query.time.from;
+    let to = query.time.to;
+    if (query.time.period) {
+      const range = resolveRelativeRange(
+        query.time.period,
+        model.config.project.timezone,
+        defaults.now,
+      );
+      from = range.from;
+      to = range.to;
+      notes.push(
+        `time.period "${query.time.period}" resolved to ${from}..${to} (${model.config.project.timezone}).`,
+      );
+    }
+    if (!from || !to) {
+      throw invalidQuery("time requires period, or both from and to.");
+    }
     const resolvedTime = resolveTimeColumn(model, metrics, query.time.dimension, schema, policy);
-    if (query.time.from > query.time.to) {
-      throw invalidQuery(`time.from (${query.time.from}) is after time.to (${query.time.to}).`);
+    if (from > to) {
+      throw invalidQuery(`time.from (${from}) is after time.to (${to}).`);
     }
     assertSafeJoin(
       model,
@@ -235,8 +274,8 @@ export function resolveQuery(
     );
     time = {
       column: resolvedTime.column,
-      from: query.time.from,
-      to: query.time.to,
+      from,
+      to,
       grain: query.time.grain ?? null,
       governed: resolvedTime.governed,
       qualified: resolvedTime.qualified,

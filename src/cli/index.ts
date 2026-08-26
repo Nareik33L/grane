@@ -6,7 +6,6 @@ import { stringify as stringifyYaml } from "yaml";
 import { loadConfig } from "../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
-import { resolveRelativeRange } from "../query/time.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
 import { registerMcpCommands } from "./mcp.js";
 import { GraneError } from "../errors.js";
@@ -232,21 +231,26 @@ program
           });
         }
         if (options.last || options.from || options.to) {
-          let from = options.from;
-          let to = options.to;
           if (options.last) {
-            const range = resolveRelativeRange(options.last, kernel.config.project.timezone);
-            from = range.from;
-            to = range.to;
+            if (options.from || options.to) {
+              throw new Error("Provide either --last, or both --from and --to.");
+            }
+            query.time = {
+              period: options.last,
+              ...(options.grain ? { grain: options.grain as never } : {}),
+            };
+          } else {
+            if (!options.from || !options.to) {
+              throw new Error("Provide either --last, or both --from and --to.");
+            }
+            query.time = {
+              from: options.from,
+              to: options.to,
+              ...(options.grain ? { grain: options.grain as never } : {}),
+            };
           }
-          if (!from || !to) {
-            throw new Error("Provide either --last, or both --from and --to.");
-          }
-          query.time = {
-            from,
-            to,
-            ...(options.grain ? { grain: options.grain as never } : {}),
-          };
+        } else if (options.grain) {
+          throw new Error("--grain requires --last or --from/--to.");
         } else if (options.grain) {
           throw new Error("--grain requires a time range (--last or --from/--to).");
         }
@@ -297,9 +301,15 @@ program
       const port = Number(options.port);
       await serveHttp(kernel, port);
       const catalog = await kernel.catalog();
+      const agents = kernel.config.auth.agents.length;
       console.log("Grane MCP Server\n");
       console.log(`Database      ${kernel.config.connection.type}`);
       console.log(`Providers     ${kernel.serverInfo().semantic_providers.join(", ")}`);
+      console.log(
+        agents > 0
+          ? `Auth          ${agents} agent${agents === 1 ? "" : "s"} (HTTP bearer required)`
+          : `Auth          open`,
+      );
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
       if (catalog.exploration.enabled) {

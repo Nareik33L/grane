@@ -25,6 +25,7 @@ export const SUPPORTED_PROVIDER_TYPES = [
   "lookml",
   "ossie",
   "fragment",
+  "malloy",
 ] as const;
 
 export function loadProvider(spec: SemanticProviderConfig, ctx: ProviderContext): SemanticContribution {

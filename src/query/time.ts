@@ -91,10 +91,11 @@ export function resolveRelativeRange(
         to: formatDate({ year: today.year - 1, month: 12, day: 31 }),
       };
     default: {
-      const match = /^(\d+)(d|w|m)$/.exec(normalized);
+      const lastN = /^last_(\d+)(d|w|m)$/.exec(normalized);
+      const match = lastN ?? /^(\d+)(d|w|m)$/.exec(normalized);
       if (!match) {
         throw new Error(
-          `Unsupported relative period "${spec}". Use e.g. 30d, 12w, 6m, today, yesterday, this_month, last_month, this_year, last_year.`,
+          `Unsupported relative period "${spec}". Use e.g. 30d, last_30d, 12w, 6m, today, yesterday, this_month, last_month, this_year, last_year.`,
         );
       }
       const amount = Number(match[1]);

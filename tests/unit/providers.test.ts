@@ -41,6 +41,9 @@ describe("dbt / MetricFlow YAML (legacy + latest spec)", () => {
     expect(contribution.metrics.average_order_value?.numerator).toBe("revenue");
     expect(contribution.metrics.average_order_value?.denominator).toBe("orders");
     expect(contribution.metrics.average_order_value?.synonyms).toContain("AOV");
+    expect(contribution.metrics.revenue_per_order?.type).toBe("ratio");
+    expect(contribution.metrics.revenue_per_order?.numerator).toBe("revenue");
+    expect(contribution.metrics.revenue_per_order?.denominator).toBe("orders");
     expect(contribution.metrics.trailing_revenue).toBeUndefined();
     expect(contribution.warnings.some((w) => w.includes("trailing_revenue") && w.includes("cumulative"))).toBe(
       true,

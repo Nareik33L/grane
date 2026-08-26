@@ -77,8 +77,30 @@ ChatGPT requires a **public HTTPS URL** and Developer Mode (paid plan). Local
 
 Query Model v1 accepts governed `metrics` / `dimensions` and, when exploration
 is enabled, `raw_dimensions` (`table.column`) and `raw_metrics`
-(`{ field, type, alias? }`). Grane compiles the SQL either way. Do not present
-`trust: mixed` or `trust: exploratory` results as approved business truth.
+(`{ field, type, alias? }`). Relative windows use `time.period` (`last_month`,
+`30d`, `this_year`, …) resolved in the project timezone; `from`/`to` still work.
+Grane compiles the SQL either way. Do not present `trust: mixed` or
+`trust: exploratory` results as approved business truth.
+
+## Per-agent HTTP auth
+
+When `auth.agents` is set in `grane.yml`, `/mcp` requires
+`Authorization: Bearer <token>`. `/health` stays public. stdio is local-process
+trusted and does not require a bearer token.
+
+```yaml
+auth:
+  agents:
+    - id: finance
+      token: ${FINANCE_AGENT_TOKEN}
+      metrics: [revenue, orders]
+      exploration: false
+    - id: analyst
+      token: ${ANALYST_AGENT_TOKEN}
+```
+
+Omit `metrics` / `dimensions` to grant the full governed catalog. An agent's
+`exploration: false` cannot turn exploration on if it is globally disabled.
 
 ## Example database
 

@@ -1,0 +1,12 @@
+source: orders is duckdb.table('orders') extend {
+  primary_key: id
+  dimension: status is status
+  measure: revenue is net_amount.sum()
+  measure: order_count is count()
+  join_one: customers is customers on customer_id
+}
+
+source: customers is table('customers') extend {
+  primary_key: id
+  dimension: country is country
+}

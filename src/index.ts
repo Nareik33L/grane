@@ -11,6 +11,8 @@ export {
   type ExplorationConfig,
   type SemanticProviderConfig,
   type DefinitionSource,
+  type AuthConfig,
+  type AgentConfig,
 } from "./config/schema.js";
 export { SemanticModel, type Metric, type Dimension } from "./model/model.js";
 export { RelationshipGraph } from "./model/graph.js";
@@ -31,7 +33,7 @@ export { inferRelationships, type DatabaseSchema } from "./connectors/types.js";
 export { createConnector } from "./connectors/create.js";
 export { getDialect, WAREHOUSE_TYPES } from "./connectors/dialect.js";
 export { buildMcpServer } from "./mcp/server.js";
-export { serveStdio, serveHttp } from "./mcp/transport.js";
+export { serveStdio, serveHttp, type HttpMcpHandle } from "./mcp/transport.js";
 export {
   CLIENT_IDS,
   connectMcp,
@@ -45,5 +47,7 @@ export { GraneError, type Refusal } from "./errors.js";
 export { explorationPolicy } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";
+export { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "./auth/agents.js";
+export type { AgentGrant } from "./auth/agents.js";
 export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

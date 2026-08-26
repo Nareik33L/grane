@@ -11,8 +11,10 @@ import { executeCompiled, type QueryResult } from "./execute/executor.js";
 import { explorationPolicy } from "./explore/policy.js";
 import { listExplorableColumns, type ExplorableColumn } from "./explore/raw.js";
 import { recordRawUsage } from "./explore/usage.js";
+import type { AgentGrant } from "./auth/agents.js";
+import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
 
-export const GRANE_VERSION = "0.5.0";
+export const GRANE_VERSION = "0.6.0";
 
 export interface ServerInfo {
   name: "grane";
@@ -22,6 +24,7 @@ export interface ServerInfo {
   capabilities: string[];
   exploration: { enabled: boolean };
   semantic_providers: string[];
+  agent: string | null;
 }
 
 export interface CatalogMetric {
@@ -96,6 +99,9 @@ export interface KernelOptions {
   projectDir?: string;
   schema?: DatabaseSchema;
   providerWarnings?: string[];
+  now?: Date;
+  agent?: AgentGrant | null;
+  connector?: WarehouseConnector | null;
 }
 
 /**
@@ -107,6 +113,8 @@ export class GraneKernel {
   readonly config: GraneConfig;
   readonly projectDir: string | undefined;
   readonly providerWarnings: string[];
+  readonly agent: AgentGrant | null;
+  private readonly now: Date | undefined;
   private connector: WarehouseConnector | null = null;
   private schemaCache: DatabaseSchema | null = null;
 
@@ -116,10 +124,21 @@ export class GraneKernel {
     this.projectDir = options.projectDir;
     this.schemaCache = options.schema ?? null;
     this.providerWarnings = options.providerWarnings ?? [];
+    this.agent = options.agent ?? null;
+    this.now = options.now;
+    this.connector = options.connector ?? null;
   }
 
   serverInfo(): ServerInfo {
-    const capabilities = ["metrics", "dimensions", "filters", "time_grains", "ordering", "provenance"];
+    const capabilities = [
+      "metrics",
+      "dimensions",
+      "filters",
+      "time_grains",
+      "time_periods",
+      "ordering",
+      "provenance",
+    ];
     if (this.config.exploration.enabled) {
       capabilities.push("exploration", "raw_dimensions", "raw_metrics");
     }
@@ -142,6 +161,9 @@ export class GraneKernel {
     if (this.config.providers.length > 0) {
       capabilities.push("semantic_providers");
     }
+    if (this.config.auth.agents.length > 0) {
+      capabilities.push("agent_auth");
+    }
     return {
       name: "grane",
       version: GRANE_VERSION,
@@ -150,6 +172,7 @@ export class GraneKernel {
       capabilities,
       exploration: { enabled: this.config.exploration.enabled },
       semantic_providers: [...new Set(semantic_providers)],
+      agent: this.agent?.id ?? null,
     };
   }
 
@@ -206,7 +229,8 @@ export class GraneKernel {
         definition_version: m.definitionVersion,
         available_dimensions: this.model.availableDimensions(m),
         source: m.config.source ?? { provider: "native" },
-      }));
+      }))
+      .filter((m) => metricAllowed(this.agent, m.name));
     const dimensions = [...this.model.dimensions.values()]
       .filter((d) => !filter || filter.dimensions.includes(d.name))
       .map((d) => ({
@@ -215,7 +239,8 @@ export class GraneKernel {
         entity: d.config.entity,
         type: d.config.type ?? null,
         source: d.config.source ?? { provider: "native" },
-      }));
+      }))
+      .filter((d) => dimensionAllowed(this.agent, d.name));
     const entities = [...this.model.entities.values()]
       .filter((e) => !filter || filter.entities.includes(e.name))
       .map((e) => ({
@@ -253,6 +278,30 @@ export class GraneKernel {
       defaultRows: this.config.limits.default_rows,
       maxRows: this.config.limits.max_rows,
       schema: this.schemaCache,
+      now: this.now,
+      agent: this.agent,
+    });
+  }
+
+  /**
+   * A kernel bound to one authenticated agent. Shares the warehouse connector
+   * and schema cache. Catalog and resolve honour that agent's allow-lists.
+   */
+  bindAgent(grant: AgentGrant): GraneKernel {
+    const config: GraneConfig = {
+      ...this.config,
+      exploration: {
+        ...this.config.exploration,
+        enabled: this.config.exploration.enabled && grant.exploration,
+      },
+    };
+    return new GraneKernel(config, {
+      projectDir: this.projectDir,
+      schema: this.schemaCache ?? undefined,
+      providerWarnings: this.providerWarnings,
+      now: this.now,
+      agent: grant,
+      connector: this.connector,
     });
   }
 

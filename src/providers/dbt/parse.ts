@@ -229,7 +229,7 @@ function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: st
     label: str(raw.label),
     filter: str(raw.filter),
     agg: str(raw.agg),
-    expr: str(raw.expr),
+    expr: str(raw.expr) ?? str(nested(raw, "type_params", "expr")),
     measure: str(raw.measure),
     aggTimeDimension: str(raw.agg_time_dimension),
     numerator: metricRef(raw.numerator ?? nested(raw, "type_params", "numerator")),

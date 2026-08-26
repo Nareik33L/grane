@@ -13,3 +13,8 @@ metrics:
     type: cumulative
     type_params:
       measure: revenue
+
+  - name: revenue_per_order
+    type: derived
+    type_params:
+      expr: "{{ Metric('revenue') }} / {{ Metric('orders') }}"

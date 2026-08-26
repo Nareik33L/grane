@@ -38,6 +38,14 @@ limits:
 #     - users.password_hash
 #     - customers.ssn
 
+# HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
+# auth:
+#   agents:
+#     - id: finance
+#       token: \${FINANCE_AGENT_TOKEN}
+#       metrics: [revenue, orders]
+#       exploration: false
+
 # Extra governed definitions you already maintain. Omit type to auto-detect.
 # providers:
 #   - path: ../jaffle_shop          # dbt, Cube, LookML, Ossie, …

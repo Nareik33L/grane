@@ -52,4 +52,11 @@ describe("deterministic time resolution", () => {
   it("rejects unsupported specs", () => {
     expect(() => resolveRelativeRange("sometime", "UTC", NOW)).toThrow(/Unsupported/);
   });
+
+  it("resolves last_30d as the last 30 days ending today", () => {
+    expect(resolveRelativeRange("last_30d", "UTC", NOW)).toEqual({
+      from: "2026-07-27",
+      to: "2026-08-25",
+    });
+  });
 });

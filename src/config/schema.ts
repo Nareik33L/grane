@@ -200,6 +200,25 @@ export const explorationConfigSchema = z.object({
 export type ExplorationConfig = z.infer<typeof explorationConfigSchema>;
 
 /**
+ * Per-agent HTTP MCP credentials. When `agents` is non-empty, streamable HTTP
+ * requires `Authorization: Bearer <token>` (stdio stays local-process trusted).
+ * Omit `metrics` / `dimensions` to grant the full governed catalog.
+ */
+export const agentConfigSchema = z.object({
+  id: z.string().min(1),
+  token: z.string().min(1),
+  metrics: z.array(z.string()).optional(),
+  dimensions: z.array(z.string()).optional(),
+  exploration: z.boolean().default(true),
+});
+export type AgentConfig = z.infer<typeof agentConfigSchema>;
+
+export const authConfigSchema = z.object({
+  agents: z.array(agentConfigSchema).default([]),
+});
+export type AuthConfig = z.infer<typeof authConfigSchema>;
+
+/**
  * Extra semantic inputs. Native YAML in the Grane project is always loaded.
  * `providers` are universal connectors: point them at a dbt, Cube, LookML,
  * Apache Ossie, or generic fragment path. Omit `type` to auto-detect.
@@ -227,6 +246,7 @@ export const graneConfigSchema = z.object({
   connection: connectionConfigSchema.prefault({}),
   limits: limitsConfigSchema.prefault({}),
   exploration: explorationConfigSchema.prefault({}),
+  auth: authConfigSchema.prefault({}),
   providers: z.array(semanticProviderConfigSchema).default([]),
   entities: z.record(z.string(), entityConfigSchema).default({}),
   metrics: z.record(z.string(), metricConfigSchema).default({}),

@@ -26,6 +26,7 @@ interface View {
   name: string;
   table: string;
   path: string;
+  derived: boolean;
   dimensions: LookmlDim[];
   measures: { name: string; type: string; sql?: string; filters?: string }[];
 }
@@ -53,6 +54,7 @@ function parseLookml(text: string): { views: View[]; joins: { from: string; to: 
   const joins: { from: string; to: string; sqlOn: string; relationship: string }[] = [];
   for (const block of extractBlocks(text, "view")) {
     const tableMatch = block.body.match(/sql_table_name:\s*([^\s;]+)/);
+    const derived = /derived_table\s*:/.test(block.body);
     const table = tableName(tableMatch?.[1], block.name);
     const dimensions: View["dimensions"] = [];
     for (const dim of [...extractBlocks(block.body, "dimension"), ...extractBlocks(block.body, "dimension_group")]) {
@@ -68,7 +70,7 @@ function parseLookml(text: string): { views: View[]; joins: { from: string; to: 
       const filters = measure.body.match(/filters:\s*\[([^\]]+)\]/)?.[1];
       measures.push({ name: measure.name, type, sql, filters });
     }
-    views.push({ name: block.name, table, path: "", dimensions, measures });
+    views.push({ name: block.name, table, path: "", derived, dimensions, measures });
   }
   for (const block of extractBlocks(text, "explore")) {
     for (const join of extractBlocks(block.body, "join")) {
@@ -141,6 +143,12 @@ export function loadLookmlProvider(spec: SemanticProviderConfig, ctx: ProviderCo
   for (const view of views) {
     const source = { provider: "lookml" as const, path: view.path };
     const pk = viewPrimaryKey(view);
+    if (view.derived) {
+      out.warnings.push(
+        `LookML view "${view.name}" is a derived_table; Grane binds it to warehouse relation "${view.table}". ` +
+          `Materialize the PDT in the warehouse — Grane will not run the LookML SQL.`,
+      );
+    }
     out.entities[view.name] = withSource({ table: view.table, primary_key: pk }, source);
     for (const dim of view.dimensions) {
       const column = lookmlSqlColumn(dim.sql, view.table);

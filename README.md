@@ -210,7 +210,7 @@ types, and detects unsafe fan-out before an agent ever runs a query.
 
 ## Existing semantic models
 
-If the company already defines Revenue in dbt, Cube, Looker, or Apache Ossie,
+If the company already defines Revenue in dbt, Cube, Looker, Apache Ossie, or Malloy,
 do not copy it into Grane YAML. Point a connector at that project:
 
 ```yaml
@@ -242,7 +242,7 @@ Agents send analytical intent, not SQL:
   "dimensions": ["country"],
   "raw_dimensions": ["orders.discount_code"],
   "filters": [{ "field": "customer_type", "operator": "=", "value": "business" }],
-  "time": { "from": "2026-07-01", "to": "2026-07-31", "grain": "month" },
+  "time": { "period": "last_month", "grain": "month" },
   "order": [{ "field": "revenue", "direction": "desc" }],
   "limit": 100
 }

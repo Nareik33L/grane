@@ -40,17 +40,41 @@ export type RawMetricInput = z.infer<typeof rawMetricSchema>;
 export const trustLevelSchema = z.enum(["governed", "mixed", "exploratory"]);
 export type TrustLevel = z.infer<typeof trustLevelSchema>;
 
-export const queryTimeSchema = z.object({
-  /**
-   * Optional dimension name or table.column reference. Defaults to the
-   * canonical time_dimension of the requested metrics.
-   */
-  dimension: z.string().optional(),
-  from: dateString,
-  /** Inclusive end date. */
-  to: dateString,
-  grain: timeGrainSchema.optional(),
-});
+export const queryTimeSchema = z
+  .object({
+    /**
+     * Optional dimension name or table.column reference. Defaults to the
+     * canonical time_dimension of the requested metrics.
+     */
+    dimension: z.string().optional(),
+    /** Inclusive start date. Required with `to` unless `period` is set. */
+    from: dateString.optional(),
+    /** Inclusive end date. Required with `from` unless `period` is set. */
+    to: dateString.optional(),
+    /**
+     * Relative period resolved in the project timezone, e.g. `last_month`,
+     * `30d`, `this_year`. Cannot be combined with `from`/`to`.
+     */
+    period: z.string().min(1).optional(),
+    grain: timeGrainSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasPeriod = Boolean(value.period);
+    const hasFrom = Boolean(value.from);
+    const hasTo = Boolean(value.to);
+    if (hasPeriod && (hasFrom || hasTo)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "time.period cannot be combined with time.from or time.to",
+      });
+    }
+    if (!hasPeriod && (!hasFrom || !hasTo)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)",
+      });
+    }
+  });
 export type QueryTime = z.infer<typeof queryTimeSchema>;
 
 export const queryOrderSchema = z.object({
