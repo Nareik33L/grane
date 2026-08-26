@@ -41,15 +41,15 @@ docker run --rm \
   ghcr.io/nareik33l/grane:0.6.4
 ```
 
-Or from this repo:
+Or from this repo, against **your** warehouse (not the demo shop):
 
 ```bash
 export DATABASE_URL='postgres://grane_readonly:...@db.internal:5432/your_db'
-docker compose up -d --build
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 The compose file mounts `./analytics` read-only and writes audit JSONL to a
-named volume.
+named volume. The default `docker-compose.yml` is the self-contained demo.
 
 ## Read-only database user
 

@@ -8,8 +8,8 @@ import { resolveRelativeRange } from "../../src/query/time.js";
 import { GraneError } from "../../src/errors.js";
 
 /**
- * Integration tests for the full governed workflow against the example
- * database (docker compose -f example/docker-compose.yml up -d).
+ * Integration tests for the full governed workflow against the demo
+ * database (`docker compose up -d postgres --wait`).
  *
  * Skipped automatically when the database is unreachable.
  */
@@ -18,7 +18,7 @@ const DB_URL =
   process.env.GRANE_TEST_DATABASE_URL ??
   "postgres://grane_readonly:grane_readonly@localhost:5433/grane_demo";
 
-const exampleDir = join(dirname(fileURLToPath(import.meta.url)), "../../example/analytics");
+const exampleDir = join(dirname(fileURLToPath(import.meta.url)), "../../demo/analytics");
 
 async function databaseUp(): Promise<boolean> {
   const pool = new pg.Pool({ connectionString: DB_URL, connectionTimeoutMillis: 3000 });
@@ -71,12 +71,15 @@ describe.skipIf(!dbUp)("governed workflow (integration)", () => {
     const schema = await kernel.introspectSchema();
     const tableNames = schema.tables.map((t) => t.name).sort();
     expect(tableNames).toEqual([
+      "checkout_events",
       "customers",
       "order_items",
       "orders",
       "payments",
       "products",
       "refunds",
+      "subscriptions",
+      "support_tickets",
     ]);
     expect(schema.foreignKeys.length).toBeGreaterThanOrEqual(5);
   });

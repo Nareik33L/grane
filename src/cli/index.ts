@@ -17,6 +17,7 @@ import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
 import { GRANE_YML, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
+import { registerDemoCommand } from "./demo.js";
 
 const program = new Command();
 
@@ -437,5 +438,6 @@ function printTable(columns: string[], rows: Record<string, unknown>[]): void {
 }
 
 registerMcpCommands(program, { projectDir, fail });
+registerDemoCommand(program, { fail });
 
 program.parseAsync(process.argv).catch(fail);

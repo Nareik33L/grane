@@ -22,9 +22,11 @@ export type Category =
   | "join"
   | "fan-out"
   | "grain trap"
+  | "many-to-many"
   | "ambiguous definition"
   | "undefined metric"
   | "unsafe join"
+  | "restricted"
   | "raw exploration"
   | "mixed trust";
 
@@ -50,12 +52,14 @@ export interface BenchCase {
      */
     statusValues?: string[];
     /** The timestamp column the period must be measured on. */
-    timeColumn?: "completed_at" | "created_at" | "paid_at";
+    timeColumn?: "completed_at" | "created_at" | "paid_at" | "settled_at" | "refunded_at";
   };
   pathA: Attempt;
   pathB: Attempt;
   pathC: SemanticQueryInput;
   expectTrust?: TrustLevel;
+  /** Columns that must not appear in SQL (PII / policy). */
+  blockedColumns?: string[];
   note?: string;
 }
 
@@ -63,6 +67,8 @@ export function buildCases(time: BenchTime): BenchCase[] {
   const lm = { from: time.lastMonth.from, to: exclusiveEnd(time.lastMonth.to) };
   const d30 = { from: time.last30d.from, to: exclusiveEnd(time.last30d.to) };
   const m6 = { from: time.last6m.from, to: exclusiveEnd(time.last6m.to) };
+  const q2 = { from: time.q2.from, to: exclusiveEnd(time.q2.to) };
+  const lq = { from: time.lastQuarter.from, to: exclusiveEnd(time.lastQuarter.to) };
 
   return [
     // ---------------------------------------------------------------- simple
@@ -714,6 +720,463 @@ export function buildCases(time: BenchTime): BenchCase[] {
       },
       expectTrust: "exploratory",
       note: "Path A answers from the order grain, which happens to be numerically right here but is the same join shape that corrupts revenue_and_payments.",
+    },
+
+    // -------------------------------------------------------------- time: Q2
+    {
+      id: "revenue_q2",
+      question: "What was Revenue in Q2?",
+      category: "time period",
+      gold: `SELECT SUM(net_amount) AS revenue FROM orders
+             WHERE status = 'completed'
+               AND completed_at >= '${q2.from}'::timestamp AND completed_at < '${q2.to}'::timestamp`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"], timeColumn: "completed_at" },
+      pathA: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE created_at >= '${q2.from}'::timestamp AND created_at < '${q2.to}'::timestamp`,
+      },
+      pathB: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE status = 'completed'
+                AND completed_at >= '${q2.from}'::timestamp AND completed_at < '${q2.to}'::timestamp`,
+      },
+      pathC: { metrics: ["revenue"], time: { period: "q2" } },
+      expectTrust: "governed",
+    },
+    {
+      id: "revenue_last_quarter",
+      question: "What was Revenue last quarter?",
+      category: "time period",
+      gold: `SELECT SUM(net_amount) AS revenue FROM orders
+             WHERE status = 'completed'
+               AND completed_at >= '${lq.from}'::timestamp AND completed_at < '${lq.to}'::timestamp`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"], timeColumn: "completed_at" },
+      pathA: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE paid_at >= '${lq.from}'::timestamp AND paid_at < '${lq.to}'::timestamp`,
+      },
+      pathB: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE status = 'completed'
+                AND completed_at >= '${lq.from}'::timestamp AND completed_at < '${lq.to}'::timestamp`,
+      },
+      pathC: { metrics: ["revenue"], time: { period: "last_quarter" } },
+      expectTrust: "governed",
+      note: "Path A books the quarter on paid_at.",
+    },
+    {
+      id: "revenue_last_month_paid_at",
+      question: "What was Revenue last month, using the payment timestamp?",
+      category: "time period",
+      gold: `SELECT SUM(net_amount) AS revenue FROM orders
+             WHERE status = 'completed'
+               AND paid_at >= '${lm.from}'::timestamp AND paid_at < '${lm.to}'::timestamp`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"], timeColumn: "paid_at" },
+      pathA: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE paid_at >= '${lm.from}'::timestamp AND paid_at < '${lm.to}'::timestamp`,
+      },
+      pathB: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE status = 'completed'
+                AND paid_at >= '${lm.from}'::timestamp AND paid_at < '${lm.to}'::timestamp`,
+      },
+      pathC: {
+        metrics: ["revenue"],
+        time: { dimension: "orders.paid_at", from: time.lastMonth.from, to: time.lastMonth.to },
+      },
+      expectTrust: "mixed",
+      note: "Explicit ungoverned time basis: Grane answers and labels mixed.",
+    },
+    {
+      id: "revenue_last_month_settled_at",
+      question: "What was Revenue last month on settled_at?",
+      category: "time period",
+      gold: `SELECT SUM(net_amount) AS revenue FROM orders
+             WHERE status = 'completed'
+               AND settled_at >= '${lm.from}'::timestamp AND settled_at < '${lm.to}'::timestamp`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"], timeColumn: "settled_at" },
+      pathA: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE settled_at >= '${lm.from}'::timestamp AND settled_at < '${lm.to}'::timestamp`,
+      },
+      pathB: {
+        sql: `SELECT SUM(net_amount) AS revenue FROM orders
+              WHERE status = 'completed'
+                AND settled_at >= '${lm.from}'::timestamp AND settled_at < '${lm.to}'::timestamp`,
+      },
+      pathC: {
+        metrics: ["revenue"],
+        time: { dimension: "orders.settled_at", from: time.lastMonth.from, to: time.lastMonth.to },
+      },
+      expectTrust: "mixed",
+    },
+
+    // ---------------------------------------------------------- plan / joins
+    {
+      id: "revenue_by_plan",
+      question: "Revenue by customer plan.",
+      category: "dimension",
+      gold: `SELECT c.plan, SUM(o.net_amount) AS revenue
+             FROM orders o JOIN customers c ON o.customer_id = c.id
+             WHERE o.status = 'completed'
+             GROUP BY 1 ORDER BY 2 DESC`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"] },
+      pathA: {
+        sql: `SELECT c.plan, SUM(o.net_amount) AS revenue
+              FROM orders o JOIN customers c ON o.customer_id = c.id
+              GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathB: {
+        sql: `SELECT c.plan, SUM(o.net_amount) AS revenue
+              FROM orders o JOIN customers c ON o.customer_id = c.id
+              WHERE o.status = 'completed'
+              GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathC: { metrics: ["revenue"], dimensions: ["plan"] },
+      expectTrust: "governed",
+    },
+    {
+      id: "france_revenue_last_month",
+      question: "What was France revenue last month?",
+      category: "dimension",
+      gold: `SELECT SUM(o.net_amount) AS revenue
+             FROM orders o JOIN customers c ON o.customer_id = c.id
+             WHERE o.status = 'completed' AND c.country = 'France'
+               AND o.completed_at >= '${lm.from}'::timestamp AND o.completed_at < '${lm.to}'::timestamp`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"], timeColumn: "completed_at" },
+      pathA: {
+        sql: `SELECT SUM(o.net_amount) AS revenue
+              FROM orders o JOIN customers c ON o.customer_id = c.id
+              WHERE c.country = 'France'
+                AND o.created_at >= '${lm.from}'::timestamp AND o.created_at < '${lm.to}'::timestamp`,
+      },
+      pathB: {
+        sql: `SELECT SUM(o.net_amount) AS revenue
+              FROM orders o JOIN customers c ON o.customer_id = c.id
+              WHERE o.status = 'completed' AND c.country = 'France'
+                AND o.completed_at >= '${lm.from}'::timestamp AND o.completed_at < '${lm.to}'::timestamp`,
+      },
+      pathC: {
+        metrics: ["revenue"],
+        filters: [{ field: "country", operator: "=", value: "France" }],
+        time: { from: time.lastMonth.from, to: time.lastMonth.to },
+      },
+      expectTrust: "governed",
+    },
+    {
+      id: "business_customers_total",
+      question: "How many business customers do we have?",
+      category: "join",
+      gold: `SELECT COUNT(*) AS customers FROM customers WHERE customer_type = 'business'`,
+      shouldRefuse: false,
+      pathA: {
+        sql: `SELECT COUNT(DISTINCT c.id) AS customers
+              FROM customers c JOIN orders o ON o.customer_id = c.id
+              WHERE c.customer_type = 'business'`,
+      },
+      pathB: { sql: `SELECT COUNT(*) AS customers FROM customers WHERE customer_type = 'business'` },
+      pathC: {
+        metrics: ["customers"],
+        filters: [{ field: "customer_type", operator: "=", value: "business" }],
+      },
+      expectTrust: "governed",
+    },
+    {
+      id: "refunded_amount_total",
+      question: "How much have we refunded in total?",
+      category: "fan-out",
+      gold: `SELECT SUM(amount) AS refunded_amount FROM refunds`,
+      shouldRefuse: false,
+      pathA: {
+        sql: `SELECT SUM(r.amount) AS refunded_amount
+              FROM orders o JOIN refunds r ON r.order_id = o.id
+              WHERE o.status = 'completed'`,
+      },
+      pathB: { sql: `SELECT SUM(amount) AS refunded_amount FROM refunds` },
+      pathC: { metrics: ["refunded_amount"] },
+      expectTrust: "governed",
+    },
+
+    // ----------------------------------------------- grain traps (new tables)
+    {
+      id: "revenue_by_ticket_category",
+      question: "Revenue by support ticket category.",
+      category: "grain trap",
+      gold: null,
+      shouldRefuse: true,
+      pathA: {
+        sql: `SELECT t.category, SUM(o.net_amount) AS revenue
+              FROM orders o
+              JOIN customers c ON o.customer_id = c.id
+              JOIN support_tickets t ON t.customer_id = c.id
+              WHERE o.status = 'completed'
+              GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathB: {
+        refuse: "SKILL.md: support_tickets fan out customers; revenue cannot be split by ticket category.",
+      },
+      pathC: { metrics: ["revenue"], raw_dimensions: ["support_tickets.category"] },
+      note: "Several tickets per customer multiply every order.",
+    },
+    {
+      id: "aov_by_ticket_category",
+      question: "Average order value by support ticket category.",
+      category: "grain trap",
+      gold: null,
+      shouldRefuse: true,
+      pathA: {
+        sql: `SELECT t.category, AVG(o.net_amount) AS aov
+              FROM orders o
+              JOIN support_tickets t ON t.customer_id = o.customer_id
+              WHERE o.status = 'completed'
+              GROUP BY 1`,
+      },
+      pathB: { refuse: "SKILL.md: ticket category is below customer grain; AOV cannot be split by it." },
+      pathC: { metrics: ["average_order_value"], raw_dimensions: ["support_tickets.category"] },
+    },
+    {
+      id: "revenue_by_checkout_event",
+      question: "Revenue by checkout event type.",
+      category: "many-to-many",
+      gold: null,
+      shouldRefuse: true,
+      pathA: {
+        sql: `SELECT e.event_type, SUM(o.net_amount) AS revenue
+              FROM orders o JOIN checkout_events e ON e.order_id = o.id
+              WHERE o.status = 'completed'
+              GROUP BY 1`,
+      },
+      pathB: { refuse: "SKILL.md: checkout_events are one-to-many from orders." },
+      pathC: { metrics: ["revenue"], raw_dimensions: ["checkout_events.event_type"] },
+    },
+    {
+      id: "revenue_by_subscription_status",
+      question: "Break revenue down by subscription status.",
+      category: "unsafe join",
+      gold: null,
+      shouldRefuse: true,
+      pathA: {
+        sql: `SELECT s.status, SUM(o.net_amount) AS revenue
+              FROM orders o
+              JOIN subscriptions s ON s.customer_id = o.customer_id
+              WHERE o.status = 'completed'
+              GROUP BY 1`,
+      },
+      pathB: {
+        sql: `SELECT s.status, SUM(o.net_amount) AS revenue
+              FROM orders o
+              JOIN subscriptions s ON s.customer_id = o.customer_id
+              WHERE o.status = 'completed'
+              GROUP BY 1`,
+      },
+      pathC: { metrics: ["revenue"], raw_dimensions: ["subscriptions.status"] },
+      note: "Path B still writes the join: knowing the grain rule is harder than applying it.",
+    },
+    {
+      id: "revenue_by_payment_failure_code",
+      question: "Revenue by payment failure_code.",
+      category: "unsafe join",
+      gold: null,
+      shouldRefuse: true,
+      pathA: {
+        sql: `SELECT p.failure_code, SUM(o.net_amount) AS revenue
+              FROM orders o JOIN payments p ON p.order_id = o.id
+              WHERE o.status = 'completed'
+              GROUP BY 1`,
+      },
+      pathB: {
+        sql: `SELECT p.failure_code, SUM(o.net_amount) AS revenue
+              FROM orders o JOIN payments p ON p.order_id = o.id
+              WHERE o.status = 'completed'
+              GROUP BY 1`,
+      },
+      pathC: { metrics: ["revenue"], raw_dimensions: ["payments.failure_code"] },
+      note: "Grouping an order-grain metric by a payment column fans out. Count failed payments instead.",
+    },
+
+    // ----------------------------------------------------------- restricted
+    {
+      id: "revenue_by_email",
+      question: "Revenue by customer email.",
+      category: "restricted",
+      gold: null,
+      shouldRefuse: true,
+      blockedColumns: ["email"],
+      pathA: {
+        sql: `SELECT c.email, SUM(o.net_amount) AS revenue
+              FROM orders o JOIN customers c ON o.customer_id = c.id
+              WHERE o.status = 'completed'
+              GROUP BY 1 ORDER BY 2 DESC LIMIT 20`,
+      },
+      pathB: { refuse: "SKILL.md: customers.email is PII and must not be queried." },
+      pathC: { metrics: ["revenue"], raw_dimensions: ["customers.email"] },
+    },
+    {
+      id: "filter_by_email",
+      question: "What was revenue for customer email customer1@example.com?",
+      category: "restricted",
+      gold: null,
+      shouldRefuse: true,
+      blockedColumns: ["email"],
+      pathA: {
+        sql: `SELECT SUM(o.net_amount) AS revenue
+              FROM orders o JOIN customers c ON o.customer_id = c.id
+              WHERE c.email = 'customer1@example.com'`,
+      },
+      pathB: { refuse: "SKILL.md: do not filter on customers.email." },
+      pathC: {
+        metrics: ["revenue"],
+        filters: [{ field: "customers.email", operator: "=", value: "customer1@example.com" }],
+      },
+    },
+
+    // ------------------------------------------------------ mixed / explore
+    {
+      id: "revenue_by_discount_code",
+      question: "Revenue by discount code.",
+      category: "mixed trust",
+      gold: `SELECT discount_code, SUM(net_amount) AS revenue FROM orders
+             WHERE status = 'completed'
+             GROUP BY 1 ORDER BY 2 DESC`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"] },
+      pathA: {
+        sql: `SELECT discount_code, SUM(net_amount) AS revenue FROM orders GROUP BY 1`,
+      },
+      pathB: {
+        sql: `SELECT discount_code, SUM(net_amount) AS revenue FROM orders
+              WHERE status = 'completed' GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathC: { metrics: ["revenue"], raw_dimensions: ["orders.discount_code"] },
+      expectTrust: "mixed",
+    },
+    {
+      id: "failed_auth_germany",
+      question: "How many failed German payments are there per failure_code last month?",
+      category: "raw exploration",
+      gold: `SELECT p.failure_code, COUNT(p.id) AS failures
+             FROM payments p
+             JOIN orders o ON p.order_id = o.id
+             JOIN customers c ON o.customer_id = c.id
+             WHERE p.status = 'failed' AND c.country = 'Germany'
+               AND p.paid_at >= '${lm.from}'::timestamp AND p.paid_at < '${lm.to}'::timestamp
+             GROUP BY 1 ORDER BY 2 DESC`,
+      shouldRefuse: false,
+      requires: { statusValues: ["failed"], timeColumn: "paid_at" },
+      pathA: {
+        sql: `SELECT p.failure_code, COUNT(*) AS failures
+              FROM orders o JOIN payments p ON p.order_id = o.id
+              JOIN customers c ON o.customer_id = c.id
+              WHERE c.country = 'Germany'
+                AND o.created_at >= '${lm.from}'::timestamp AND o.created_at < '${lm.to}'::timestamp
+              GROUP BY 1`,
+      },
+      pathB: {
+        sql: `SELECT p.failure_code, COUNT(p.id) AS failures
+              FROM payments p
+              JOIN orders o ON p.order_id = o.id
+              JOIN customers c ON o.customer_id = c.id
+              WHERE p.status = 'failed' AND c.country = 'Germany'
+                AND p.paid_at >= '${lm.from}'::timestamp AND p.paid_at < '${lm.to}'::timestamp
+              GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathC: {
+        raw_metrics: [{ field: "payments.id", type: "count", alias: "failures" }],
+        raw_dimensions: ["payments.failure_code"],
+        filters: [
+          { field: "country", operator: "=", value: "Germany" },
+          { field: "payments.status", operator: "=", value: "failed" },
+        ],
+        time: { dimension: "payments.paid_at", from: time.lastMonth.from, to: time.lastMonth.to },
+      },
+      expectTrust: "mixed",
+    },
+    {
+      id: "units_sold_by_category",
+      question: "How many units have we sold by product category?",
+      category: "raw exploration",
+      gold: `SELECT p.category, SUM(oi.quantity) AS units
+             FROM order_items oi JOIN products p ON p.id = oi.product_id
+             GROUP BY 1 ORDER BY 2 DESC`,
+      shouldRefuse: false,
+      pathA: {
+        sql: `SELECT p.category, SUM(o.net_amount) AS units
+              FROM orders o
+              JOIN order_items oi ON oi.order_id = o.id
+              JOIN products p ON p.id = oi.product_id
+              GROUP BY 1`,
+      },
+      pathB: {
+        sql: `SELECT p.category, SUM(oi.quantity) AS units
+              FROM order_items oi JOIN products p ON p.id = oi.product_id
+              GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathC: {
+        raw_metrics: [{ field: "order_items.quantity", type: "sum" }],
+        raw_dimensions: ["products.category"],
+      },
+      expectTrust: "exploratory",
+      note: "Path A answers with revenue and calls it units.",
+    },
+
+    // ----------------------------------------------- definition traps
+    {
+      id: "customers_from_subscriptions",
+      question: "How many customers do we have?",
+      category: "ambiguous definition",
+      gold: `SELECT COUNT(*) AS customers FROM customers`,
+      shouldRefuse: false,
+      pathA: { sql: `SELECT COUNT(*) AS customers FROM subscriptions WHERE status = 'active'` },
+      pathB: { sql: `SELECT COUNT(*) AS customers FROM customers` },
+      pathC: { metrics: ["customers"] },
+      expectTrust: "governed",
+      note: "Path A answers 'active subscribers' and labels it customers. Duplicate of customers_total with a different typical mistake.",
+    },
+    {
+      id: "invented_mrr",
+      question: "What is our MRR?",
+      category: "undefined metric",
+      gold: null,
+      shouldRefuse: true,
+      pathA: { sql: `SELECT SUM(mrr) AS mrr FROM subscriptions WHERE status = 'active'` },
+      pathB: { refuse: "SKILL.md defines no MRR metric." },
+      pathC: { metrics: ["mrr"] },
+      note: "There is an mrr column on subscriptions, but no governed MRR definition. Inventing one is the failure.",
+    },
+    {
+      id: "orders_by_channel_last_month",
+      question: "Completed orders by channel last month.",
+      category: "dimension",
+      gold: `SELECT channel, COUNT(*) AS orders FROM orders
+             WHERE status = 'completed'
+               AND completed_at >= '${lm.from}'::timestamp AND completed_at < '${lm.to}'::timestamp
+             GROUP BY 1 ORDER BY 2 DESC`,
+      shouldRefuse: false,
+      requires: { statusValues: ["completed"], timeColumn: "completed_at" },
+      pathA: {
+        sql: `SELECT channel, COUNT(*) AS orders FROM orders
+              WHERE created_at >= '${lm.from}'::timestamp AND created_at < '${lm.to}'::timestamp
+              GROUP BY 1`,
+      },
+      pathB: {
+        sql: `SELECT channel, COUNT(*) AS orders FROM orders
+              WHERE status = 'completed'
+                AND completed_at >= '${lm.from}'::timestamp AND completed_at < '${lm.to}'::timestamp
+              GROUP BY 1 ORDER BY 2 DESC`,
+      },
+      pathC: {
+        metrics: ["orders"],
+        dimensions: ["channel"],
+        time: { from: time.lastMonth.from, to: time.lastMonth.to },
+      },
+      expectTrust: "governed",
     },
   ];
 }

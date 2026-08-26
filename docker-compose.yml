@@ -1,28 +1,49 @@
-# Runs the Grane MCP server against your own project and database.
+# Self-contained Grane demo: shop warehouse + MCP server.
 #
-#   1. Put your grane.yml / metrics.yml / ... in ./analytics
-#   2. export DATABASE_URL=postgres://readonly_user:...@your-host:5432/db
-#   3. docker compose up -d
+#   git clone https://github.com/Nareik33L/grane.git
+#   cd grane
+#   docker compose up
 #
-# Published image: ghcr.io/nareik33l/grane
-# Production (TLS, agent tokens, read-only DB): docs/production.md
+# Then ask an MCP agent: "Why did Revenue fall last month?"
+# MCP: http://localhost:8080/mcp
+# Postgres: localhost:5433 (user grane_readonly / grane_readonly, db grane_demo)
 #
-# For a self-contained demo (database included), see example/docker-compose.yml
-# and the Quickstart in README.md.
+# Production (your own database): docker compose -f docker-compose.prod.yml up
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: grane-demo-db
+    environment:
+      POSTGRES_USER: grane
+      POSTGRES_PASSWORD: grane
+      POSTGRES_DB: grane_demo
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./demo/seed/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./demo/seed/02_data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grane -d grane_demo"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   grane:
     build: .
     image: ghcr.io/nareik33l/grane:0.6.4
-    container_name: grane
+    container_name: grane-demo
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgres://grane_readonly:grane_readonly@postgres:5432/grane_demo
       GRANE_AUDIT_PATH: /var/log/grane/audit.jsonl
     volumes:
-      - ./analytics:/project:ro
-      - grane-audit:/var/log/grane
+      - ./demo/analytics:/project:ro
+      - grane-demo-audit:/var/log/grane
     ports:
       - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -31,10 +52,10 @@ services:
           "-e",
           "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 6
       start_period: 15s
 
 volumes:
-  grane-audit:
+  grane-demo-audit:

@@ -114,7 +114,7 @@ Queries and refusals are appended to `.grane/audit.jsonl` (see
 
 ```bash
 docker compose -f example/docker-compose.yml up -d --wait
-grane -p example/analytics serve
+grane -p demo/analytics serve
 ```
 
 Then connect your agent and ask: *"What was revenue by country last month?"*

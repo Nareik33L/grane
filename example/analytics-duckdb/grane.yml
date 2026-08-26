@@ -1,6 +1,6 @@
 project:
-  name: grane-example-duckdb
-  timezone: Europe/London
+  name: grane-demo-duckdb
+  timezone: UTC
   week:
     starts: monday
 
@@ -8,9 +8,6 @@ connection:
   type: duckdb
   path: warehouse.duckdb
   schema: main
-  # MotherDuck (after uploading warehouse.duckdb):
-  # path: md:grane_example?attach_mode=single
-  # token: ${MOTHERDUCK_TOKEN}
 
 limits:
   max_rows: 10000
@@ -19,19 +16,18 @@ limits:
 
 exploration:
   enabled: true
-  schemas:
-    - main
-  exclude: []
+  exclude:
+    - customers.email
 
 entities:
   customer:
     table: customers
     primary_key: id
-    description: A person or business that has registered with the shop.
+    description: A registered shop account. Not "someone who has ordered".
   order:
     table: orders
     primary_key: id
-    description: A customer order. Most metrics are defined at this grain.
+    description: A customer order. Revenue and most metrics live at this grain.
   product:
     table: products
     primary_key: id

@@ -35,6 +35,11 @@ export const SUPPORTED_RELATIVE_PERIODS = [
   "yesterday",
   "this_month",
   "last_month",
+  "this_quarter",
+  "last_quarter",
+  "q2",
+  "q3",
+  "q4",
   "this_year",
   "last_year",
   "this_fiscal_year",
@@ -96,11 +101,11 @@ export function addDays(date: CalendarDate, days: number): CalendarDate {
   return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
 }
 
-function startOfMonth(date: CalendarDate): CalendarDate {
+export function startOfMonth(date: CalendarDate): CalendarDate {
   return { ...date, day: 1 };
 }
 
-function addMonths(date: CalendarDate, months: number): CalendarDate {
+export function addMonths(date: CalendarDate, months: number): CalendarDate {
   const utc = new Date(Date.UTC(date.year, date.month - 1 + months, date.day));
   return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
 }
@@ -121,6 +126,42 @@ export function startOfFiscalYear(today: CalendarDate, startsMonth: number): Cal
   return { year: today.year - 1, month: startsMonth, day: 1 };
 }
 
+export function startOfQuarter(date: CalendarDate): CalendarDate {
+  const month = Math.floor((date.month - 1) / 3) * 3 + 1;
+  return { year: date.year, month, day: 1 };
+}
+
+export function quarterRange(year: number, quarter: 1 | 2 | 3 | 4): DateRange {
+  const startMonth = (quarter - 1) * 3 + 1;
+  const start = { year, month: startMonth, day: 1 };
+  const end = addDays(addMonths(start, 3), -1);
+  return { from: formatDate(start), to: formatDate(end) };
+}
+
+/** Compare calendar dates as YYYYMMDD integers. */
+function dateKey(date: CalendarDate): number {
+  return date.year * 10000 + date.month * 100 + date.day;
+}
+
+/**
+ * Q1–Q4 of the current calendar year if that quarter has started; otherwise
+ * the same quarter of the previous year. In August, `q2` is April–June of
+ * this year; in February, `q2` is April–June of last year.
+ *
+ * `q1` is resolved separately (year-to-date within calendar Q1) so a fiscal
+ * year can still force clarification.
+ */
+export function namedQuarterRange(quarter: 1 | 2 | 3 | 4, today: CalendarDate): DateRange {
+  const thisYear = quarterRange(today.year, quarter);
+  const start = {
+    year: today.year,
+    month: (quarter - 1) * 3 + 1,
+    day: 1,
+  };
+  if (dateKey(today) >= dateKey(start)) return thisYear;
+  return quarterRange(today.year - 1, quarter);
+}
+
 export interface DateRange {
   /** Inclusive start date (YYYY-MM-DD). */
   from: string;
@@ -138,7 +179,9 @@ export interface RelativeRangeOptions {
  *
  * Supported: `<N>d` (N days ending today), `<N>w`, `<N>m` (calendar months
  * ending today), `today`, `yesterday`, `this_month`, `last_month`,
- * `this_year`, `last_year`, `this_fiscal_year`, `last_fiscal_year`.
+ * `this_quarter`, `last_quarter`, `q2`–`q4`, `this_year`, `last_year`,
+ * `this_fiscal_year`, `last_fiscal_year`. `q1` is calendar Q1 year-to-date,
+ * or `ambiguous_query` when a fiscal year is configured.
  */
 export function resolveRelativeRange(
   spec: string,
@@ -181,12 +224,26 @@ export function resolveRelativeRange(
       return resolveYtd(today, options.fiscalStartsMonth);
     case "q1":
       return resolveQ1(today, options.fiscalStartsMonth);
+    case "this_quarter":
+      refuseFiscalQuarter(spec, options.fiscalStartsMonth);
+      return { from: formatDate(startOfQuarter(today)), to: formatDate(today) };
+    case "last_quarter": {
+      refuseFiscalQuarter(spec, options.fiscalStartsMonth);
+      const start = startOfQuarter(addMonths(startOfQuarter(today), -3));
+      const end = addDays(startOfQuarter(today), -1);
+      return { from: formatDate(start), to: formatDate(end) };
+    }
     default: {
       if (/^fy\d{4}$/.test(normalized)) {
         throw ambiguousQuery(
           `"${spec}" is ambiguous: fiscal years can be labelled by the calendar year they start in or the calendar year they end in. Use this_fiscal_year, last_fiscal_year, or an explicit from/to range.`,
           { period: spec },
         );
+      }
+      const namedQuarter = /^q([2-4])$/.exec(normalized);
+      if (namedQuarter) {
+        refuseFiscalQuarter(spec, options.fiscalStartsMonth);
+        return namedQuarterRange(Number(namedQuarter[1]) as 2 | 3 | 4, today);
       }
       const lastN = /^last_(\d+)(d|w|m)$/.exec(normalized);
       const match = lastN ?? /^(\d+)(d|w|m)$/.exec(normalized);
@@ -206,6 +263,15 @@ export function resolveRelativeRange(
       }
       return { from: formatDate(addDays(addMonths(today, -amount), 1)), to: formatDate(today) };
     }
+  }
+}
+
+function refuseFiscalQuarter(spec: string, fiscalStartsMonth: number | undefined): void {
+  if (fiscalStartsMonth != null) {
+    throw ambiguousQuery(
+      `"${spec}" is ambiguous when a fiscal year is configured: calendar quarter vs fiscal quarter. Use an explicit from/to range.`,
+      { period: spec },
+    );
   }
 }
 

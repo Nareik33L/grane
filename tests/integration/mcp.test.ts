@@ -15,7 +15,7 @@ const DB_URL =
   "postgres://grane_readonly:grane_readonly@localhost:5433/grane_demo";
 const PORT = 8199;
 
-const exampleDir = join(dirname(fileURLToPath(import.meta.url)), "../../example/analytics");
+const exampleDir = join(dirname(fileURLToPath(import.meta.url)), "../../demo/analytics");
 
 async function databaseUp(): Promise<boolean> {
   const pool = new pg.Pool({ connectionString: DB_URL, connectionTimeoutMillis: 3000 });

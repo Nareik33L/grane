@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="620" viewBox="0 0 760 620" role="img" aria-label="Grane demo: why did revenue fall last month">
+  <style>
+    .bg { fill: #0f1419; }
+    .frame { fill: none; stroke: #2b3640; }
+    .t { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+    .dim { fill: #8b9aab; }
+    .ask { fill: #e6edf3; }
+    .ok { fill: #3fb950; }
+    .warn { fill: #d29922; }
+    .lead { fill: #58a6ff; }
+  </style>
+  <rect class="bg" width="760" height="620" rx="12"/>
+  <rect class="frame" x="12" y="12" width="736" height="596" rx="8"/>
+  <text class="t ask" x="32" y="44">Why did revenue fall last month?</text>
+  <text class="t dim" x="32" y="72">Agent ’ Grane</text>
+  <text class="t ask" x="48" y="96">revenue</text>
+  <text class="t ask" x="48" y="114">period: last_month</text>
+  <text class="t dim" x="32" y="142">Grane</text>
+  <text class="t ask" x="48" y="166">Revenue: £184,230</text>
+  <text class="t ask" x="48" y="184">Change:  -14.3%</text>
+  <text class="t ok" x="48" y="208">trust: governed  every field is an approved definition.</text>
+  <text class="t dim" x="32" y="236">Agent ’ Grane</text>
+  <text class="t ask" x="48" y="260">revenue by country</text>
+  <text class="t ask" x="48" y="278">period: last_month</text>
+  <text class="t dim" x="32" y="306">Grane</text>
+  <text class="t ask" x="48" y="330">UK            -3.0%</text>
+  <text class="t ask" x="48" y="348">US            +2.0%</text>
+  <text class="t ask" x="48" y="366">Germany      -39.0%</text>
+  <text class="t ok" x="48" y="390">trust: governed</text>
+  <text class="t dim" x="32" y="418">Agent ’ Grane</text>
+  <text class="t ask" x="48" y="442">failed payments by failure_code  where country = Germany</text>
+  <text class="t dim" x="32" y="470">Grane</text>
+  <text class="t ask" x="48" y="494">CARD_AUTH_FAILED   +241.7%</text>
+  <text class="t warn" x="48" y="518">trust: mixed  a lead, not approved truth.</text>
+  <text class="t lead" x="32" y="554">Agent: Revenue fell 14.3%, primarily due to Germany.</text>
+  <text class="t lead" x="32" y="572">The strongest lead is card authentication failures.</text>
+  <text class="t dim" x="32" y="590">Revenue and geography are governed. The failure analysis is exploratory.</text>
+</svg>

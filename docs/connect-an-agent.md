@@ -80,7 +80,7 @@ Or run the published Docker image if you prefer containers.
 
 ### 2. Point Grane at your database
 
-Create a Grane project (`grane init`) or use the example under `example/analytics/`.
+Create a Grane project (`grane init`) or use the demo shop under `demo/analytics/`.
 
 In `grane.yml`:
 

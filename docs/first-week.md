@@ -117,4 +117,4 @@ npm install @duckdb/node-api
 # connection.type: duckdb and connection.path: ./warehouse.duckdb
 ```
 
-The repo's `example/analytics-duckdb` is a demo shop, not the default install.
+The repo's `demo/` shop is a try-it environment, not the default install.

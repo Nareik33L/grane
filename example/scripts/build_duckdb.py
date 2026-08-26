@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the example DuckDB warehouse and Parquet files for warehouse upload."""
+"""Build a DuckDB warehouse from the canonical demo seed."""
 
 from __future__ import annotations
 
@@ -8,27 +8,30 @@ from pathlib import Path
 import duckdb
 
 ROOT = Path(__file__).resolve().parents[1]
-SQL_PATH = ROOT / "seed" / "duckdb.sql"
+SQL_PATH = ROOT.parent / "demo" / "seed" / "duckdb.sql"
 DB_PATH = ROOT / "analytics-duckdb" / "warehouse.duckdb"
-PARQUET_DIR = ROOT / "analytics-duckdb" / "parquet"
-TABLES = ("customers", "products", "orders", "order_items", "payments", "refunds")
 
 
 def main() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PARQUET_DIR.mkdir(parents=True, exist_ok=True)
     if DB_PATH.exists():
         DB_PATH.unlink()
-
     con = duckdb.connect(str(DB_PATH))
     con.execute(SQL_PATH.read_text())
-
     print(f"Wrote {DB_PATH}")
-    for table in TABLES:
+    for table in (
+        "customers",
+        "products",
+        "orders",
+        "order_items",
+        "payments",
+        "refunds",
+        "subscriptions",
+        "checkout_events",
+        "support_tickets",
+    ):
         count = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-        parquet = PARQUET_DIR / f"{table}.parquet"
-        con.execute(f"COPY {table} TO '{parquet}' (FORMAT PARQUET, COMPRESSION ZSTD)")
-        print(f"  {table:12} {count:5} rows  ->  {parquet.name}")
+        print(f"  {table:16} {count:5} rows")
     con.close()
 
 

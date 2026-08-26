@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Canonical demo shop in `demo/`: planted last-month revenue drop (Germany /
+  `CARD_AUTH_FAILED`), `grane demo`, and `docker compose up` as the zero-to-query
+  path. The same dataset powers the A/B/C benchmark.
+- Benchmark expanded to ~50 questions with a permission score and a five-run
+  compile check for Grane. Paths A and B remain representative SQL fixtures.
+- `time.period` accepts `this_quarter`, `last_quarter`, and `q2`–`q4`
+  (calendar). `q1` stays the 0.6.5 rule: year-to-date within calendar Q1, or
+  `ambiguous_query` when a fiscal year is configured.
+- Hostile-input and information-boundary regression tests (SQL injection in
+  filters, blocked `customers.email` on every access path, grain traps on
+  tickets / checkout events / payment failure codes).
+- README opening shortened around the demo.
+
 ## 0.6.5
 
 - Deterministic kernel capabilities used by the Gauntlet:
