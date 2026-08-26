@@ -1,0 +1,3 @@
+# Generated project state — never ship in the npm tarball.
+.grane/
+**/.grane/
