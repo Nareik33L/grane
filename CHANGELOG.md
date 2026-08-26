@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Agent dimension allow-lists apply to governed filters, `time.dimension`,
   catalog `available_dimensions`, and `undefined_dimension` suggestions.

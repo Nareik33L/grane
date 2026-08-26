@@ -1,6 +1,6 @@
 {
   "name": "grane-analytics",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Open-source deterministic analytics harness for AI agents. Connect your warehouse, define business metrics in code, and let MCP agents query them — plus permitted raw warehouse columns, clearly labeled.",
   "license": "Apache-2.0",
   "type": "module",
