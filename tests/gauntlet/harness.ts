@@ -158,6 +158,8 @@ function alignCustomVerdict(scenario: Scenario, verdict: Verdict): Verdict {
   }
   return verdict;
 }
+
+function guessCode(scenario: Scenario): VerdictCode {
   if (scenario.guessSeverity === "security") return "SECURITY CRITICAL";
   if (scenario.guessSeverity === "standard") return "FAIL";
   return "CRITICAL FAIL";
