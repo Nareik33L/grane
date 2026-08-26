@@ -10,6 +10,7 @@ import { serveHttp, serveStdio } from "../mcp/transport.js";
 import { registerMcpCommands } from "./mcp.js";
 import { GraneError } from "../errors.js";
 import type { SemanticQueryInput } from "../query/model.js";
+import { trustHeadline } from "../query/trust.js";
 import { listExplorableColumns } from "../explore/raw.js";
 import { explorationPolicy } from "../explore/policy.js";
 import { promoteColumn } from "../explore/promote.js";
@@ -271,6 +272,8 @@ program
           console.log(JSON.stringify(result, null, 2));
           return;
         }
+        console.log(trustHeadline(result.trust));
+        console.log("");
         for (const note of result.notes) console.error(`note: ${note}`);
         if (result.warning) console.error(`warning: ${result.warning}`);
         printTable(result.columns, result.rows);

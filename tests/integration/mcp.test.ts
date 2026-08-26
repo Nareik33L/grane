@@ -53,7 +53,9 @@ describe.skipIf(!dbUp)("MCP over streamable HTTP (integration)", () => {
 
   const parseText = (result: Awaited<ReturnType<Client["callTool"]>>) => {
     const content = result.content as { type: string; text: string }[];
-    return JSON.parse(content[0]!.text) as Record<string, unknown>;
+    const text = content[0]!.text;
+    const start = text.indexOf("{");
+    return JSON.parse(start >= 0 ? text.slice(start) : text) as Record<string, unknown>;
   };
 
   it("exposes the four-tool surface", async () => {
@@ -88,6 +90,11 @@ describe.skipIf(!dbUp)("MCP over streamable HTTP (integration)", () => {
       },
     });
     const payload = parseText(result);
+    expect((result.content as { text: string }[])[0]!.text.startsWith("trust: governed")).toBe(true);
+    expect(payload["headline"]).toBe(
+      "trust: governed — every field is an approved definition.",
+    );
+    expect(Object.keys(payload)[0]).toBe("trust");
     expect((payload["rows"] as unknown[]).length).toBeGreaterThan(0);
     const provenance = payload["provenance"] as Record<string, unknown>;
     expect(provenance["trust"]).toBe("governed");

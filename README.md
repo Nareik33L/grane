@@ -248,11 +248,16 @@ Agents send analytical intent, not SQL:
 }
 ```
 
-Every result carries a trust level and provenance:
+Every result leads with a trust headline, then JSON (trust first):
+
+```text
+trust: mixed — approved metrics plus raw fields; a lead, not approved truth.
+```
 
 ```json
 {
   "trust": "mixed",
+  "headline": "trust: mixed — approved metrics plus raw fields; a lead, not approved truth.",
   "governed": ["revenue"],
   "ungoverned": ["orders.discount_code"],
   "warning": "orders.discount_code is not defined in the Grane semantic model",

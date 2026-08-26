@@ -25,6 +25,7 @@ export {
   type SemanticQueryInput,
   type TrustLevel,
 } from "./query/model.js";
+export { trustHeadline, TRUST_HEADLINES } from "./query/trust.js";
 export { resolveQuery, type ResolvedQuery } from "./query/resolve.js";
 export { resolveRelativeRange, todayInTimeZone } from "./query/time.js";
 export { compileQuery, type CompiledQuery } from "./compile/compiler.js";

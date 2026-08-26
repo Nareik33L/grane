@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { GraneKernel } from "../kernel.js";
-import { semanticQuerySchema } from "../query/model.js";
+import { semanticQuerySchema, type TrustLevel } from "../query/model.js";
 import { GraneError } from "../errors.js";
+import { mcpTrustText } from "../query/trust.js";
 
 /**
  * The Grane MCP surface. Deliberately small and difficult to misuse:
@@ -20,6 +21,10 @@ type ToolResult = {
 
 function ok(payload: unknown): ToolResult {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+}
+
+function okTrust(payload: { trust: TrustLevel; [key: string]: unknown }): ToolResult {
+  return { content: [{ type: "text", text: mcpTrustText(payload) }] };
 }
 
 function refuse(err: unknown): ToolResult {
@@ -54,7 +59,9 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
         "the SQL itself; never write SQL. For relative windows send time.period (last_month, 30d) " +
         "instead of computing from/to dates." +
         explorationHint +
-        " If Grane refuses a request (e.g. undefined_metric), report that rather than inventing a definition.",
+        " If Grane refuses a request (e.g. undefined_metric), report that rather than inventing a definition. " +
+        "When you present query results, the first sentence of your reply must be the trust headline. " +
+        "Put that same headline in any chart title. Never present mixed or exploratory numbers as approved business truth.",
     },
   );
 
@@ -94,14 +101,14 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
       title: "Validate a semantic query (dry run)",
       description:
         "Check a proposed Grane Query Model v1 request without executing it. Returns the resolved " +
-        "definitions, trust level and generated SQL if the query is valid and analytically safe, or a " +
-        "structured refusal explaining why it is not.",
+        "definitions, trust headline, and generated SQL if the query is valid and analytically safe, or a " +
+        "structured refusal explaining why it is not. Lead any summary with the trust headline.",
       inputSchema: { query: semanticQuerySchema.describe(querySchemaDescription) },
     },
     async ({ query }) => {
       try {
         const explained = await kernel.explain(query);
-        return ok({ valid: true, ...explained });
+        return okTrust({ valid: true, ...explained });
       } catch (err) {
         return refuse(err);
       }
@@ -114,22 +121,22 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
       title: "Run a governed or exploratory analytical query",
       description:
         "Execute a Grane Query Model v1 request. Grane resolves names, validates safety, compiles " +
-        "deterministic SQL, executes it read-only and returns rows plus provenance. " +
+        "deterministic SQL, executes it read-only and returns a trust headline, then rows plus provenance. " +
         "Use raw_dimensions / raw_metrics for permitted warehouse columns that are not in the semantic model. " +
-        "Inspect trust (governed | mixed | exploratory) before presenting conclusions.",
+        "The first sentence of your reply to the user must be the trust headline. Put it in any chart title too.",
       inputSchema: { query: semanticQuerySchema.describe(querySchemaDescription) },
     },
     async ({ query }) => {
       try {
         const result = await kernel.query(query);
-        return ok({
-          columns: result.columns,
-          rows: result.rows,
-          notes: result.notes,
+        return okTrust({
           trust: result.trust,
           governed: result.governed,
           ungoverned: result.ungoverned,
           warning: result.warning,
+          columns: result.columns,
+          rows: result.rows,
+          notes: result.notes,
           provenance: result.provenance,
         });
       } catch (err) {
@@ -143,13 +150,14 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
     {
       title: "Explain a semantic query",
       description:
-        "Show how Grane would answer a Query Model v1 request without executing it: the metric " +
-        "definitions and versions used, the trust level, the join plan, and the exact SQL that would run.",
+        "Show how Grane would answer a Query Model v1 request without executing it: the trust headline, " +
+        "metric definitions and versions, the join plan, and the exact SQL that would run. " +
+        "Lead any summary with the trust headline.",
       inputSchema: { query: semanticQuerySchema.describe(querySchemaDescription) },
     },
     async ({ query }) => {
       try {
-        return ok(await kernel.explain(query));
+        return okTrust({ ...(await kernel.explain(query)) });
       } catch (err) {
         return refuse(err);
       }

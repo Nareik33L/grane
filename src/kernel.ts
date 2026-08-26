@@ -14,7 +14,7 @@ import { recordRawUsage } from "./explore/usage.js";
 import type { AgentGrant } from "./auth/agents.js";
 import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
 
-export const GRANE_VERSION = "0.6.2";
+export const GRANE_VERSION = "0.6.3";
 
 export interface ServerInfo {
   name: "grane";

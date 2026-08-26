@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3
+
+- MCP `query` / `explain` / `validate` lead with a trust headline, then JSON
+  with `trust` first. Agents must open the reply with that line and put it in
+  any chart title. The CLI prints the same headline above the table.
+
 ## 0.6.2
 
 - `grane mcp connect` with stdio replaces a leftover HTTP entry of the same

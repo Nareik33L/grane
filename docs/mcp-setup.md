@@ -71,16 +71,17 @@ ChatGPT requires a **public HTTPS URL** and Developer Mode (paid plan). Local
 | Tool | Input | Returns |
 | --- | --- | --- |
 | `catalog` | `{ search? }` | metrics, dimensions, entities, explorable columns, server capabilities |
-| `query` | `{ query: QueryModelV1 }` | rows + `trust` (`governed` \| `mixed` \| `exploratory`) + provenance |
-| `validate` | `{ query: QueryModelV1 }` | dry-run with SQL, or structured refusal |
-| `explain` | `{ query: QueryModelV1 }` | definitions, trust, join plan, SQL (no execution) |
+| `query` | `{ query: QueryModelV1 }` | trust headline, then rows + `trust` + provenance |
+| `validate` | `{ query: QueryModelV1 }` | dry-run with trust headline and SQL, or structured refusal |
+| `explain` | `{ query: QueryModelV1 }` | trust headline, definitions, join plan, SQL (no execution) |
 
 Query Model v1 accepts governed `metrics` / `dimensions` and, when exploration
 is enabled, `raw_dimensions` (`table.column`) and `raw_metrics`
 (`{ field, type, alias? }`). Relative windows use `time.period` (`last_month`,
 `30d`, `this_year`, …) resolved in the project timezone; `from`/`to` still work.
 Grane compiles the SQL either way. Do not present `trust: mixed` or
-`trust: exploratory` results as approved business truth.
+`trust: exploratory` results as approved business truth. Agents must open the
+reply with the trust headline and put it in any chart title.
 
 ## Per-agent HTTP auth
 
