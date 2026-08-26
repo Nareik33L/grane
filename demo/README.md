@@ -9,6 +9,8 @@ docker compose up
 npx grane-analytics demo
 ```
 
+The 40-second walkthrough is [`why-revenue-fell.gif`](why-revenue-fell.gif) (still: [`why-revenue-fell.svg`](why-revenue-fell.svg)).
+
 Then ask an agent:
 
 > Why did Revenue fall last month?

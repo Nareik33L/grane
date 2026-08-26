@@ -18,7 +18,7 @@ Agent → MCP → Grane → Warehouse
 - No LLM inside Grane
 - Fully self-hosted
 
-![Why did revenue fall last month?](demo/why-revenue-fell.svg)
+![Why did revenue fall last month?](demo/why-revenue-fell.gif)
 
 ## Try it
 
