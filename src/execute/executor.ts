@@ -33,6 +33,19 @@ export interface QueryResult {
 const WRITE_KEYWORDS =
   /^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do)\b/i;
 
+/**
+ * Read-only execution policy. Mutation tests flip `refuseWrites` to prove
+ * the Gauntlet detects a disabled write guard. Production code must leave
+ * this `true`.
+ */
+export const executionPolicy = {
+  refuseWrites: true,
+};
+
+export function isWriteSql(sql: string): boolean {
+  return WRITE_KEYWORDS.test(sql);
+}
+
 export function newQueryId(): string {
   return `q_${randomBytes(6).toString("hex")}`;
 }
@@ -42,7 +55,7 @@ export async function executeCompiled(
   compiled: CompiledQuery,
   limits: LimitsConfig,
 ): Promise<QueryResult> {
-  if (WRITE_KEYWORDS.test(compiled.sql)) {
+  if (executionPolicy.refuseWrites && isWriteSql(compiled.sql)) {
     throw unsafeQuery("Refusing to execute a non-SELECT statement.");
   }
   const startedAt = Date.now();

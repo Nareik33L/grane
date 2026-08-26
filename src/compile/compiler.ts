@@ -170,6 +170,9 @@ export function compileQuery(
       // Measure is on the base table or safely reachable: aggregate directly.
       joinPathTo(measure.table, `measure of metric "${metric.name}"`);
       const filterClause = andFilters(compileMetricFilters(metric.filters, params, col), perMetricTime);
+      if (metric.config.type === "count_distinct") {
+        return { expr: filteredDistinctCount(dialect, col(measure), filterClause) };
+      }
       const fn = aggregateFn(metric);
       return {
         expr: filterClause
@@ -535,6 +538,23 @@ function aggregateFn(metric: Metric): "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" {
 function directAggregate(metric: Metric, measureExpr: string): string {
   if (metric.config.type === "count_distinct") return `COUNT(DISTINCT ${measureExpr})`;
   return `${aggregateFn(metric)}(${measureExpr})`;
+}
+
+/**
+ * COUNT(DISTINCT …) must keep DISTINCT when a FILTER/CASE qualifier is
+ * applied. `COUNT(x) FILTER (WHERE …)` silently becomes a row count — the
+ * interaction bug the Gauntlet caught for last-month distinct + dimension.
+ */
+function filteredDistinctCount(
+  dialect: SqlDialect,
+  measureExpr: string,
+  filterClause: string | null,
+): string {
+  if (!filterClause) return `COUNT(DISTINCT ${measureExpr})`;
+  if (dialect.supportsFilterClause) {
+    return `COUNT(DISTINCT ${measureExpr}) FILTER (WHERE ${filterClause})`;
+  }
+  return `COUNT(DISTINCT CASE WHEN ${filterClause} THEN ${measureExpr} END)`;
 }
 
 function andFilters(...parts: Array<string | null | undefined>): string | null {

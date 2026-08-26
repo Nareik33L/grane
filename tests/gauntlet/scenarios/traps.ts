@@ -12,6 +12,8 @@ import type { Scenario } from "../types.js";
 import { GAUNTLET_NOW } from "../types.js";
 import { tryExecuteRawSql } from "../harness.js";
 import { compositionTraps } from "./composition.js";
+import { interactionTraps } from "./interactions.js";
+import { metamorphicTraps } from "./metamorphic.js";
 import { semiAdditiveTraps } from "./semi.js";
 
 function sc(partial: Scenario): Scenario {
@@ -33,6 +35,8 @@ export function trapScenarios(): Scenario[] {
     ...readonlyTraps(),
     ...agentTraps(),
     ...compositionTraps(),
+    ...interactionTraps(),
+    ...metamorphicTraps(),
   ];
 }
 

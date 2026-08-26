@@ -10,6 +10,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../../src/config/sc
 import { duckdbDialect } from "../../src/connectors/dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../../src/connectors/types.js";
 import { unsafeQuery } from "../../src/errors.js";
+import { executionPolicy, isWriteSql } from "../../src/execute/executor.js";
 import {
   ACCOUNT_MEMBERS,
   ACCOUNTS,
@@ -236,7 +237,7 @@ export class GauntletWarehouse implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (WRITE_HEAD.test(sql)) {
+    if (executionPolicy.refuseWrites && (WRITE_HEAD.test(sql) || isWriteSql(sql))) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     return this.enqueue(async () => {

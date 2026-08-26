@@ -284,6 +284,117 @@ export const GOLD_SQL = {
       AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2023-10-01'
       AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-01-01'
   `,
+  successfulRevenueThisQuarter: `
+    SELECT SUM(p.amount)::DOUBLE AS v
+    FROM payments p
+    JOIN orders o ON o.id = p.order_id
+    WHERE p.status = 'succeeded'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-01-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
+  successfulRevenueThisQuarterWeb: `
+    SELECT SUM(p.amount)::DOUBLE AS v
+    FROM payments p
+    JOIN orders o ON o.id = p.order_id
+    WHERE p.status = 'succeeded'
+      AND o.channel = 'web'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-01-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-16'
+  `,
+  aovByChannelLastMonth: `
+    SELECT channel,
+      (
+        SUM(net_amount) FILTER (
+          WHERE status = 'completed'
+            AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+            AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+        )::DOUBLE
+        / NULLIF(
+          COUNT(id) FILTER (
+            WHERE status = 'completed'
+              AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+              AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+          ),
+          0
+        )
+      ) AS average_order_value
+    FROM orders
+    GROUP BY 1
+  `,
+  revenueLastMonthChannelIn: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND channel IN ('web', 'mobile')
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+  `,
+  revenueThisWeekMondayNyPin: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE 'America/New_York') >= TIMESTAMP '2024-03-04'
+      AND (completed_at::timestamptz AT TIME ZONE 'America/New_York') < TIMESTAMP '2024-03-11'
+  `,
+  revenueThisWeekMondayLondonPin: `
+    SELECT SUM(net_amount)::DOUBLE AS v FROM orders
+    WHERE status = 'completed'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-03-11'
+      AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-12'
+  `,
+  conversionWebLastMonth: `
+    SELECT (
+      COUNT(id) FILTER (
+        WHERE status = 'completed'
+          AND channel = 'web'
+          AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+          AND (completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+      )::DOUBLE
+      / NULLIF(
+        COUNT(id) FILTER (
+          WHERE channel = 'web'
+            AND (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+            AND (created_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+        ),
+        0
+      )
+    ) AS v
+    FROM orders
+  `,
+  orderingCustomersLastMonthByCountry: `
+    SELECT c.country AS customer_country, COUNT(DISTINCT o.customer_id)::DOUBLE AS ordering_customers
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.id
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+    GROUP BY 1
+  `,
+  orderingCustomersLastMonthByBilling: `
+    SELECT b.country AS billing_country, COUNT(DISTINCT o.customer_id)::DOUBLE AS ordering_customers
+    FROM orders o
+    JOIN billing_addresses b ON b.order_id = o.id
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+    GROUP BY 1
+  `,
+  revenueLastMonthByChannelCountry: `
+    SELECT o.channel AS channel, c.country AS customer_country, SUM(o.net_amount)::DOUBLE AS revenue
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.id
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+    GROUP BY 1, 2
+  `,
+  revenueLastMonthShipping: `
+    SELECT s.country AS shipping_country, SUM(o.net_amount)::DOUBLE AS revenue
+    FROM orders o
+    JOIN shipping_addresses s ON s.order_id = o.id
+    WHERE o.status = 'completed'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') >= TIMESTAMP '2024-02-01'
+      AND (o.completed_at::timestamptz AT TIME ZONE '${GAUNTLET_TZ}') < TIMESTAMP '2024-03-01'
+    GROUP BY 1
+  `,
 };
 
 /**

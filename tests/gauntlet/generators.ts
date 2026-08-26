@@ -607,7 +607,41 @@ export function generateEquivalent(): Scenario[] {
                 detail: `trust ${left.compiled.trust} vs ${right.compiled.trust}`,
               };
             }
-            return { code: "PASS", detail: `both ${left.compiled.trust}` };
+            const leftRows = await ctx.kernel.query(a as never);
+            const rightRows = await ctx.kernel.query(b as never);
+            if (name === "dim-order") {
+              const keyOf = (row: Record<string, unknown>) =>
+                `${String(row["channel"])}\u0001${String(row["customer_country"])}`;
+              const map = (rows: Record<string, unknown>[]) => {
+                const out = new Map<string, number>();
+                for (const row of rows) out.set(keyOf(row), Number(row["revenue"]));
+                return out;
+              };
+              const lm = map(leftRows.rows);
+              const rm = map(rightRows.rows);
+              if (lm.size !== rm.size) {
+                return { code: "CRITICAL FAIL", detail: `dim-order row counts ${lm.size} vs ${rm.size}` };
+              }
+              for (const [key, value] of lm) {
+                const other = rm.get(key);
+                if (other == null || Math.abs(value - other) > 0.005) {
+                  return { code: "CRITICAL FAIL", detail: `dim-order ${key} ${value} vs ${String(other)}` };
+                }
+              }
+              return { code: "PASS", detail: `both ${left.compiled.trust}, ${lm.size} groups` };
+            }
+            const first = (rows: Record<string, unknown>[]) => {
+              const row = rows[0];
+              if (!row) return null;
+              const metric = Object.keys(row).find((k) => k !== "channel" && k !== "customer_country");
+              return metric ? Number(row[metric]) : Number(Object.values(row)[0]);
+            };
+            const lv = first(leftRows.rows);
+            const rv = first(rightRows.rows);
+            if (lv == null || rv == null || Math.abs(lv - rv) > 0.005) {
+              return { code: "CRITICAL FAIL", detail: `executed ${String(lv)} vs ${String(rv)}` };
+            }
+            return { code: "PASS", detail: `both ${left.compiled.trust}, ${lv}` };
           } catch (err) {
             try {
               ctx.kernel.compile(b as never);
@@ -927,6 +961,162 @@ export function generateConcurrency(): Scenario[] {
         return { code: "PASS", detail: "100 parallel compiles isolated" };
       },
     }),
+    sc({
+      id: "gen/conc/agent-isolation",
+      category: "concurrency",
+      mode: "custom",
+      question: "Intern and analyst kernels interleaved must not leak permissions, trust, or results.",
+      interpretation:
+        "bindAgent shares the warehouse, not grants. Intern compiling customer_country must refuse while analyst succeeds.",
+      expectedSqlBehaviour: "Per-agent allow-lists remain isolated under Promise.all.",
+      guessSeverity: "security",
+      expectation: { kind: "execute", trust: "governed" },
+      custom: async (ctx) => {
+        const { toGrant } = await import("../../src/auth/agents.js");
+        const intern = ctx.kernel.bindAgent(
+          toGrant({
+            id: "intern",
+            token: "intern-token",
+            metrics: ["revenue"],
+            dimensions: ["channel"],
+            exploration: false,
+          }),
+        );
+        const analyst = ctx.kernel.bindAgent(
+          toGrant({
+            id: "analyst",
+            token: "analyst-token",
+            metrics: ["revenue", "orders", "average_order_value"],
+            dimensions: ["customer_country", "channel"],
+            exploration: true,
+          }),
+        );
+        const internCountry = { metrics: ["revenue"], dimensions: ["customer_country"] };
+        const internChannel = { metrics: ["revenue"], dimensions: ["channel"] };
+        const analystCountry = { metrics: ["revenue"], dimensions: ["customer_country"] };
+        const internExplore = { metrics: ["revenue"], raw_dimensions: ["orders.discount_code"] };
+
+        const tasks = Array.from({ length: 24 }, (_, i) => {
+          if (i % 4 === 0) {
+            return Promise.resolve().then(() => {
+              const c = intern.compile(internChannel);
+              if (c.compiled.trust !== "governed") throw new Error(`intern channel trust ${c.compiled.trust}`);
+              if (!c.compiled.sql.includes("channel")) throw new Error("intern channel SQL missing channel");
+              return "intern-ok" as const;
+            });
+          }
+          if (i % 4 === 1) {
+            return Promise.resolve().then(() => {
+              try {
+                intern.compile(internCountry);
+                throw new Error("intern compiled customer_country");
+              } catch (err) {
+                if (err instanceof Error && err.message === "intern compiled customer_country") throw err;
+                if (err instanceof GraneError) return "intern-refused" as const;
+                throw err;
+              }
+            });
+          }
+          if (i % 4 === 2) {
+            return Promise.resolve().then(() => {
+              try {
+                intern.compile(internExplore);
+                throw new Error("intern compiled exploration");
+              } catch (err) {
+                if (err instanceof Error && err.message === "intern compiled exploration") throw err;
+                if (err instanceof GraneError && err.refusal.status === "exploration_disabled") {
+                  return "intern-explore-refused" as const;
+                }
+                throw err instanceof Error ? err : new Error(String(err));
+              }
+            });
+          }
+          return Promise.resolve().then(() => {
+            const c = analyst.compile(analystCountry);
+            if (c.compiled.trust !== "governed") throw new Error(`analyst trust ${c.compiled.trust}`);
+            if (!/customer|country/i.test(c.compiled.sql)) {
+              throw new Error("analyst country SQL missing country");
+            }
+            return "analyst-ok" as const;
+          });
+        });
+        try {
+          const settled = await Promise.all(tasks);
+          const internOk = settled.filter((s) => s === "intern-ok").length;
+          const internRefused = settled.filter((s) => s === "intern-refused").length;
+          const analystOk = settled.filter((s) => s === "analyst-ok").length;
+          if (internOk === 0 || internRefused === 0 || analystOk === 0) {
+            return { code: "CRITICAL FAIL", detail: `isolation counts ${settled.join(",")}` };
+          }
+          const [internExec, analystExec] = await Promise.all([
+            intern.query(internChannel),
+            analyst.query(analystCountry),
+          ]);
+          if (internExec.trust !== "governed" || analystExec.trust !== "governed") {
+            return { code: "CRITICAL FAIL", detail: "trust leaked across agents" };
+          }
+          if (internExec.provenance.generated_sql === analystExec.provenance.generated_sql) {
+            return { code: "CRITICAL FAIL", detail: "intern and analyst produced identical SQL" };
+          }
+          return { code: "PASS", detail: `isolated ${settled.length} interleaved compiles` };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (/intern compiled/.test(message)) return { code: "SECURITY CRITICAL", detail: message };
+          return { code: "CRITICAL FAIL", detail: message };
+        }
+      },
+    }),
+    sc({
+      id: "gen/conc/parallel-query-results",
+      category: "concurrency",
+      mode: "custom",
+      question: "Parallel intern/analyst executions must keep their own numbers.",
+      interpretation: "No shared mutable query state. Analyst country slice ≠ intern channel slice.",
+      expectedSqlBehaviour: "Distinct result sets.",
+      expectation: { kind: "execute", trust: "governed" },
+      custom: async (ctx) => {
+        const { toGrant } = await import("../../src/auth/agents.js");
+        const intern = ctx.kernel.bindAgent(
+          toGrant({
+            id: "intern",
+            token: "intern-token",
+            metrics: ["revenue"],
+            dimensions: ["channel"],
+            exploration: false,
+          }),
+        );
+        const analyst = ctx.kernel.bindAgent(
+          toGrant({
+            id: "analyst",
+            token: "analyst-token",
+            metrics: ["revenue", "orders", "average_order_value"],
+            dimensions: ["customer_country", "channel"],
+            exploration: true,
+          }),
+        );
+        const [a, b, c, d] = await Promise.all([
+          intern.query({ metrics: ["revenue"], dimensions: ["channel"] }),
+          analyst.query({ metrics: ["revenue"], dimensions: ["customer_country"] }),
+          intern.query({ metrics: ["revenue"], dimensions: ["channel"] }),
+          analyst.query({ metrics: ["revenue"], dimensions: ["customer_country"] }),
+        ]);
+        const internKeys = new Set(a.rows.map((r) => String(r["channel"])));
+        const analystKeys = new Set(b.rows.map((r) => String(r["customer_country"])));
+        if (internKeys.has("GB") || internKeys.has("US")) {
+          return { code: "CRITICAL FAIL", detail: "intern channel result contains countries" };
+        }
+        if (analystKeys.has("web") || analystKeys.has("mobile")) {
+          return { code: "CRITICAL FAIL", detail: "analyst country result contains channels" };
+        }
+        if (JSON.stringify(a.rows) !== JSON.stringify(c.rows)) {
+          return { code: "CRITICAL FAIL", detail: "intern results were not stable across parallel queries" };
+        }
+        if (JSON.stringify(b.rows) !== JSON.stringify(d.rows)) {
+          return { code: "CRITICAL FAIL", detail: "analyst results were not stable across parallel queries" };
+        }
+        return { code: "PASS", detail: "parallel agent results isolated" };
+      },
+    }),
   ];
 }
 
@@ -1053,6 +1243,152 @@ export function generateExploratoryTables(): Scenario[] {
   );
 }
 
+export function generateBoundaryFuzz(): Scenario[] {
+  const rand = mulberry32(20260315);
+  const dates = [
+    "2024-02-29",
+    "2023-02-29",
+    "2024-02-30",
+    "2024-13-01",
+    "0000-01-01",
+    "9999-12-31",
+    "2024-00-10",
+    "2024-01-00",
+    "not-a-date",
+    "2024-02-29T12:00:00Z",
+  ];
+  const identifiers = [
+    "orders.channel",
+    "customers.country",
+    "customers.email",
+    "order_items.amount",
+    "countries.name",
+    "does_not.exist",
+    "orders.",
+    ".channel",
+    "orders..channel",
+    "ORDERS.CHANNEL",
+  ];
+  const out: Scenario[] = [];
+  for (let i = 0; i < 36; i += 1) {
+    const kind = i % 4;
+    if (kind === 0) {
+      const from = pick(rand, dates);
+      const to = pick(rand, dates);
+      out.push(
+        sc({
+          id: `gen/fuzz/date-${i}`,
+          category: "properties",
+          mode: "custom",
+          question: `Fuzzed civil range ${from}..${to}`,
+          interpretation: "Fuzz finds crashes, guessed calendars, and write SQL — not business gold.",
+          expectedSqlBehaviour: "Compile a SELECT or structured invalid_query.",
+          query: { metrics: ["revenue"], time: { from, to } },
+          disposition: ["EXECUTE", "INVALID"],
+          expectation: { kind: "refuse", reason: "fuzz date" },
+          custom: async (ctx) => invariantCompile(ctx.kernel, { metrics: ["revenue"], time: { from, to } }),
+        }),
+      );
+    } else if (kind === 1) {
+      const field = pick(rand, identifiers);
+      const operator = pick(rand, ["=", "in", "contains", "is_null"] as const);
+      const value = operator === "in" ? ["web", "x"] : operator === "is_null" ? undefined : pick(rand, HOSTILE_FILTER_VALUES);
+      const query = {
+        metrics: ["revenue"],
+        filters: [{ field, operator, value: value as never }],
+      };
+      out.push(
+        sc({
+          id: `gen/fuzz/filter-${i}`,
+          category: "properties",
+          mode: "custom",
+          question: `Fuzzed filter ${field} ${operator}`,
+          interpretation: "Blocked columns, injection, and malformed operators must not crash or write.",
+          expectedSqlBehaviour: "Parameterised SELECT or structured refusal.",
+          query,
+          disposition: ["EXECUTE", "INVALID", "REFUSE_POLICY", "REFUSE_SAFETY", "CLARIFY", "EXPLORE"],
+          expectation: { kind: "refuse", reason: "fuzz filter" },
+          custom: async (ctx) => invariantCompile(ctx.kernel, query),
+        }),
+      );
+    } else if (kind === 2) {
+      const metric = pick(rand, ["revenue", "not_a_metric", "account_balance", HOSTILE_IDENTIFIERS[i % HOSTILE_IDENTIFIERS.length]!]);
+      const dim = pick(rand, ["channel", "country", "product_category", "ticket_category"]);
+      const query = { metrics: [metric], dimensions: [dim] };
+      out.push(
+        sc({
+          id: `gen/fuzz/shape-${i}`,
+          category: "properties",
+          mode: "custom",
+          question: `Fuzzed shape ${metric} by ${dim}`,
+          interpretation: "Unknown names, unsafe grains, and hostile identifiers stay refusals or safe compiles.",
+          expectedSqlBehaviour: "No write SQL, no blocked columns, no guessed joins.",
+          query,
+          disposition: ["EXECUTE", "INVALID", "CLARIFY", "REFUSE_SAFETY", "REFUSE_POLICY"],
+          expectation: { kind: "refuse", reason: "fuzz shape" },
+          custom: async (ctx) => invariantCompile(ctx.kernel, query),
+        }),
+      );
+    } else {
+      const payload = pick(rand, MCP_PAYLOADS);
+      out.push(
+        sc({
+          id: `gen/fuzz/mcp-${i}`,
+          category: "mcp",
+          mode: "custom",
+          question: `Fuzzed MCP payload ${i}`,
+          interpretation: "Malformed Query Model input is hostile. Kernel safety is the boundary.",
+          expectedSqlBehaviour: "Schema reject or structured refusal. Never a write.",
+          query: payload as Record<string, unknown>,
+          disposition: ["EXECUTE", "INVALID"],
+          guessSeverity: "security",
+          expectation: { kind: "refuse", reason: "fuzz mcp" },
+          custom: async (ctx) => {
+            const parsed = semanticQuerySchema.safeParse(payload);
+            if (!parsed.success) return { code: "PASS — INVALID", detail: "schema rejected payload" };
+            return invariantCompile(ctx.kernel, parsed.data);
+          },
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+async function invariantCompile(
+  kernel: import("../../src/kernel.js").GraneKernel,
+  query: Record<string, unknown>,
+): Promise<import("./types.js").Verdict> {
+  try {
+    const { compiled, resolved } = kernel.compile(query as never);
+    if (isWriteSql(compiled.sql)) return { code: "SECURITY CRITICAL", detail: "write SQL" };
+    const blocked = sqlContainsBlockedColumn(compiled.sql);
+    if (blocked.length) return { code: "SECURITY CRITICAL", detail: blocked.join() };
+    if (resolved.trust === "governed" && resolved.ungoverned.length > 0) {
+      return { code: "CRITICAL FAIL", detail: "governed trust with ungoverned fields" };
+    }
+    return resolved.trust === "governed"
+      ? { code: "PASS", detail: "invariants held" }
+      : { code: "PASS — EXPLORATORY", detail: resolved.trust };
+  } catch (err) {
+    if (err instanceof GraneError) {
+      const leaks = errorLeaksSecrets(err.message);
+      if (leaks.length) return { code: "SECURITY CRITICAL", detail: leaks.join() };
+      if (err.refusal.status === "ambiguous_query") return { code: "PASS — CLARIFY", detail: err.refusal.status };
+      if (err.refusal.status === "column_not_permitted" || err.refusal.status === "exploration_disabled") {
+        return { code: "PASS — POLICY", detail: err.refusal.status };
+      }
+      if (err.refusal.status === "unsafe_query") return { code: "PASS — SAFE REFUSAL", detail: err.refusal.status };
+      if (err.refusal.status === "invalid_query") return { code: "PASS — INVALID", detail: err.refusal.status };
+      if (err.refusal.status === "undefined_metric" || err.refusal.status === "undefined_dimension") {
+        return { code: "PASS — CLARIFY", detail: err.refusal.status };
+      }
+      return { code: "PASS — SAFE REFUSAL", detail: err.refusal.status };
+    }
+    return { code: "FAIL", detail: String(err) };
+  }
+}
+
 export function allGenerated(): Scenario[] {
   return [
     ...generateJoinGrainMatrix(),
@@ -1069,6 +1405,7 @@ export function allGenerated(): Scenario[] {
     ...generateEquivalent(),
     ...generateSchemaMutations(),
     ...generateProperties(),
+    ...generateBoundaryFuzz(),
     ...generateLeakage(),
     ...generateConcurrency(),
   ];

@@ -506,3 +506,41 @@ export function distinctCompletedCustomerIds(): number {
   return new Set(completedOrders().map((o) => o.customer_id).filter((id): id is number => id != null))
     .size;
 }
+
+/** Independent of Grane: civil YYYY-MM-DD of a UTC instant in a named zone. */
+export function civilDateInZone(isoUtc: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(isoUtc));
+}
+
+/** Completed orders whose completed_at civil date in `timeZone` is inside `[from, to]` inclusive. */
+export function completedInInclusiveRange(
+  from: string,
+  to: string,
+  timeZone = "Europe/London",
+): OrderRow[] {
+  return completedOrders().filter((o) => {
+    if (!o.completed_at) return false;
+    const day = civilDateInZone(o.completed_at, timeZone);
+    return day >= from && day <= to;
+  });
+}
+
+export function revenueInInclusiveRange(from: string, to: string, timeZone = "Europe/London"): number {
+  return sum(completedInInclusiveRange(from, to, timeZone).map((o) => o.net_amount));
+}
+
+export function ordersCreatedInInclusiveRange(
+  from: string,
+  to: string,
+  timeZone = "Europe/London",
+): OrderRow[] {
+  return ORDERS.filter((o) => {
+    const day = civilDateInZone(o.created_at, timeZone);
+    return day >= from && day <= to;
+  });
+}

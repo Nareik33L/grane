@@ -257,6 +257,16 @@ describe("semi-additive, per-component time, trust, and ambiguous paths", () => 
     expect(resolved.time?.to).toBe("2024-03-15");
   });
 
+  it("keeps COUNT DISTINCT when a metric filter or time window is applied", () => {
+    const { compiled } = kernel.compile({
+      metrics: ["ordering_customers"],
+      dimensions: ["customer_country"],
+      time: { period: "last_month" },
+    });
+    expect(compiled.sql).toMatch(/COUNT\s*\(\s*DISTINCT/i);
+    expect(compiled.sql).not.toMatch(/COUNT\s*\(\s*"orders"\."customer_id"\s*\)\s*FILTER/i);
+  });
+
   it("marks orders → countries as ambiguous in the relationship graph", () => {
     const model = new SemanticModel(gauntletConfig());
     const path = model.graph.findPath("orders", "countries");

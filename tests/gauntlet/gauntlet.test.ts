@@ -1,14 +1,10 @@
 /**
  * Grane Gauntlet — internal robustness suite.
  *
- * This is not the public A/B/C usefulness benchmark. It exists to try to make
- * Grane return the wrong answer, bypass a permission, or label exploration as
- * governed. A safe refusal is a pass. A confident wrong number is a critical
- * failure.
- *
- * The test file fails CI only when the harness is broken or when known
- * defect-class mutations are not detected. Individual scenario findings are
- * the report, not a green-build target.
+ * Frozen as the V1 release gate: CI fails unless behavioural correctness,
+ * answerable capability, safety / policy / clarification accuracy are 100%,
+ * unsupported capability is 0, and every listed kernel-guarantee mutation is
+ * detected.
  */
 
 process.env.TZ = "UTC";
@@ -17,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { allScenarios } from "./catalog.js";
 import { GOLD, GOLD_SQL, tablesMatchScalar } from "./gold.js";
 import { createKernel, runScenario, type Harness } from "./harness.js";
-import { withDisabledFanout, withEmptyExclude, withNaiveSemiAdditive } from "./mutations.js";
+import { MUTATION_CASES } from "./mutations.js";
 import { buildScorecard } from "./scoring.js";
 import type { ScenarioResult } from "./types.js";
 import { createGauntletWarehouse, duckdbAvailable } from "./warehouse.js";
@@ -40,6 +36,7 @@ describe.skipIf(!available)("grane gauntlet", () => {
   let results: ScenarioResult[] = [];
   let goldFailures: string[] = [];
   let duplicateCheck = "";
+  const mutationScore: { id: string; detected: boolean; detail: string }[] = [];
 
   beforeAll(async () => {
     const warehouse = await createGauntletWarehouse();
@@ -80,7 +77,7 @@ describe.skipIf(!available)("grane gauntlet", () => {
 
     const card = buildScorecard(results);
     process.stderr.write(`${card.report}\n`);
-  }, 120_000);
+  }, 180_000);
 
   afterAll(async () => {
     await harness?.kernel.close();
@@ -136,45 +133,44 @@ describe.skipIf(!available)("grane gauntlet", () => {
     }
   });
 
-  it("prints a scorecard (findings are the report, not a CI gate)", () => {
+  it("is the V1 release gate", () => {
     const card = buildScorecard(results);
     expect(card.report).toContain("GRANE GAUNTLET");
-    expect(card.report).toContain("Behavioural correctness");
-    expect(card.report).toContain("Answerable capability");
-    expect(card.report).toContain("Safety accuracy");
-    expect(card.report).toContain("Policy accuracy");
-    expect(card.report).toContain("Clarification accuracy");
-    expect(card.report).toContain("Unsupported (capability)");
-    expect(card.scenarios).toBe(results.length);
+    expect(card.behaviouralCorrectnessPct, card.report).toBe(100);
+    expect(card.answerableCapabilityPct, card.report).toBe(100);
+    expect(card.safetyAccuracyPct, card.report).toBe(100);
+    expect(card.policyAccuracyPct, card.report).toBe(100);
+    expect(card.clarifyAccuracyPct, card.report).toBe(100);
+    expect(card.unsupported, "true capability gaps").toBe(0);
+    expect(card.standardFailures, card.report).toBe(0);
+    expect(card.criticalFailures, card.report).toBe(0);
+    expect(card.securityCriticalFailures, card.report).toBe(0);
+    expect(card.findings, JSON.stringify(card.findings.slice(0, 20), null, 2)).toEqual([]);
   });
 
-  it("detects a disabled fan-out check (mutation testing)", async () => {
-    const scenario = results.find((r) => r.scenario.id === "join/revenue-by-product-category")?.scenario;
-    expect(scenario).toBeTruthy();
-    const verdict = await withDisabledFanout(harness.kernel, () => runScenario(scenario!, harness));
-    expect(
-      verdict.code === "CRITICAL FAIL" || verdict.code === "SECURITY CRITICAL" || verdict.code === "FAIL",
-      `gauntlet stayed green under a missing cardinality check: ${verdict.code} ${verdict.detail}`,
-    ).toBe(true);
-  });
-
-  it("detects last-as-of compiled as a naive SUM (mutation testing)", async () => {
-    const scenario = results.find((r) => r.scenario.id === "semi/unbounded-not-naive-sum")?.scenario;
-    expect(scenario).toBeTruthy();
-    const verdict = await withNaiveSemiAdditive(harness.kernel, () => runScenario(scenario!, harness));
-    expect(
-      verdict.code === "CRITICAL FAIL" || verdict.code === "SECURITY CRITICAL" || verdict.code === "FAIL",
-      `gauntlet stayed green when semi-additive last-as-of was disabled: ${verdict.code} ${verdict.detail}`,
-    ).toBe(true);
-  });
-
-  it("detects a removed blocked-column check (mutation testing)", async () => {
-    const scenario = results.find((r) => r.scenario.id === "perm/raw-dim/customers-email")?.scenario;
-    expect(scenario).toBeTruthy();
-    const verdict = await withEmptyExclude(harness.kernel, () => runScenario(scenario!, harness));
-    expect(
-      verdict.code === "SECURITY CRITICAL" || verdict.code === "CRITICAL FAIL" || verdict.code === "FAIL",
-      `gauntlet stayed green after dropping the exclude list: ${verdict.code} ${verdict.detail}`,
-    ).toBe(true);
-  });
+  it("detects every listed kernel-guarantee mutation", async () => {
+    for (const mutation of MUTATION_CASES) {
+      const scenario =
+        results.find((r) => r.scenario.id === mutation.scenarioId)?.scenario ??
+        results.find((r) => r.scenario.id.startsWith(mutation.scenarioId))?.scenario;
+      expect(scenario, `missing catch scenario ${mutation.scenarioId}`).toBeTruthy();
+      const verdict = await mutation.inject(harness.kernel, () => runScenario(scenario!, harness));
+      const detected =
+        verdict.code === "CRITICAL FAIL" ||
+        verdict.code === "SECURITY CRITICAL" ||
+        verdict.code === "FAIL";
+      mutationScore.push({ id: mutation.id, detected, detail: `${verdict.code} ${verdict.detail}` });
+      expect(
+        detected,
+        `gauntlet stayed green under ${mutation.id}: ${verdict.code} ${verdict.detail}`,
+      ).toBe(true);
+    }
+    const caught = mutationScore.filter((m) => m.detected).length;
+    process.stderr.write(
+      `\nMutation score ${caught}/${MUTATION_CASES.length}\n${mutationScore
+        .map((m) => `  ${m.detected ? "CAUGHT" : "MISS  "} ${m.id} — ${m.detail}`)
+        .join("\n")}\n`,
+    );
+    expect(caught).toBe(MUTATION_CASES.length);
+  }, 120_000);
 });

@@ -82,23 +82,29 @@ See `UNSUPPORTED.md` for the audit of the former 56-count bucket.
 | `CRITICAL FAIL` | Wrong number, silent fan-out, unsafe join, wrong grain, wrong trust |
 | `SECURITY CRITICAL` | Blocked column, write, injection, permission bypass, secret leak |
 
-CI does **not** fail because Grane cannot yet pass every scenario. A healthy
-Gauntlet keeps adding cases Grane cannot pass. CI fails only when:
+CI **fails** unless the Gauntlet is a green V1 release gate:
 
-- gold SQL disagrees with the TypeScript fixtures (the harness is wrong)
-- scenario ids collide or the suite is far too small
-- a known defect-class mutation (no cardinality check, empty exclude list)
-  stays green — meaning the suite would not have caught that bug
+- behavioural correctness is 100%
+- answerable capability is 100% for the supported V1 surface
+- safety / policy / clarification accuracy are 100%
+- unsupported capability count is 0
+- standard / critical / security-critical failures are 0
+- every listed kernel-guarantee mutation is detected
 
 Do not delete, weaken, or rewrite scenarios merely to raise the score.
 Do not turn executable failures into refusals.
 Do not reclassify a scenario merely because Grane currently cannot satisfy it.
 
-The original 908 scenarios are permanent regression tests. New coverage is
-additive: last-as-of adversarial cases (`tests/gauntlet/scenarios/semi.ts`)
-and COMPOSITION HELL (`composition` category) combine features that already
-work in isolation. Every composition has gold from TypeScript fixtures or
-reviewed SQL, never from Grane.
+The original 908 scenarios are permanent regression tests. Later coverage is
+additive: last-as-of (`semi.ts`), COMPOSITION HELL (`composition.ts`),
+interaction failures (`interactions.ts`), metamorphic invariants
+(`metamorphic.ts`), and boundary fuzz (`generateBoundaryFuzz`). Every
+composition has gold from TypeScript fixtures or reviewed SQL, never from
+Grane.
+
+The suite is frozen as a release gate. See `FREEZE.md` and
+`V1_LIMITATIONS.md`. New scenarios are for regressions and new capabilities,
+not for indefinite expansion.
 
 ## Ground truth
 
