@@ -335,6 +335,7 @@ npm test                                                 # unit + integration
 
 npm install -D @duckdb/node-api
 npm run test:benchmark                                   # A/B/C thesis benchmark
+npm run test:gauntlet                                    # internal robustness gauntlet
 ```
 
 See [docs/warehouses.md](docs/warehouses.md) for supported warehouses
@@ -346,6 +347,11 @@ Databricks); extra drivers are optional installs. Production Docker:
 — direct warehouse SQL, SQL written from a well-written `SKILL.md`, and the
 Grane Query Model — and scores all three against independently reviewed SQL. See
 [tests/benchmark/README.md](tests/benchmark/README.md).
+
+`tests/gauntlet` is the internal robustness suite: a hostile warehouse and
+hundreds of scenarios designed to make Grane return the wrong number, bypass a
+permission, or label exploration as governed. A safe refusal is a pass. It is
+not the public benchmark. See [tests/gauntlet/README.md](tests/gauntlet/README.md).
 
 ## License
 

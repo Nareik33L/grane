@@ -18,9 +18,9 @@ are not installed with the repo. Add the driver you are working on, e.g.
 `npm install mysql2`.
 
 `npm run test:unit` does not need Postgres. Full `npm test` needs the example
-database on `localhost:5433`. `npm run test:benchmark` needs only
-`@duckdb/node-api` and the checked-in `example/analytics-duckdb/warehouse.duckdb`;
-see `tests/benchmark/README.md`.
+database on `localhost:5433`. `npm run test:benchmark` and `npm run test:gauntlet`
+need only `@duckdb/node-api`; see `tests/benchmark/README.md` and
+`tests/gauntlet/README.md`.
 
 ## Scope
 

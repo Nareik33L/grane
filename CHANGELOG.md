@@ -2,6 +2,11 @@
 
 ## 0.6.4
 
+- Internal **Grane Gauntlet** (`tests/gauntlet`, `npm run test:gauntlet`): a
+  hostile DuckDB warehouse and ~900 scenarios that try to make Grane return
+  the wrong number, silently fan out, bypass a permission, or label
+  exploration as governed. Independent gold SQL and fixture reductions;
+  a safe refusal is a pass. Not the public A/B/C benchmark.
 - First-week path on your own Postgres: `grane discover --write-relationships`
   merges inferred foreign keys into `relationships.yml` without clobbering
   existing keys. `grane init` scaffolds five-metric comments, audit, and
