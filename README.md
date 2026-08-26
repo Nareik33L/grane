@@ -97,27 +97,9 @@ Warehouse connections: **[docs/warehouses.md](docs/warehouses.md)**
 
 Semantic connectors (dbt, Cube, LookML, Ossie): **[docs/providers.md](docs/providers.md)**
 
-## Quickstart (with the example database)
+First week on your own Postgres: **[docs/first-week.md](docs/first-week.md)**
 
-```bash
-npm install -g grane-analytics @duckdb/node-api
-git clone https://github.com/Nareik33L/grane.git
-cd grane
-
-# DuckDB (no Docker): seeded shop data in example/analytics-duckdb
-grane -p example/analytics-duckdb validate
-grane -p example/analytics-duckdb query revenue -d country --last 30d
-
-# Or Postgres:
-docker compose -f example/docker-compose.yml up -d --wait
-grane -p example/analytics validate
-grane -p example/analytics query revenue --dimension country --last last_month
-grane -p example/analytics query revenue --raw-dimension customers.name --last 30d
-grane -p example/analytics mcp doctor --offline --skip-mcp
-grane -p example/analytics mcp print-config generic
-grane -p example/analytics serve
-# MCP  http://localhost:8080/mcp
-```
+Production HTTP (Docker, TLS, agent tokens, audit log): **[docs/production.md](docs/production.md)**
 
 ## Install
 
@@ -126,10 +108,45 @@ npm install -g grane-analytics
 # or: npx grane-analytics --help
 ```
 
-The CLI command is still `grane`. Requires Node 20+. Warehouse drivers other
-than Postgres are **not** installed with the CLI — add only the one you use
-(see Warehouses below). That keeps a global install free of unrelated SDK
-deprecation warnings.
+The CLI command is still `grane`. Requires Node 20+. Postgres is bundled.
+Other warehouse drivers are **not** installed with the CLI — add only the one
+you use (see Warehouses below).
+
+## Quickstart (your own Postgres)
+
+```bash
+grane init
+export DATABASE_URL=postgres://readonly_user:...@host:5432/db
+grane discover --write-relationships   # inspect schema; merge FKs, keep existing keys
+# define entities and about five metrics (see metrics.yml comments)
+grane validate
+grane query revenue -d country --last 30d
+grane mcp connect cursor
+```
+
+Use a **read-only database user**. Grane also wraps every query in a
+`READ ONLY` transaction with a statement timeout, but the database remains
+the final security boundary. Queries are appended to `.grane/audit.jsonl`.
+
+Step-by-step: **[docs/first-week.md](docs/first-week.md)**.
+
+## Example database
+
+```bash
+git clone https://github.com/Nareik33L/grane.git
+cd grane
+
+# Postgres demo (Docker):
+docker compose -f example/docker-compose.yml up -d --wait
+grane -p example/analytics validate
+grane -p example/analytics query revenue --dimension country --last last_month
+grane -p example/analytics serve
+# MCP  http://localhost:8080/mcp
+
+# DuckDB alternative (no Docker): npm install @duckdb/node-api
+grane -p example/analytics-duckdb validate
+grane -p example/analytics-duckdb query revenue -d country --last 30d
+```
 
 ## Warehouses
 
@@ -147,22 +164,6 @@ Set `connection.type` in `grane.yml`. Postgres and Redshift use the bundled
 | `databricks` | `npm install @databricks/sql` |
 
 Connection examples: **[docs/warehouses.md](docs/warehouses.md)**
-
-## Quickstart (your own database)
-
-```bash
-grane init                 # scaffolds grane.yml, metrics.yml, dimensions.yml, relationships.yml
-export DATABASE_URL=postgres://readonly_user:...@host:5432/db
-grane discover             # introspect tables, columns, FKs; infer relationships
-# ... define entities, metrics, dimensions, relationships ...
-grane validate             # the "type checker for analytics"
-grane query revenue -d country --last 30d
-grane serve                # or: grane serve --stdio
-```
-
-Use a **read-only database user**. Grane also wraps every query in a
-`READ ONLY` transaction with a statement timeout, but the database remains
-the final security boundary.
 
 ## Defining metrics
 
@@ -338,7 +339,8 @@ npm run test:benchmark                                   # A/B/C thesis benchmar
 
 See [docs/warehouses.md](docs/warehouses.md) for supported warehouses
 (Postgres, MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Redshift,
-Databricks); extra drivers are optional installs.
+Databricks); extra drivers are optional installs. Production Docker:
+[docs/production.md](docs/production.md).
 
 `tests/benchmark` asks the same questions of the DuckDB example shop three ways
 — direct warehouse SQL, SQL written from a well-written `SKILL.md`, and the

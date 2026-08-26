@@ -26,7 +26,7 @@ export interface LoadedConfig {
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
-const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "auth", "providers"] as const;
+const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "auth", "audit", "providers"] as const;
 
 /** Resolve the project directory: the given dir, or ./analytics under it if grane.yml lives there. */
 export function findProjectDir(startDir: string): string {
@@ -39,6 +39,15 @@ export function findProjectDir(startDir: string): string {
   throw configError(
     `No grane.yml found in ${dir} or ${analytics}. Run "grane init" to create a project.`,
   );
+}
+
+/** Docker-friendly overrides so a read-only project mount can still audit. */
+function applyAuditEnvOverrides(config: GraneConfig): void {
+  const path = process.env.GRANE_AUDIT_PATH;
+  if (path) config.audit.path = path;
+  if (/^(1|true|yes)$/i.test(process.env.GRANE_AUDIT_STDOUT ?? "")) {
+    config.audit.stdout = true;
+  }
 }
 
 /** Interpolates ${VAR} and ${VAR:-default} in connection settings. */
@@ -142,6 +151,11 @@ export function loadConfig(projectDir: string): LoadedConfig {
     }
   }
 
+  const audit = merged["audit"] as Record<string, unknown> | undefined;
+  if (audit && "path" in audit) {
+    audit.path = interpolateEnv(audit.path);
+  }
+
   const auth = merged["auth"] as Record<string, unknown> | undefined;
   const agents = auth && Array.isArray(auth.agents) ? auth.agents : [];
   for (const agent of agents) {
@@ -179,6 +193,7 @@ export function loadConfig(projectDir: string): LoadedConfig {
   }
 
   const config = finalParsed.data;
+  applyAuditEnvOverrides(config);
   validateAuthConfig(config);
   for (const agent of config.auth.agents) {
     for (const name of agent.metrics ?? []) {

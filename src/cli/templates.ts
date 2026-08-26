@@ -1,7 +1,8 @@
 /** File templates written by `grane init`. */
 
 export const GRANE_YML = `# Grane project configuration.
-# Docs: https://github.com/grane-analytics/grane
+# First week: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md
+# Production: https://github.com/Nareik33L/grane/blob/main/docs/production.md
 
 project:
   name: my-analytics
@@ -28,6 +29,14 @@ limits:
   default_rows: 1000
   timeout_ms: 30000
 
+# Append-only query audit (JSONL). No row payloads, no agent tokens.
+# Relative path is resolved from this project directory. Override in Docker
+# with GRANE_AUDIT_PATH=/var/log/grane/audit.jsonl
+audit:
+  enabled: true
+  path: \${GRANE_AUDIT_PATH:-.grane/audit.jsonl}
+  # stdout: true   # also emit JSON lines on stderr (container logs; MCP-safe)
+
 # Controlled exploration: agents may query warehouse columns that are not
 # governed metrics or dimensions. Results are marked trust: mixed or exploratory.
 # exploration:
@@ -39,6 +48,7 @@ limits:
 #     - customers.ssn
 
 # HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
+# Required for production HTTP. stdio (local Cursor/Claude) stays trusted.
 # auth:
 #   agents:
 #     - id: finance
@@ -63,10 +73,11 @@ entities: {}
 #     primary_key: id
 `;
 
-export const METRICS_YML = `# Governed metric definitions. Run "grane validate" after editing.
+export const METRICS_YML = `# Governed metric definitions. First week: pick about five, then "grane validate".
+# Rename tables/columns to match "grane discover".
 
 metrics: {}
-# Example:
+# Example starter set:
 # metrics:
 #   revenue:
 #     description: Completed order revenue
@@ -80,6 +91,34 @@ metrics: {}
 #       - sales
 #     filters:
 #       orders.status: completed
+#   orders:
+#     description: Completed order count
+#     entity: order
+#     type: count
+#     sql: \${orders.id}
+#     time_dimension: \${orders.completed_at}
+#     filters:
+#       orders.status: completed
+#   customers:
+#     description: Registered customers
+#     entity: customer
+#     type: count
+#     sql: \${customers.id}
+#     time_dimension: \${customers.created_at}
+#   average_order_value:
+#     description: Revenue per completed order
+#     entity: order
+#     type: ratio
+#     numerator: revenue
+#     denominator: orders
+#     synonyms:
+#       - aov
+#   refunded_amount:
+#     description: Refunded order value
+#     entity: order
+#     type: sum
+#     sql: \${refunds.amount}
+#     time_dimension: \${orders.completed_at}
 `;
 
 export const DIMENSIONS_YML = `# Approved dimensions for breaking down and filtering metrics.
@@ -96,7 +135,7 @@ dimensions: {}
 `;
 
 export const RELATIONSHIPS_YML = `# How tables relate. Cardinality is required for join-safety checks.
-# Tip: "grane discover" prints relationships inferred from foreign keys.
+# Tip: "grane discover --write-relationships" merges inferred FKs without clobbering keys.
 
 relationships: {}
 # Example:

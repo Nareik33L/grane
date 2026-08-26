@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.4
+
+- First-week path on your own Postgres: `grane discover --write-relationships`
+  merges inferred foreign keys into `relationships.yml` without clobbering
+  existing keys. `grane init` scaffolds five-metric comments, audit, and
+  agent-token placeholders. Guide: `docs/first-week.md`.
+- Production HTTP: non-root Docker image with `/health` HEALTHCHECK, GHCR
+  publish on `v*` tags (`ghcr.io/nareik33l/grane`), and `docs/production.md`
+  (`docker run -v project -e DATABASE_URL`, read-only DB user, TLS in front,
+  per-agent bearer tokens). No SSO.
+- Query audit log: append-only JSONL (default `.grane/audit.jsonl`) of time,
+  agent, trust, query model, SQL, row count, and refusals. No row payloads,
+  no tokens. Opt out with `audit.enabled: false`. Docker: `GRANE_AUDIT_PATH`
+  and `GRANE_AUDIT_STDOUT=1` (JSON lines on stderr).
+
 ## 0.6.3
 
 - MCP `query` / `explain` / `validate` lead with a trust headline, then JSON

@@ -21,6 +21,10 @@ exploration:
     - public
   exclude: []
 
+# audit:
+#   enabled: true
+#   path: .grane/audit.jsonl
+
 entities:
   customer:
     table: customers

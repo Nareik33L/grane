@@ -50,7 +50,12 @@ export function inferRelationships(schema: DatabaseSchema): Record<
 > {
   const relationships: Record<string, { from: string; to: string; type: "many_to_one" }> = {};
   for (const fk of schema.foreignKeys) {
-    const name = `${fk.table}_to_${fk.refTable}`;
+    const base = `${fk.table}_to_${fk.refTable}`;
+    let name = base;
+    let n = 2;
+    while (name in relationships) {
+      name = `${base}_${n++}`;
+    }
     relationships[name] = {
       from: `${fk.table}.${fk.column}`,
       to: `${fk.refTable}.${fk.refColumn}`,

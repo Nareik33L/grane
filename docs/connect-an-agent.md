@@ -128,9 +128,12 @@ grane serve
 # Health check: http://localhost:8080/health
 ```
 
-**Production HTTP:** deploy Grane (Docker, your VPC, Cloud Run, etc.) behind
-HTTPS. ChatGPT and most web agents require a **public HTTPS URL** — they cannot
-reach `localhost` on your laptop directly.
+**Production HTTP:** deploy Grane in your VPC behind HTTPS. Use the published
+image `ghcr.io/nareik33l/grane`, a read-only database user, and
+`auth.agents` bearer tokens. ChatGPT and most web agents require a **public
+HTTPS URL**. Step-by-step: **[production.md](production.md)**.
+
+Local desktop clients should keep **stdio** (`grane mcp connect cursor`).
 
 ---
 

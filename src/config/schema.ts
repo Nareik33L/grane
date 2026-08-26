@@ -219,6 +219,22 @@ export const authConfigSchema = z.object({
 export type AuthConfig = z.infer<typeof authConfigSchema>;
 
 /**
+ * Append-only query audit log. Records time, agent, trust, the semantic query,
+ * compiled SQL, row count, and refusals. Never writes row payloads or tokens.
+ */
+export const auditConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  /** JSONL path. Relative paths resolve from the project directory. */
+  path: z.string().default(".grane/audit.jsonl"),
+  /**
+   * Also emit one JSON object per line on stderr (MCP stdio stays clean;
+   * container runtimes still collect it).
+   */
+  stdout: z.boolean().default(false),
+});
+export type AuditConfig = z.infer<typeof auditConfigSchema>;
+
+/**
  * Extra semantic inputs. Native YAML in the Grane project is always loaded.
  * `providers` are universal connectors: point them at a dbt, Cube, LookML,
  * Apache Ossie, or generic fragment path. Omit `type` to auto-detect.
@@ -247,6 +263,7 @@ export const graneConfigSchema = z.object({
   limits: limitsConfigSchema.prefault({}),
   exploration: explorationConfigSchema.prefault({}),
   auth: authConfigSchema.prefault({}),
+  audit: auditConfigSchema.prefault({}),
   providers: z.array(semanticProviderConfigSchema).default([]),
   entities: z.record(z.string(), entityConfigSchema).default({}),
   metrics: z.record(z.string(), metricConfigSchema).default({}),

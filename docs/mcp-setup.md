@@ -64,7 +64,8 @@ Config file locations:
 ```
 
 ChatGPT requires a **public HTTPS URL** and Developer Mode (paid plan). Local
-`localhost` only works for clients on the same machine.
+`localhost` only works for clients on the same machine. VPC / Docker / TLS /
+agent tokens: [production.md](production.md).
 
 ## Tools
 
@@ -105,6 +106,9 @@ apply to the catalog (including each metric's `available_dimensions`), grouping
 dimensions, governed filters, and `time.dimension`. Unknown names suggest only
 granted fields. An agent's `exploration: false` cannot turn exploration on if
 it is globally disabled.
+
+Queries and refusals are appended to `.grane/audit.jsonl` (see
+[production.md](production.md#audit-log)).
 
 ## Example database
 

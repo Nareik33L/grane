@@ -16,6 +16,7 @@ import { explorationPolicy } from "../explore/policy.js";
 import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
 import { GRANE_YML, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
+import { writeDiscoveredRelationships } from "../discover/relationships.js";
 
 const program = new Command();
 
@@ -76,7 +77,7 @@ program
     }
     console.log(
       written.length > 0
-        ? `\nGrane project created. Next steps:\n  1. Set connection.url in grane.yml (or export DATABASE_URL)\n  2. Run "grane discover" to inspect your schema\n  3. Define entities, metrics, dimensions and relationships\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Clients: claude, cursor, gemini, vscode, chatgpt, windsurf, claude-code`
+        ? `\nGrane project created. First week on your own Postgres:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane discover --write-relationships" to inspect schema and merge FKs\n  3. Define entities and about five metrics (see metrics.yml comments)\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md`
         : "\nNothing to do.",
     );
   });
@@ -86,11 +87,33 @@ program
   .command("discover")
   .description("Introspect the connected database schema and infer relationships")
   .option("--yaml", "print inferred relationships as YAML ready for relationships.yml")
-  .action(async (options: { yaml?: boolean }) => {
+  .option(
+    "--write-relationships",
+    "merge inferred foreign keys into relationships.yml (never overwrites existing keys)",
+  )
+  .action(async (options: { yaml?: boolean; writeRelationships?: boolean }) => {
     const kernel = loadKernel();
     try {
       const schema = await kernel.introspectSchema();
       const inferred = inferRelationships(schema);
+      if (options.writeRelationships) {
+        const project = kernel.projectDir;
+        if (!project) {
+          throw new Error("Cannot write relationships.yml: project directory is unknown.");
+        }
+        const written = writeDiscoveredRelationships(project, inferred, kernel.config.relationships);
+        if (written.added.length > 0) {
+          console.log(`Wrote ${written.added.length} relationship(s) to ${written.file}`);
+          for (const name of written.added) console.log(`  + ${name}`);
+        } else {
+          console.log("No new relationships to write (existing keys and from→to pairs were kept).");
+        }
+        if (written.skipped.length > 0) {
+          console.log(`Skipped ${written.skipped.length} already defined:`);
+          for (const skip of written.skipped) console.log(`  - ${skip.name} (${skip.reason})`);
+        }
+        console.log("");
+      }
       if (options.yaml) {
         console.log(stringifyYaml({ relationships: inferred }));
         return;
@@ -120,7 +143,7 @@ program
         }
       }
       if (Object.keys(inferred).length > 0) {
-        console.log(`\nInferred relationships (grane discover --yaml to copy):`);
+        console.log(`\nInferred relationships (grane discover --yaml to copy, --write-relationships to merge):`);
         for (const [name, rel] of Object.entries(inferred)) {
           console.log(`  ${name}: ${rel.from} -> ${rel.to} (${rel.type})`);
         }

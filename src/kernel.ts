@@ -13,8 +13,10 @@ import { listExplorableColumns, type ExplorableColumn } from "./explore/raw.js";
 import { recordRawUsage } from "./explore/usage.js";
 import type { AgentGrant } from "./auth/agents.js";
 import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
+import { recordAudit, refusalFromError } from "./audit.js";
+import type { AuditEvent } from "./audit.js";
 
-export const GRANE_VERSION = "0.6.3";
+export const GRANE_VERSION = "0.6.4";
 
 export interface ServerInfo {
   name: "grane";
@@ -163,6 +165,9 @@ export class GraneKernel {
     }
     if (this.config.auth.agents.length > 0) {
       capabilities.push("agent_auth");
+    }
+    if (this.config.audit.enabled) {
+      capabilities.push("audit");
     }
     return {
       name: "grane",
@@ -321,47 +326,93 @@ export class GraneKernel {
     return this.compile(input);
   }
 
+  private audit(event: Omit<AuditEvent, "ts" | "agent">): void {
+    recordAudit(this.config, this.projectDir, {
+      ts: new Date().toISOString(),
+      agent: this.agent?.id ?? null,
+      ...event,
+    });
+  }
+
   /** Validate + compile without executing (dry run). */
   async explain(input: SemanticQueryInput): Promise<ExplainResult> {
-    const { resolved, compiled } = await this.compileReady(input);
-    return {
-      trust: resolved.trust,
-      governed: resolved.governed,
-      ungoverned: resolved.ungoverned,
-      warning: resolved.warning,
-      query_model: "v1",
-      entity: resolved.entity,
-      base_table: resolved.baseTable,
-      metrics: Object.fromEntries(
-        resolved.metrics.map((m) => [
-          m.name,
-          {
-            description: m.config.description ?? null,
-            type: m.config.type,
-            definition_version: m.definitionVersion,
-            status: m.config.status,
-            source: m.config.source ?? { provider: "native" },
-          },
-        ]),
-      ),
-      plan: compiled.plan,
-      generated_sql: compiled.sql,
-      params: compiled.params,
-      notes: resolved.notes,
-    };
+    try {
+      const { resolved, compiled } = await this.compileReady(input);
+      return {
+        trust: resolved.trust,
+        governed: resolved.governed,
+        ungoverned: resolved.ungoverned,
+        warning: resolved.warning,
+        query_model: "v1",
+        entity: resolved.entity,
+        base_table: resolved.baseTable,
+        metrics: Object.fromEntries(
+          resolved.metrics.map((m) => [
+            m.name,
+            {
+              description: m.config.description ?? null,
+              type: m.config.type,
+              definition_version: m.definitionVersion,
+              status: m.config.status,
+              source: m.config.source ?? { provider: "native" },
+            },
+          ]),
+        ),
+        plan: compiled.plan,
+        generated_sql: compiled.sql,
+        params: compiled.params,
+        notes: resolved.notes,
+      };
+    } catch (err) {
+      this.audit({
+        kind: "refusal",
+        operation: "explain",
+        query: input,
+        refusal: refusalFromError(err),
+      });
+      throw err;
+    }
   }
 
   /** Resolve -> validate -> compile -> execute. Trust reflects governed vs raw fields. */
   async query(input: SemanticQueryInput): Promise<QueryResult & { notes: string[] }> {
-    const { resolved, compiled } = await this.compileReady(input);
-    const result = await executeCompiled(this.getConnector(), compiled, this.config.limits);
-    if (this.projectDir && resolved.ungoverned.length > 0) {
-      try {
-        recordRawUsage(this.projectDir, resolved.ungoverned);
-      } catch {
-        // Usage tracking is best-effort and must not fail a query.
+    const started = Date.now();
+    let sql: string | undefined;
+    let trust: QueryResult["trust"] | undefined;
+    try {
+      const { resolved, compiled } = await this.compileReady(input);
+      sql = compiled.sql;
+      trust = compiled.trust;
+      const result = await executeCompiled(this.getConnector(), compiled, this.config.limits);
+      if (this.projectDir && resolved.ungoverned.length > 0) {
+        try {
+          recordRawUsage(this.projectDir, resolved.ungoverned);
+        } catch {
+          // Usage tracking is best-effort and must not fail a query.
+        }
       }
+      this.audit({
+        kind: "query",
+        operation: "query",
+        query: input,
+        trust: result.trust,
+        query_id: result.provenance.query_id,
+        sql: compiled.sql,
+        row_count: result.provenance.row_count,
+        duration_ms: result.provenance.duration_ms,
+      });
+      return { ...result, notes: resolved.notes };
+    } catch (err) {
+      this.audit({
+        kind: "refusal",
+        operation: "query",
+        query: input,
+        ...(trust ? { trust } : {}),
+        ...(sql ? { sql } : {}),
+        duration_ms: Date.now() - started,
+        refusal: refusalFromError(err),
+      });
+      throw err;
     }
-    return { ...result, notes: resolved.notes };
   }
 }

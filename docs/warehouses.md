@@ -16,6 +16,8 @@ the one you need.
 | Databricks | `databricks` | `npm install @databricks/sql` |
 
 Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
+First week on Postgres: [first-week.md](first-week.md). Production Docker:
+[production.md](production.md).
 
 ## Postgres / Redshift
 

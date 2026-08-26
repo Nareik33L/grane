@@ -27,10 +27,12 @@ see `tests/benchmark/README.md`.
 In scope: metrics, dimensions, relationships, validation, the SQL compiler,
 join/grain safety, provenance, controlled exploration of raw warehouse
 columns, semantic connectors (dbt, Cube, LookML, Apache Ossie, auto-detect),
-MCP, CLI, and database connectors.
+MCP, CLI, database connectors, the query audit log, and production Docker.
 
 Out of scope: dashboards, chart builders, a built-in chatbot, hosted
-analytics, unrestricted agent-written SQL, or anything that makes Grane
+analytics, unrestricted agent-written SQL, SSO, or anything that makes Grane
 invent business definitions or present exploration as governed truth.
 
-See [README.md](README.md) and [docs/connect-an-agent.md](docs/connect-an-agent.md).
+See [README.md](README.md), [docs/first-week.md](docs/first-week.md),
+[docs/production.md](docs/production.md), and
+[docs/connect-an-agent.md](docs/connect-an-agent.md).
