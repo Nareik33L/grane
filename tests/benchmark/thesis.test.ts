@@ -4,7 +4,7 @@
  * keep?
  *
  * Three execution paths answer the same questions against the same DuckDB
- * example shop (example/analytics-duckdb):
+ * demo shop (demo/):
  *
  *   A  Direct warehouse SQL. What an unconstrained agent with a database MCP
  *      tends to emit: SUM(net_amount) with no status filter, "last month" on
@@ -30,6 +30,7 @@ import { buildCases, type BenchCase } from "./cases.js";
 import {
   benchmarkKernel,
   duckdbAvailable,
+  ensureDemoWarehouse,
   rawWarehouse,
   resolveBenchTime,
   runGranePath,
@@ -64,8 +65,8 @@ if (!available) {
 }
 
 describe.skipIf(!available)("grane thesis benchmark (A/B/C)", () => {
-  const warehouse = rawWarehouse();
-  const kernel = benchmarkKernel();
+  let warehouse: ReturnType<typeof rawWarehouse>;
+  let kernel: ReturnType<typeof benchmarkKernel>;
 
   let cases: BenchCase[] = [];
   let scores: CaseScore[] = [];
@@ -76,7 +77,11 @@ describe.skipIf(!available)("grane thesis benchmark (A/B/C)", () => {
   let report = "";
 
   beforeAll(async () => {
+    const warehousePath = await ensureDemoWarehouse();
+    warehouse = rawWarehouse(warehousePath);
     const time = await resolveBenchTime(warehouse.run);
+    const now = new Date(`${time.anchor}T12:00:00Z`);
+    kernel = benchmarkKernel(warehousePath, now);
     cases = buildCases(time);
 
     for (const kase of cases) {
@@ -143,15 +148,15 @@ describe.skipIf(!available)("grane thesis benchmark (A/B/C)", () => {
   }
 
   afterAll(async () => {
-    await kernel.close();
-    await warehouse.close();
+    await kernel?.close();
+    await warehouse?.close();
   });
 
   // --- harness health: these are the only reasons to fail CI ---
 
   it("has a question set in the intended size range", () => {
-    expect(cases.length).toBeGreaterThanOrEqual(20);
-    expect(cases.length).toBeLessThanOrEqual(30);
+    expect(cases.length).toBeGreaterThanOrEqual(45);
+    expect(cases.length).toBeLessThanOrEqual(55);
   });
 
   it("ran every gold query successfully", () => {
@@ -165,7 +170,7 @@ describe.skipIf(!available)("grane thesis benchmark (A/B/C)", () => {
   it("scored every case on every path", () => {
     expect(scores).toHaveLength(cases.length * PATHS.length);
     for (const score of scores) {
-      expect(score.checks.length).toBe(4);
+        expect(score.checks.length).toBe(5);
     }
   });
 
@@ -215,6 +220,16 @@ describe.skipIf(!available)("grane thesis benchmark (A/B/C)", () => {
     expect(c.byDimension.refusal.passed / c.byDimension.refusal.applicable).toBeGreaterThan(
       a.byDimension.refusal.passed / a.byDimension.refusal.applicable,
     );
+  });
+
+  it("compiles the same SQL five times for the same semantic request (path C repeatability)", () => {
+    const query = {
+      metrics: ["revenue"],
+      dimensions: ["country"],
+      time: { period: "last_month" as const },
+    };
+    const sql = Array.from({ length: 5 }, () => kernel.compile(query).compiled.sql);
+    expect(new Set(sql).size).toBe(1);
   });
 
   it("reports the score table", () => {

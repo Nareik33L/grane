@@ -1,53 +1,60 @@
 /**
- * Benchmark plumbing: the DuckDB example shop, a UTC-pinned Grane kernel, and
- * the three path runners (A: naive SQL, B: SKILL.md SQL, C: Grane Query Model).
+ * Benchmark plumbing: the canonical demo shop (demo/), a UTC-pinned Grane
+ * kernel, and the three path runners (A: naive SQL, B: SKILL.md SQL, C: Grane).
  */
 
 process.env.TZ = "UTC";
 
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { existsSync } from "node:fs";
 import { loadConfig } from "../../src/config/load.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { GraneError } from "../../src/errors.js";
 import { DuckDbConnector } from "../../src/connectors/duckdb.js";
-import { buildDemoWarehouse } from "../../src/demo/warehouse.js";
-import { addDays, formatDate, resolveRelativeRange, type DateRange } from "../../src/query/time.js";
+import {
+  addDays,
+  formatDate,
+  namedQuarterRange,
+  resolveRelativeRange,
+  todayInTimeZone,
+  type DateRange,
+} from "../../src/query/time.js";
 import type { SemanticQueryInput, TrustLevel } from "../../src/query/model.js";
 import type { LimitsConfig } from "../../src/config/schema.js";
 import { analyzeSql, type SqlAnalysis } from "./sql.js";
+import { demoAnalyticsDir } from "../../src/demo/paths.js";
+import { buildDemoWarehouse, duckdbDriverAvailable } from "../../src/demo/warehouse.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const EXAMPLE_DIR = join(here, "../../example/analytics-duckdb");
-export const WAREHOUSE_PATH = join(EXAMPLE_DIR, "warehouse.duckdb");
+export const EXAMPLE_DIR = demoAnalyticsDir();
+export let WAREHOUSE_PATH = join(here, "../../demo/warehouse.duckdb");
 
 export async function duckdbAvailable(): Promise<boolean> {
-  try {
-    await import("@duckdb/node-api");
-  } catch {
-    return false;
-  }
-  if (!existsSync(WAREHOUSE_PATH)) {
-    try {
-      await buildDemoWarehouse(WAREHOUSE_PATH);
-    } catch {
-      return false;
-    }
-  }
-  return existsSync(WAREHOUSE_PATH);
+  return duckdbDriverAvailable();
 }
 
 const LIMITS: LimitsConfig = { max_rows: 10000, default_rows: 1000, timeout_ms: 30000 };
 
+let warehousePathPromise: Promise<string> | null = null;
+
+export async function ensureDemoWarehouse(): Promise<string> {
+  if (!warehousePathPromise) {
+    warehousePathPromise = buildDemoWarehouse().then((result) => {
+      WAREHOUSE_PATH = result.path;
+      return result.path;
+    });
+  }
+  return warehousePathPromise;
+}
+
 /** Raw SQL executor for gold / path A / path B fixtures. */
-export function rawWarehouse(): {
+export function rawWarehouse(path = WAREHOUSE_PATH): {
   run: (sql: string) => Promise<Record<string, unknown>[]>;
   close: () => Promise<void>;
 } {
   const connector = new DuckDbConnector({
     type: "duckdb",
-    path: WAREHOUSE_PATH,
+    path,
     schema: "main",
   } as never);
   return {
@@ -59,11 +66,12 @@ export function rawWarehouse(): {
   };
 }
 
-/** The example shop kernel, with the project timezone pinned to UTC for scoring. */
-export function benchmarkKernel(): GraneKernel {
+/** Demo shop kernel, timezone pinned to UTC for scoring. */
+export function benchmarkKernel(warehousePath = WAREHOUSE_PATH, now?: Date): GraneKernel {
   const { config, projectDir } = loadConfig(EXAMPLE_DIR);
   config.project.timezone = "UTC";
-  return new GraneKernel(config, { projectDir });
+  config.connection = { type: "duckdb", path: warehousePath, schema: "main" };
+  return new GraneKernel(config, { projectDir, now });
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +84,8 @@ export interface BenchTime {
   lastMonth: DateRange;
   last30d: DateRange;
   last6m: DateRange;
+  q2: DateRange;
+  lastQuarter: DateRange;
 }
 
 /** Inclusive end date -> exclusive upper bound, matching Grane's compiler. */
@@ -106,15 +116,14 @@ export async function resolveBenchTime(
   );
   const newest = rows[0]?.["newest"];
   const now = newest instanceof Date ? newest : new Date(String(newest));
+  const today = todayInTimeZone("UTC", now);
   return {
-    anchor: formatDate({
-      year: now.getUTCFullYear(),
-      month: now.getUTCMonth() + 1,
-      day: now.getUTCDate(),
-    }),
+    anchor: formatDate(today),
     lastMonth: resolveRelativeRange("last_month", "UTC", now),
     last30d: resolveRelativeRange("30d", "UTC", now),
     last6m: resolveRelativeRange("6m", "UTC", now),
+    q2: namedQuarterRange(2, today),
+    lastQuarter: resolveRelativeRange("last_quarter", "UTC", now),
   };
 }
 

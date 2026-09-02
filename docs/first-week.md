@@ -10,7 +10,7 @@ If you have not used Grane yet, run the bundled shop first:
 npx grane-analytics demo
 ```
 
-That path does not need your warehouse. Details: [example/DEMO.md](../example/DEMO.md).
+That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).
 
 You will: create a read-only database user → `grane init` → `discover` →
 define about five metrics → `validate`. Then connect an agent.
@@ -125,6 +125,5 @@ npm install @duckdb/node-api
 # connection.type: duckdb and connection.path: ./warehouse.duckdb
 ```
 
-The repo's `example/analytics-duckdb` is the demo shop (`grane demo` builds
-`warehouse.duckdb` from `example/seed/duckdb.sql`). It is not the default
-for `grane init`.
+The repo's `demo/` shop is a try-it environment, not the default install.
+`grane demo` builds DuckDB from `demo/seed/duckdb.sql`.

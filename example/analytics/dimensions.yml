@@ -9,6 +9,11 @@ dimensions:
     entity: customer
     sql: ${customers.customer_type}
 
+  plan:
+    description: Customer subscription plan (starter, growth, enterprise).
+    entity: customer
+    sql: ${customers.plan}
+
   channel:
     description: Sales channel the order came through.
     entity: order

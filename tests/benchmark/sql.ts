@@ -9,20 +9,21 @@
  */
 
 /**
- * One-to-many edges of the example shop, as parent -> child. Joining a child
+ * One-to-many edges of the demo shop, as parent -> child. Joining a child
  * table while aggregating at the parent grain multiplies parent rows.
  *
- *   customers 1--N orders
- *   orders    1--N payments      (1-2 succeeded rows per completed order)
- *   orders    1--N refunds
- *   orders    1--N order_items
+ *   customers 1--N orders / support_tickets / subscriptions
+ *   orders    1--N payments, refunds, order_items, checkout_events
  *   products  1--N order_items
  */
 const ONE_TO_MANY: { parent: string; child: string }[] = [
   { parent: "customers", child: "orders" },
+  { parent: "customers", child: "support_tickets" },
+  { parent: "customers", child: "subscriptions" },
   { parent: "orders", child: "payments" },
   { parent: "orders", child: "refunds" },
   { parent: "orders", child: "order_items" },
+  { parent: "orders", child: "checkout_events" },
   { parent: "products", child: "order_items" },
 ];
 
@@ -33,6 +34,9 @@ const TABLES = new Set([
   "payments",
   "refunds",
   "products",
+  "subscriptions",
+  "checkout_events",
+  "support_tickets",
 ]);
 
 /**
@@ -119,7 +123,7 @@ export interface SqlAnalysis {
   truncatesOn: Set<string>;
 }
 
-const TIME_COLUMNS = ["completed_at", "created_at", "paid_at"];
+const TIME_COLUMNS = ["completed_at", "created_at", "paid_at", "settled_at", "refunded_at"];
 
 export function analyzeSql(sql: string, params: readonly unknown[] = []): SqlAnalysis {
   const effectiveSql = inlineParams(sql, params);

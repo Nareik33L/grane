@@ -10,7 +10,7 @@ not be accepted.
 npm install
 npm run demo
 npm run test:unit
-docker compose -f example/docker-compose.yml up -d --wait
+docker compose up -d postgres --wait
 npm test
 ```
 
@@ -18,10 +18,13 @@ Warehouse SDKs (MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Databricks)
 are not installed with the repo. Add the driver you are working on, e.g.
 `npm install mysql2`.
 
-`npm run test:unit` does not need Postgres. Full `npm test` needs the example
-database on `localhost:5433`. `npm run test:benchmark` and `npm run test:gauntlet`
-need only `@duckdb/node-api`; see `tests/benchmark/README.md` and
-`tests/gauntlet/README.md`.
+`npm run test:unit` does not need Postgres. Full `npm test` needs the demo
+database on `localhost:5433` (`docker compose up -d postgres --wait`).
+`npm run test:benchmark` builds the DuckDB shop from `demo/seed/duckdb.sql`.
+`npm run test:gauntlet` needs only `@duckdb/node-api`. See
+`tests/benchmark/README.md` and `tests/gauntlet/README.md`.
+
+The first experience is `npm run demo` or `docker compose up`.
 
 ## Scope
 

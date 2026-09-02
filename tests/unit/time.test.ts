@@ -127,5 +127,44 @@ describe("deterministic time resolution", () => {
     expect(isValidCivilDate("2024-13-01")).toBe(false);
     expect(formatDate(addDays({ year: 2024, month: 2, day: 28 }, 1))).toBe("2024-02-29");
   });
+
+  it("resolves this_quarter and last_quarter", () => {
+    expect(resolveRelativeRange("this_quarter", "UTC", NOW)).toEqual({
+      from: "2026-07-01",
+      to: "2026-08-25",
+    });
+    expect(resolveRelativeRange("last_quarter", "UTC", NOW)).toEqual({
+      from: "2026-04-01",
+      to: "2026-06-30",
+    });
+  });
+
+  it("resolves named quarters of the current year once they have started", () => {
+    expect(resolveRelativeRange("q2", "UTC", NOW)).toEqual({
+      from: "2026-04-01",
+      to: "2026-06-30",
+    });
+    expect(resolveRelativeRange("Q2", "UTC", NOW)).toEqual({
+      from: "2026-04-01",
+      to: "2026-06-30",
+    });
+  });
+
+  it("resolves a named quarter to last year when it has not started yet", () => {
+    const february = new Date("2026-02-10T12:00:00Z");
+    expect(resolveRelativeRange("q2", "UTC", february)).toEqual({
+      from: "2025-04-01",
+      to: "2025-06-30",
+    });
+  });
+
+  it("treats this_quarter as ambiguous when a fiscal year is configured", () => {
+    try {
+      resolveRelativeRange("this_quarter", "UTC", NOW, { fiscalStartsMonth: 4 });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as GraneError).refusal.status).toBe("ambiguous_query");
+    }
+  });
 });
 

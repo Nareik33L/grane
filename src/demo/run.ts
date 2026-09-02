@@ -2,9 +2,6 @@ import { homedir } from "node:os";
 import { GraneKernel } from "../kernel.js";
 import { loadConfig } from "../config/load.js";
 import { GraneError } from "../errors.js";
-import { trustHeadline } from "../query/trust.js";
-import { addDays, formatDate, parseCivilDate, resolveRelativeRange, type DateRange } from "../query/time.js";
-import type { QueryResult } from "../execute/executor.js";
 import {
   connectMcp,
   findWorkspaceDir,
@@ -12,12 +9,19 @@ import {
   resolveClient,
   resolveGraneLaunch,
 } from "../mcp/connect/index.js";
-import { join } from "node:path";
+import { serveHttp } from "../mcp/transport.js";
 import { buildDemoWarehouse } from "./warehouse.js";
-import { bundledDuckdbProject } from "./paths.js";
+import { demoRoot } from "./paths.js";
 import { resolveDemoProject, type ResolveDemoProjectOptions } from "./project.js";
+import { runInvestigation, type Investigation } from "./investigate.js";
+import { join } from "node:path";
 
 export const DEMO_QUESTION = "Why did revenue fall last month?";
+
+export const DEMO_POSTGRES =
+  process.env.DATABASE_URL ??
+  process.env.GRANE_DEMO_DATABASE_URL ??
+  "postgres://grane_readonly:grane_readonly@localhost:5433/grane_demo";
 
 export interface DemoIo {
   log: (line: string) => void;
@@ -26,23 +30,16 @@ export interface DemoIo {
 
 export interface RunDemoOptions extends ResolveDemoProjectOptions {
   connect?: string;
+  json?: boolean;
+  serve?: boolean;
+  port?: number;
   io?: DemoIo;
-}
-
-export interface DemoChannelRow {
-  channel: string;
-  revenue: number;
 }
 
 export interface DemoResult {
   projectDir: string;
   warehousePath: string | null;
-  lastMonth: DateRange;
-  priorMonth: DateRange;
-  lastMonthRevenue: number;
-  priorMonthRevenue: number;
-  lastMonthByChannel: DemoChannelRow[];
-  mixedCodes: string[];
+  investigation: Investigation;
   productCategoryStatus: string | null;
   emailStatus: string | null;
   generatedSql: string;
@@ -53,35 +50,36 @@ const defaultIo: DemoIo = {
   error: (line) => console.error(line),
 };
 
-export function priorCalendarMonth(last: DateRange): DateRange {
-  const from = parseCivilDate(last.from);
-  const priorStart = {
-    year: from.month === 1 ? from.year - 1 : from.year,
-    month: from.month === 1 ? 12 : from.month - 1,
-    day: 1,
-  };
-  return { from: formatDate(priorStart), to: formatDate(addDays(from, -1)) };
-}
-
 export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult> {
   const io = options.io ?? defaultIo;
   const resolved = resolveDemoProject(options);
 
   if (!resolved.postgres && resolved.warehousePath) {
-    io.log("Building the local DuckDB demo warehouse...");
-    const parquetDir =
-      resolved.projectDir === bundledDuckdbProject()
-        ? join(resolved.projectDir, "parquet")
-        : undefined;
-    await buildDemoWarehouse(resolved.warehousePath, { parquetDir });
-    io.log(`Wrote ${resolved.warehousePath}`);
-    io.log("");
+    io.error("Building the local DuckDB demo warehouse from demo/seed/duckdb.sql...");
+    await buildDemoWarehouse(resolved.warehousePath);
+    io.error(`Wrote ${resolved.warehousePath}`);
+    io.error("");
   } else if (resolved.postgres) {
-    io.log("Using the Postgres demo project (example/docker-compose.yml must be running).");
-    io.log("");
+    io.error("Using Postgres on localhost:5433 (docker compose up -d postgres --wait).");
+    io.error("");
   }
 
   const loaded = loadConfig(resolved.projectDir);
+  if (resolved.postgres) {
+    loaded.config.connection = {
+      ...loaded.config.connection,
+      type: "postgres",
+      url: DEMO_POSTGRES,
+      schema: "public",
+    };
+  } else if (resolved.warehousePath) {
+    loaded.config.connection = {
+      type: "duckdb",
+      path: resolved.warehousePath,
+      schema: "main",
+    };
+  }
+
   const kernel = new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
     providerWarnings: loaded.warnings,
@@ -97,30 +95,7 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
       );
     }
 
-    const timezone = kernel.config.project.timezone;
-    const lastMonth = resolveRelativeRange("last_month", timezone);
-    const priorMonth = priorCalendarMonth(lastMonth);
-
-    const last = await kernel.query({
-      metrics: ["revenue"],
-      time: { period: "last_month" },
-    });
-    const prior = await kernel.query({
-      metrics: ["revenue"],
-      time: { from: priorMonth.from, to: priorMonth.to },
-    });
-    const byChannel = await kernel.query({
-      metrics: ["revenue"],
-      dimensions: ["channel"],
-      time: { period: "last_month" },
-    });
-    const mixed = await kernel.query({
-      metrics: ["revenue"],
-      dimensions: ["channel"],
-      raw_dimensions: ["orders.discount_code"],
-      time: { period: "last_month" },
-    });
-
+    const investigation = await runInvestigation(kernel);
     const productCategoryStatus = await refusalStatus(kernel, {
       metrics: ["revenue"],
       dimensions: ["product_category"],
@@ -132,24 +107,31 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
       time: { period: "last_month" },
     });
 
-    const lastMonthRevenue = num(last.rows[0]?.["revenue"]);
-    const priorMonthRevenue = num(prior.rows[0]?.["revenue"]);
-    const lastMonthByChannel: DemoChannelRow[] = byChannel.rows.map((row) => ({
-      channel: String(row["channel"]),
-      revenue: num(row["revenue"]),
-    }));
-    const mixedCodes = [
-      ...new Set(mixed.rows.map((row) => String(row["orders.discount_code"] ?? "")).filter(Boolean)),
-    ];
-
-    printBanner(io, resolved.projectDir, resolved.postgres);
-    printQuery(io, "Last month revenue", last);
-    printQuery(io, `Prior month revenue (${priorMonth.from} → ${priorMonth.to})`, prior);
-    printQuery(io, "Last month by channel", byChannel);
-    printQuery(io, "Last month by channel + orders.discount_code (ungoverned)", mixed);
-    printRefusal(io, "revenue by product_category", productCategoryStatus);
-    printRefusal(io, "revenue by customers.email", emailStatus);
-    printNextSteps(io, resolved.projectDir, resolved.demoMarkdown);
+    if (options.json) {
+      io.log(
+        JSON.stringify(
+          {
+            projectDir: resolved.projectDir,
+            warehousePath: resolved.warehousePath,
+            revenueLast: investigation.revenueLast,
+            revenueChangePct: investigation.revenueChangePct,
+            byCountry: investigation.byCountry,
+            failures: investigation.failures,
+            productCategoryStatus,
+            emailStatus,
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      io.log("");
+      io.log(investigation.transcript);
+      io.log("");
+      printRefusal(io, "revenue by product_category", productCategoryStatus);
+      printRefusal(io, "revenue by customers.email", emailStatus);
+      printNextSteps(io, resolved.projectDir, resolved.demoMarkdown, Boolean(options.serve));
+    }
 
     if (options.connect) {
       const output = connectDemo(resolved.projectDir, options.connect);
@@ -157,21 +139,22 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
       io.log(output);
     }
 
+    if (options.serve) {
+      const port = options.port ?? 8080;
+      await serveHttp(kernel, port);
+      io.log(`\nMCP  http://localhost:${port}/mcp`);
+    }
+
     return {
       projectDir: resolved.projectDir,
       warehousePath: resolved.warehousePath,
-      lastMonth,
-      priorMonth,
-      lastMonthRevenue,
-      priorMonthRevenue,
-      lastMonthByChannel,
-      mixedCodes,
+      investigation,
       productCategoryStatus,
       emailStatus,
-      generatedSql: last.provenance.generated_sql,
+      generatedSql: investigation.generatedSql,
     };
   } finally {
-    await kernel.close();
+    if (!options.serve) await kernel.close();
   }
 }
 
@@ -206,24 +189,6 @@ async function refusalStatus(
   }
 }
 
-function printBanner(io: DemoIo, projectDir: string, postgres: boolean): void {
-  io.log("Grane demo shop");
-  io.log(postgres ? "Warehouse: Postgres (example compose)" : "Warehouse: local DuckDB (no Docker)");
-  io.log(`Project:   ${projectDir}`);
-  io.log("");
-  io.log("Agents reason. Grane executes. The SQL below is compiled by Grane, not written by an agent.");
-  io.log("");
-}
-
-function printQuery(io: DemoIo, title: string, result: QueryResult): void {
-  io.log(title);
-  io.log(trustHeadline(result.trust));
-  if (result.warning) io.error(`warning: ${result.warning}`);
-  printTable(io, result.columns, result.rows);
-  io.log(`query ${result.provenance.query_id}  |  ${result.provenance.duration_ms}ms`);
-  io.log("");
-}
-
 function printRefusal(io: DemoIo, label: string, status: string | null): void {
   if (status) {
     io.log(`Refused ${label}: ${status}`);
@@ -233,46 +198,23 @@ function printRefusal(io: DemoIo, label: string, status: string | null): void {
   io.log("");
 }
 
-function printNextSteps(io: DemoIo, projectDir: string, demoMarkdown: string): void {
+function printNextSteps(io: DemoIo, projectDir: string, demoMarkdown: string, serving: boolean): void {
   io.log("────────────────────────────────────────");
   io.log("Ask your agent this question:");
   io.log("");
   io.log(`  ${DEMO_QUESTION}`);
   io.log("");
-  io.log("The agent should catalog governed metrics first, find the partner decline,");
-  io.log("then investigate orders.discount_code (trust: mixed). It must not write SQL.");
+  io.log("The agent should catalog governed metrics, find Germany, then investigate");
+  io.log("permitted raw payments.failure_code (trust: mixed). It must not write SQL.");
   io.log("");
-  io.log("Connect a local agent (stdio):");
-  io.log(`  grane -p ${projectDir} mcp connect cursor`);
-  io.log(`  grane -p ${projectDir} mcp connect claude`);
-  io.log("");
+  if (!serving) {
+    io.log("Connect a local agent (stdio):");
+    io.log(`  grane -p ${projectDir} mcp connect cursor`);
+    io.log(`  grane -p ${projectDir} mcp connect claude`);
+    io.log("");
+    io.log("  or: docker compose up");
+    io.log("");
+  }
   io.log(`What you should see: ${demoMarkdown}`);
-}
-
-function printTable(io: DemoIo, columns: string[], rows: Record<string, unknown>[]): void {
-  if (rows.length === 0) {
-    io.log("(no rows)");
-    return;
-  }
-  const render = (value: unknown): string => {
-    if (value === null || value === undefined) return "";
-    if (value instanceof Date) return value.toISOString();
-    return String(value);
-  };
-  const widths = columns.map((c) => Math.max(c.length, ...rows.map((r) => render(r[c]).length)));
-  io.log(columns.map((c, i) => c.padEnd(widths[i]!)).join("  "));
-  io.log(widths.map((w) => "-".repeat(w)).join("  "));
-  for (const row of rows) {
-    io.log(columns.map((c, i) => render(row[c]).padEnd(widths[i]!)).join("  "));
-  }
-}
-
-function num(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "bigint") return Number(value);
-  const parsed = Number(value);
-  if (Number.isFinite(parsed)) return parsed;
-  const text = String(value).trim();
-  const fromText = Number(text);
-  return Number.isFinite(fromText) ? fromText : 0;
+  io.log(`Questions:           ${join(demoRoot(), "questions.md")}`);
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the example DuckDB warehouse and Parquet files for warehouse upload.
+"""Build a DuckDB warehouse and Parquet files from the canonical demo seed.
 
 The stranger path is `npx grane-analytics demo` (Node). This script is for
 Parquet / MotherDuck / Databricks exports from the same seed SQL.
@@ -12,10 +12,20 @@ from pathlib import Path
 import duckdb
 
 ROOT = Path(__file__).resolve().parents[1]
-SQL_PATH = ROOT / "seed" / "duckdb.sql"
+SQL_PATH = ROOT.parent / "demo" / "seed" / "duckdb.sql"
 DB_PATH = ROOT / "analytics-duckdb" / "warehouse.duckdb"
 PARQUET_DIR = ROOT / "analytics-duckdb" / "parquet"
-TABLES = ("customers", "products", "orders", "order_items", "payments", "refunds")
+TABLES = (
+    "customers",
+    "products",
+    "orders",
+    "order_items",
+    "payments",
+    "refunds",
+    "subscriptions",
+    "checkout_events",
+    "support_tickets",
+)
 
 
 def main() -> None:
@@ -32,7 +42,7 @@ def main() -> None:
         count = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
         parquet = PARQUET_DIR / f"{table}.parquet"
         con.execute(f"COPY {table} TO '{parquet}' (FORMAT PARQUET, COMPRESSION ZSTD)")
-        print(f"  {table:12} {count:5} rows  ->  {parquet.name}")
+        print(f"  {table:16} {count:5} rows  ->  {parquet.name}")
     con.close()
 
 

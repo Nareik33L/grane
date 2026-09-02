@@ -1,6 +1,6 @@
 metrics:
   revenue:
-    description: Net revenue from completed orders.
+    description: Net revenue from completed orders, booked on completed_at (not created_at, paid_at or settled_at).
     owner: finance
     entity: order
     type: sum
@@ -56,7 +56,7 @@ metrics:
     unit: GBP
 
   customers:
-    description: Number of registered customers.
+    description: Number of registered customers (a row in customers, whether or not they have ordered).
     entity: customer
     type: count
     sql: ${customers.id}

@@ -1,0 +1,39 @@
+# Production HTTP: your own warehouse.
+#
+#   1. Put your grane.yml / metrics.yml / ... in ./analytics
+#   2. export DATABASE_URL=postgres://readonly_user:...@your-host:5432/db
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+#
+# Published image: ghcr.io/nareik33l/grane
+# Guide: docs/production.md
+#
+# The default docker-compose.yml in this repo is the self-contained demo shop.
+
+services:
+  grane:
+    build: .
+    image: ghcr.io/nareik33l/grane:0.6.4
+    container_name: grane
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GRANE_AUDIT_PATH: /var/log/grane/audit.jsonl
+    volumes:
+      - ./analytics:/project:ro
+      - grane-audit:/var/log/grane
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  grane-audit:

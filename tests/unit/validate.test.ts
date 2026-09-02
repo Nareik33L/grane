@@ -17,6 +17,7 @@ function schemaFixture(): DatabaseSchema {
         ["id", "integer"],
         ["country", "text"],
         ["customer_type", "text"],
+        ["plan", "text"],
         ["created_at", "timestamp with time zone"],
       ]),
       table("orders", [
@@ -50,6 +51,22 @@ function schemaFixture(): DatabaseSchema {
       table("products", [
         ["id", "integer"],
         ["category", "text"],
+      ]),
+      table("support_tickets", [
+        ["id", "integer"],
+        ["customer_id", "integer"],
+        ["category", "text"],
+      ]),
+      table("checkout_events", [
+        ["id", "integer"],
+        ["order_id", "integer"],
+        ["event_type", "text"],
+      ]),
+      table("subscriptions", [
+        ["id", "integer"],
+        ["customer_id", "integer"],
+        ["plan", "text"],
+        ["status", "text"],
       ]),
     ],
     foreignKeys: [],

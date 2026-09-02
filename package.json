@@ -11,7 +11,8 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "example"
+    "example",
+    "demo"
   ],
   "engines": {
     "node": ">=20"
@@ -25,7 +26,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:benchmark": "vitest run tests/benchmark",
+    "test:benchmark": "vitest run tests/benchmark tests/demo",
     "test:gauntlet": "vitest run tests/gauntlet"
   },
   "keywords": [
@@ -49,15 +50,15 @@
   "bugs": {
     "url": "https://github.com/Nareik33L/grane/issues"
   },
+  "optionalDependencies": {
+    "@duckdb/node-api": "^1.5.5-r.4"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "commander": "^15.0.0",
     "pg": "^8.23.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
-  },
-  "optionalDependencies": {
-    "@duckdb/node-api": "^1.5.5-r.4"
   },
   "devDependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",

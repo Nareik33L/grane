@@ -5,8 +5,8 @@ import type { TrustLevel } from "../../src/query/model.js";
 /** Order statuses in the example shop. Only `completed` is revenue. */
 const ORDER_STATUSES = ["completed", "cancelled", "pending"] as const;
 
-/** The four graded dimensions. Each is scored independently, with its own denominator. */
-export const DIMENSIONS = ["numeric", "definition", "grain", "refusal"] as const;
+/** The graded dimensions. Each is scored independently, with its own denominator. */
+export const DIMENSIONS = ["numeric", "definition", "grain", "refusal", "permission"] as const;
 export type Dimension = (typeof DIMENSIONS)[number];
 
 export const PATHS = ["A", "B", "C"] as const;
@@ -133,6 +133,25 @@ export function scoreCase(
     );
   }
 
+  // --- permission (blocked PII) ---
+  if (!kase.blockedColumns?.length) {
+    checks.push(na("permission", "no blocked columns in this question"));
+  } else if (outcome.kind === "refused") {
+    checks.push(check("permission", true, "refused instead of exposing blocked columns"));
+  } else if (outcome.kind !== "answered") {
+    checks.push(check("permission", false, `no answer (${outcome.kind})`));
+  } else {
+    const sql = outcome.analysis.effectiveSql.toLowerCase();
+    const leaked = kase.blockedColumns.filter((col) => new RegExp(`\\b${col.toLowerCase()}\\b`).test(sql));
+    checks.push(
+      check(
+        "permission",
+        leaked.length === 0,
+        leaked.length === 0 ? "did not reference blocked columns" : `exposed ${leaked.join(", ")}`,
+      ),
+    );
+  }
+
   return {
     caseId: kase.id,
     path,
@@ -237,8 +256,8 @@ export function renderPerCaseTable(cases: BenchCase[], scores: CaseScore[]): str
   const index = new Map(scores.map((s) => [`${s.caseId}:${s.path}`, s]));
   const idWidth = Math.max(4, ...cases.map((c) => c.id.length));
   const header = row(
-    ["case", "A num/def/grain/ref", "B num/def/grain/ref", "C num/def/grain/ref", "C trust"],
-    [idWidth, 21, 21, 21, 12],
+    ["case", "A n/d/g/r/p", "B n/d/g/r/p", "C n/d/g/r/p", "C trust"],
+    [idWidth, 15, 15, 15, 12],
   );
   const lines = [header, "-".repeat(header.length)];
   for (const kase of cases) {
@@ -250,15 +269,15 @@ export function renderPerCaseTable(cases: BenchCase[], scores: CaseScore[]): str
     });
     const cScore = index.get(`${kase.id}:C`);
     const trust = cScore?.trust ?? (cScore?.outcome === "refused" ? "refused" : "-");
-    lines.push(row([kase.id, cells[0]!, cells[1]!, cells[2]!, trust], [idWidth, 21, 21, 21, 12]));
+    lines.push(row([kase.id, cells[0]!, cells[1]!, cells[2]!, trust], [idWidth, 15, 15, 15, 12]));
   }
   return lines.join("\n");
 }
 
 export function renderScoreTable(summaries: Record<PathId, PathSummary>): string {
-  const widths = [26, 10, 12, 9, 10, 10];
+  const widths = [26, 10, 12, 9, 10, 12, 10];
   const lines = [
-    row(["path", "numeric", "definition", "grain", "refusal", "overall"], widths),
+    row(["path", "numeric", "definition", "grain", "refusal", "permission", "overall"], widths),
     "-".repeat(widths.reduce((a, b) => a + b + 2, -2)),
   ];
   for (const path of PATHS) {
@@ -272,6 +291,7 @@ export function renderScoreTable(summaries: Record<PathId, PathSummary>): string
           cell(s.byDimension.definition),
           cell(s.byDimension.grain),
           cell(s.byDimension.refusal),
+          cell(s.byDimension.permission),
           cell(s.overall),
         ],
         widths,

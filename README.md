@@ -1,21 +1,26 @@
 # Grane
 
-**The open-source analytics harness for AI agents.**
+The open-source analytics harness for AI agents.
 
-Agents reason. Grane executes.
+**Agents reason. Grane executes.**
 
-Connect a warehouse, define the metrics that matter, and give any MCP agent
-governed access to those definitions — plus permissioned exploration of
-everything else, clearly labelled.
+Your AI can write SQL.
+That doesn't mean it knows what Revenue means.
 
-**Self-hosted. Deterministic. Semantic-first, not semantic-only.**
+```text
+Agent → MCP → Grane → Warehouse
+```
 
-> Your AI can write SQL. That doesn't mean it knows what Revenue means.
-> Grane tells it which numbers are authoritative and which conclusions are exploratory.
+- Deterministic business metrics
+- Safe joins and grain
+- Governed + exploratory analytics
+- Works with existing semantic definitions
+- No LLM inside Grane
+- Fully self-hosted
 
----
+![Why did revenue fall last month?](demo/why-revenue-fell.gif)
 
-## Try it (one command)
+## Try it
 
 Requires Node 20+. No Docker. No API keys for Grane.
 
@@ -32,203 +37,132 @@ npm install
 npm run demo
 ```
 
-That builds a local DuckDB shop, runs governed queries, shows a mixed-trust
-slice, and prints the question to ask an agent:
+You should see: revenue down ~14%, Germany the outlier, card authentication failures the lead. Revenue and geography are governed. The failure-code slice is exploratory.
 
-> Why did revenue fall last month?
-
-Then connect a local agent (stdio, not ChatGPT HTTPS) using the project path
-`demo` printed:
+Then connect a local agent:
 
 ```bash
-grane -p example/analytics-duckdb mcp connect cursor
-# also: claude, vscode, gemini
+grane -p demo/analytics mcp connect cursor
 ```
 
-Restart the client, open a **new chat**, and ask the question. The agent
-should call Grane tools — not write analytical SQL.
+Ask:
 
-Expected investigation (agent plans, Grane compiles):
+> Why did Revenue fall last month?
 
-1. Governed `revenue` last month vs the prior month — **trust: governed**
-2. Slice by `channel` — partner is the decline
-3. Investigate `orders.discount_code` — **trust: mixed** (a lead, not approved truth)
-4. Optional: `product_category` is refused (below order grain); `customers.email` is blocked
+Postgres (optional):
 
-Full script: **[example/DEMO.md](example/DEMO.md)**
+```bash
+docker compose up
+```
 
-The CLI command is `grane` (`npx grane-analytics` runs the same binary).
-Postgres is bundled; DuckDB is pulled for this demo. Other warehouse drivers
-stay optional.
+Demo project: [`demo/`](demo/). Questions: [`demo/questions.md`](demo/questions.md).
 
 ---
 
 ## Why Grane exists
 
-AI agents can already write SQL. Your database does not know the company's
-approved definition of Revenue — and letting an LLM invent it produces
-plausible, wrong numbers.
+AI agents can already write SQL. Your database does not know the approved definition of Revenue — and letting an LLM invent it produces plausible-looking, wrong numbers.
 
-```text
-Your agent (Cursor / Claude / Gemini / ChatGPT)  — your LLM keys
-        |
-        | MCP  (no LLM key)
-        v
-     GRANE     metrics, compiler, join/grain safety, provenance
-        |
-        | read-only SQL Grane compiled
-        v
-Your warehouse
-```
+Grane sits between the warehouse and the agent. The agent sends intent (`revenue by country`, `period: last_month`). Grane resolves the definition, plans joins, compiles SQL, and executes it read-only. Permitted raw columns can be explored without writing SQL, and every result is labelled `governed`, `mixed`, or `exploratory`.
 
-- **The agent reasons. Grane executes.** Agents send semantic requests
-  (`revenue` by `channel` last month). Grane resolves definitions, plans
-  joins, compiles SQL, and runs it read-only. Agents do not get a SQL tool
-  for analytics.
-- **Three trust levels.** `governed` (approved definitions), `mixed`
-  (approved metrics plus raw fields — a lead), `exploratory` (raw warehouse
-  data). The first sentence of every answer must be the trust headline.
-- **Refusal is a trust feature.** Undefined metrics, unsafe grains, and
-  excluded columns return structured errors. Grane never invents business
-  logic.
-- **No LLM inside.** Deterministic infrastructure. Nothing leaves your
-  environment.
+If Grane cannot safely resolve the meaning, it **refuses**. That is a feature.
 
----
+Connect Claude, ChatGPT, Gemini, Cursor, or any MCP agent. Grane does not need their API keys.
 
-## Connect an agent
+Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)**
 
-After the demo (or after `grane validate` on your own project):
-
-```bash
-grane mcp doctor
-grane mcp connect cursor    # claude, vscode, gemini, …
-```
-
-Desktop clients use **stdio** (`grane serve --stdio` launched by the agent).
-ChatGPT needs a **public HTTPS** URL — that is not the first-run path.
-
-Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)**  
-MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)**
-
----
-
-## Your own Postgres
-
-Once the demo makes sense:
+## Install (your warehouse)
 
 ```bash
 npm install -g grane-analytics
-mkdir analytics && cd analytics
 grane init
 export DATABASE_URL=postgres://readonly_user:...@host:5432/db
 grane discover --write-relationships
-# define entities and about five metrics
 grane validate
-grane query revenue -d country --last 30d
 grane mcp connect cursor
 ```
 
-Use a **read-only database user**. Grane also wraps queries in a `READ ONLY`
-transaction, but the warehouse remains the security boundary.
+Use a **read-only database user**. Grane also wraps every query in a `READ ONLY` transaction with a statement timeout.
 
-Step-by-step: **[docs/first-week.md](docs/first-week.md)**  
-Production HTTP (Docker, TLS, agent tokens): **[docs/production.md](docs/production.md)**  
-Warehouses: **[docs/warehouses.md](docs/warehouses.md)**  
-Existing dbt / Cube / LookML / Ossie models: **[docs/providers.md](docs/providers.md)**
+## Architecture
 
----
-
-## Defining metrics
-
-YAML, reviewed in pull requests, versioned in Git:
-
-```yaml
-metrics:
-  revenue:
-    description: Net revenue from completed orders
-    owner: finance
-    entity: order
-    type: sum
-    sql: ${orders.net_amount}
-    time_dimension: ${orders.completed_at}
-    unit: GBP
-    status: approved
-    synonyms: [sales, net sales]
-    filters:
-      orders.status: completed
+```text
+Claude / ChatGPT / Cursor / internal agents
+                 |
+                 |  MCP
+                 v
+              GRANE          metrics, dimensions, relationships,
+                 |           deterministic compiler, validation,
+                 |  SQL      join/grain safety, provenance
+                 v
+           Your warehouse
 ```
 
-`grane validate` checks references against the live schema and refuses unsafe
-fan-out before an agent runs a query.
-
----
-
-## The MCP surface
-
-Four tools, deliberately hard to misuse:
-
-| Tool | Purpose |
-| --- | --- |
-| `catalog()` | Discover metrics, dimensions, entities, and (when enabled) explorable columns |
-| `query()` | Resolve → validate → compile → execute → provenance |
-| `validate()` | Dry-run without executing |
-| `explain()` | Definitions, join plan, exact SQL |
+Four MCP tools: `catalog`, `query`, `validate`, `explain`. Agents send analytical intent, not SQL.
 
 ```json
 {
   "metrics": ["revenue"],
-  "dimensions": ["channel"],
+  "dimensions": ["country"],
   "raw_dimensions": ["orders.discount_code"],
   "time": { "period": "last_month" }
 }
 ```
 
-Every result leads with a trust headline. `generated_sql` is Grane's, not the
-agent's.
-
 | `trust` | Meaning |
 | --- | --- |
 | `governed` | Approved definitions only. Present as business truth. |
-| `mixed` | Approved metrics plus permitted raw fields. A lead, not an approved conclusion. |
+| `mixed` | Approved metrics plus permitted raw fields. A lead, not approved truth. |
 | `exploratory` | Raw warehouse data only. Investigation, not governed analytics. |
 
-```yaml
-exploration:
-  enabled: true
-  schemas: [main]
-  exclude:
-    - customers.email
+## Benchmark
+
+Same shop, same questions, three ways — no LLM in the loop. **50 questions.**
+Paths A and B are representative SQL fixtures, not live model samples.
+Grane compiled the same request five times: identical SQL.
+
+| | Numeric | Refusal | Permission | Overall |
+| --- | ---: | ---: | ---: | ---: |
+| A Direct DB MCP | 31% | 72% | 0% | 47% |
+| B DB MCP + SKILL.md | 94% | 90% | 100% | 91% |
+| C Grane | 100% | 100% | 100% | 100% |
+
+A well-written `SKILL.md` gets definitions right. It still writes fan-out joins
+and cannot *enforce* a PII denylist. Grane compiles the join plan and refuses
+the rest. If live agents beat these fixtures, that is useful — publish it.
+
+```bash
+npm run test:benchmark
 ```
 
-`grane promote orders.discount_code` writes a governed dimension when a raw
-field earns it.
+Methodology: [`tests/benchmark/README.md`](tests/benchmark/README.md).
 
----
+## Warehouses and semantic providers
+
+Postgres is bundled. Other engines are optional installs. dbt, Cube, LookML, Ossie, and Malloy can be connected instead of copying YAML. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
+
+Production HTTP (Docker, TLS, agent tokens, audit log): [docs/production.md](docs/production.md).
 
 ## What Grane is not
 
-No dashboards, no chart builder, no built-in chatbot, no hosted data plane,
-no required LLM API key. Agents own presentation; Grane owns analytics truth
-— and always says which numbers are governed and which are exploratory.
-
----
+No dashboards, no chart builder, no built-in chatbot, no hosted data plane, no required LLM API key.
 
 ## Development
 
 ```bash
 npm install
-npm run demo                 # DuckDB shop; also npm run demo:postgres
-npm run test:unit            # no database needed
-npm test                     # unit + integration (Postgres on :5433)
-npm run test:benchmark       # A/B/C thesis benchmark
-npm run test:gauntlet        # internal robustness suite
+npm run demo
+npm run test:unit                                        # no database needed
+docker compose up -d postgres --wait
+npm test                                                 # unit + integration
+
+npm run test:benchmark                                   # A/B/C thesis on the demo shop
+npm run test:gauntlet                                    # internal robustness gauntlet
 ```
 
-`tests/benchmark` asks the same questions of the demo shop three ways. See
-[tests/benchmark/README.md](tests/benchmark/README.md).
-
-`tests/gauntlet` is the internal robustness suite. See
+`tests/gauntlet` is the internal robustness suite: a hostile warehouse and
+hundreds of scenarios designed to make Grane return the wrong number, bypass a
+permission, or label exploration as governed. See
 [tests/gauntlet/README.md](tests/gauntlet/README.md).
 
 ## License

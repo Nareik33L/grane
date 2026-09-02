@@ -2,15 +2,21 @@
 
 ## Unreleased
 
-- Canonical onboarding path: `npx grane-analytics demo` (or `npm run demo`)
-  builds a local DuckDB shop, previews governed vs mixed-trust queries, and
-  prints the question *Why did revenue fall last month?* Last-month revenue
-  falls on the partner channel; `orders.discount_code` is the allowed raw
-  investigation field; `customers.email` is excluded; `product_category` is
-  refused. Script: `example/DEMO.md`.
-- Demo seed is deterministic (no random 365-day orders). `warehouse.duckdb`
-  is generated in Node; it is not committed. `python3 example/scripts/build_duckdb.py`
-  still rebuilds the file and Parquet exports.
+- Canonical demo shop in `demo/`: planted last-month revenue drop (Germany /
+  `CARD_AUTH_FAILED`). `npx grane-analytics demo` (or `npm run demo`) builds a
+  local DuckDB warehouse, runs the investigation, and prints the question to
+  ask an agent. `docker compose up` is the Postgres path. `--dir`, `--connect`,
+  `--postgres`, and `--serve` come along. The same dataset powers the A/B/C
+  benchmark. `warehouse.duckdb` is generated, not committed.
+- Benchmark expanded to ~50 questions with a permission score and a five-run
+  compile check for Grane. Paths A and B remain representative SQL fixtures.
+- `time.period` accepts `this_quarter`, `last_quarter`, and `q2`–`q4`
+  (calendar). `q1` stays the 0.6.5 rule: year-to-date within calendar Q1, or
+  `ambiguous_query` when a fiscal year is configured.
+- Hostile-input and information-boundary regression tests (SQL injection in
+  filters, blocked `customers.email` on every access path, grain traps on
+  tickets / checkout events / payment failure codes).
+- README opening shortened around the demo.
 
 ## 0.6.5
 

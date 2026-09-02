@@ -62,6 +62,7 @@ export function exampleConfig(overrides: Record<string, unknown> = {}): GraneCon
     dimensions: {
       country: { entity: "customer", sql: "${customers.country}" },
       customer_type: { entity: "customer", sql: "${customers.customer_type}" },
+      plan: { entity: "customer", sql: "${customers.plan}" },
       channel: { entity: "order", sql: "${orders.channel}" },
       order_status: { entity: "order", sql: "${orders.status}" },
       completed_at: { entity: "order", sql: "${orders.completed_at}", type: "timestamp" },
@@ -75,6 +76,21 @@ export function exampleConfig(overrides: Record<string, unknown> = {}): GraneCon
       order_items_to_products: {
         from: "order_items.product_id",
         to: "products.id",
+        type: "many_to_one",
+      },
+      tickets_to_customers: {
+        from: "support_tickets.customer_id",
+        to: "customers.id",
+        type: "many_to_one",
+      },
+      checkout_events_to_orders: {
+        from: "checkout_events.order_id",
+        to: "orders.id",
+        type: "many_to_one",
+      },
+      subscriptions_to_customers: {
+        from: "subscriptions.customer_id",
+        to: "customers.id",
         type: "many_to_one",
       },
     },
@@ -123,6 +139,7 @@ export function exampleSchema(): DatabaseSchema {
         ["email", "text"],
         ["country", "text"],
         ["customer_type", "text"],
+        ["plan", "text"],
         ["created_at", "timestamp with time zone"],
       ]),
       table("orders", [
@@ -133,15 +150,21 @@ export function exampleSchema(): DatabaseSchema {
         ["net_amount", "numeric"],
         ["completed_at", "timestamp with time zone"],
         ["created_at", "timestamp with time zone"],
+        ["paid_at", "timestamp with time zone"],
+        ["settled_at", "timestamp with time zone"],
+        ["refunded_at", "timestamp with time zone"],
         ["discount_code", "text"],
         ["device_type", "text"],
         ["referrer", "text"],
+        ["payment_failure_code", "text"],
       ]),
       table("payments", [
         ["id", "integer"],
         ["order_id", "integer"],
         ["amount", "numeric"],
         ["status", "text"],
+        ["failure_code", "text"],
+        ["paid_at", "timestamp with time zone"],
       ]),
       table("refunds", [
         ["id", "integer"],
@@ -156,6 +179,24 @@ export function exampleSchema(): DatabaseSchema {
       table("products", [
         ["id", "integer"],
         ["category", "text"],
+      ]),
+      table("support_tickets", [
+        ["id", "integer"],
+        ["customer_id", "integer"],
+        ["category", "text"],
+        ["status", "text"],
+      ]),
+      table("checkout_events", [
+        ["id", "integer"],
+        ["order_id", "integer"],
+        ["event_type", "text"],
+      ]),
+      table("subscriptions", [
+        ["id", "integer"],
+        ["customer_id", "integer"],
+        ["plan", "text"],
+        ["status", "text"],
+        ["mrr", "numeric"],
       ]),
     ],
     foreignKeys: [],

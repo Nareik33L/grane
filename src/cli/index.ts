@@ -86,21 +86,36 @@ program
 // ---------------------------------------------------------------- demo
 program
   .command("demo")
-  .description("Build the bundled shop, preview governed vs mixed results, and print the question to ask an agent")
-  .option("--dir <dir>", "write the DuckDB demo project here (default: example/analytics-duckdb or ~/.grane/demo)")
-  .option("--postgres", "use the Docker Postgres example instead of DuckDB")
-  .option("--connect <client>", "register the demo with an MCP client (cursor, claude, …)")
-  .action(async (options: { dir?: string; postgres?: boolean; connect?: string }) => {
-    try {
-      await runDemo({
-        dir: options.dir,
-        postgres: options.postgres,
-        connect: options.connect,
-      });
-    } catch (err) {
-      fail(err);
-    }
-  });
+    .description("Build the demo shop, run the revenue-drop investigation, and print the question to ask an agent")
+    .option("--dir <dir>", "write the DuckDB demo project here (default: demo/analytics or ~/.grane/demo)")
+    .option("--postgres", "use Docker Postgres on localhost:5433 instead of DuckDB")
+    .option("--connect <client>", "register the demo with an MCP client (cursor, claude, …)")
+    .option("--serve", "start the MCP server after the investigation")
+    .option("--port <port>", "HTTP port when using --serve", "8080")
+    .option("--json", "print investigation results as JSON")
+    .action(
+      async (options: {
+        dir?: string;
+        postgres?: boolean;
+        connect?: string;
+        serve?: boolean;
+        port: string;
+        json?: boolean;
+      }) => {
+        try {
+          await runDemo({
+            dir: options.dir,
+            postgres: options.postgres,
+            connect: options.connect,
+            serve: options.serve,
+            port: Number(options.port),
+            json: options.json,
+          });
+        } catch (err) {
+          fail(err);
+        }
+      },
+    );
 
 // ---------------------------------------------------------------- discover
 program

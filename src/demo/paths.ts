@@ -1,30 +1,42 @@
 import { accessSync, constants, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Package root: both `src/demo` and `dist/demo` sit two levels below it. */
+/** Repo / npm package root (contains demo/ and package.json). */
 export function packageRoot(from = fileURLToPath(import.meta.url)): string {
-  return join(dirname(from), "../..");
+  let dir = dirname(from);
+  for (let i = 0; i < 6; i += 1) {
+    if (existsSync(join(dir, "package.json")) && existsSync(join(dir, "demo"))) {
+      return dir;
+    }
+    dir = dirname(dir);
+  }
+  return resolve(dirname(from), "../..");
 }
 
-export function bundledExampleDir(root = packageRoot()): string {
-  return join(root, "example");
+export function demoRoot(root = packageRoot()): string {
+  return join(root, "demo");
 }
 
-export function bundledDuckdbProject(root = packageRoot()): string {
-  return join(bundledExampleDir(root), "analytics-duckdb");
+export function demoAnalyticsDir(root = packageRoot()): string {
+  return join(demoRoot(root), "analytics");
 }
 
-export function bundledPostgresProject(root = packageRoot()): string {
-  return join(bundledExampleDir(root), "analytics");
-}
-
-export function bundledDuckdbSeed(root = packageRoot()): string {
-  return join(bundledExampleDir(root), "seed", "duckdb.sql");
+export function demoDuckdbSql(root = packageRoot()): string {
+  return join(demoRoot(root), "seed", "duckdb.sql");
 }
 
 export function demoMarkdownPath(root = packageRoot()): string {
-  return join(bundledExampleDir(root), "DEMO.md");
+  return join(demoRoot(root), "README.md");
+}
+
+/** YAML project used for both DuckDB and Postgres; connection is overridden in code. */
+export function bundledDuckdbProject(root = packageRoot()): string {
+  return demoAnalyticsDir(root);
+}
+
+export function bundledPostgresProject(root = packageRoot()): string {
+  return demoAnalyticsDir(root);
 }
 
 export function isWritableDir(dir: string): boolean {

@@ -114,14 +114,14 @@ Queries and refusals are appended to `.grane/audit.jsonl` (see
 
 ```bash
 npx grane-analytics demo
-grane -p example/analytics-duckdb mcp connect cursor
+grane -p demo/analytics mcp connect cursor
 ```
 
-Ask: *"Why did revenue fall last month?"* See [example/DEMO.md](../example/DEMO.md).
+Ask: *"Why did revenue fall last month?"* See [demo/README.md](../demo/README.md).
 
 Postgres (optional):
 
 ```bash
-docker compose -f example/docker-compose.yml up -d --wait
+docker compose up -d postgres --wait
 npx grane-analytics demo --postgres
 ```

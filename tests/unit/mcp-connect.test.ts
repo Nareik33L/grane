@@ -13,7 +13,7 @@ import { connectMcp, printMcpConfig, listMcpRegistrations, removeMcpRegistration
 import { runDoctor } from "../../src/mcp/connect/doctor.js";
 import type { ResolvedLaunch } from "../../src/mcp/connect/types.js";
 
-const exampleDir = join(dirname(fileURLToPath(import.meta.url)), "../../example/analytics");
+const exampleDir = join(dirname(fileURLToPath(import.meta.url)), "../../demo/analytics");
 const launch: ResolvedLaunch = { command: "grane", prefixArgs: [], source: "override" };
 
 function tempDir(): string {

@@ -40,10 +40,10 @@ deterministic infrastructure in the middle.
 
 ```bash
 npx grane-analytics demo
-npx grane-analytics -p example/analytics-duckdb mcp connect cursor
+npx grane-analytics -p demo/analytics mcp connect cursor
 ```
 
-Ask: *Why did revenue fall last month?* Script: [example/DEMO.md](../example/DEMO.md).
+Ask: *Why did revenue fall last month?* Script: [demo/README.md](../demo/README.md).
 ChatGPT (HTTPS only) is not this path.
 
 After `grane validate` succeeds on your own project, register Grane with
@@ -90,7 +90,7 @@ you prefer containers.
 
 ### 2. Point Grane at your database
 
-Create a Grane project (`grane init`) or use the example under `example/analytics/`.
+Create a Grane project (`grane init`) or use the demo shop under `demo/analytics/`.
 
 In `grane.yml`:
 

@@ -23,3 +23,18 @@ relationships:
     from: order_items.product_id
     to: products.id
     type: many_to_one
+
+  checkout_events_to_orders:
+    from: checkout_events.order_id
+    to: orders.id
+    type: many_to_one
+
+  tickets_to_customers:
+    from: support_tickets.customer_id
+    to: customers.id
+    type: many_to_one
+
+  subscriptions_to_customers:
+    from: subscriptions.customer_id
+    to: customers.id
+    type: many_to_one

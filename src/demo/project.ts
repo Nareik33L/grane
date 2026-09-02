@@ -9,7 +9,6 @@ import {
   isWritableDir,
   packageRoot,
 } from "./paths.js";
-import { buildDemoWarehouse } from "./warehouse.js";
 
 export interface ResolveDemoProjectOptions {
   dir?: string;

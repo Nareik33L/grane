@@ -1,6 +1,6 @@
 /**
- * Canonical demo shop: last-month revenue falls on the partner channel
- * under ungoverned discount_code PARTNER20. Grane compiles the SQL.
+ * Canonical demo shop: last-month revenue falls in Germany under
+ * exploratory payments.failure_code CARD_AUTH_FAILED. Grane compiles the SQL.
  */
 
 process.env.TZ = "UTC";
@@ -47,33 +47,36 @@ describe.skipIf(!duckdb)("canonical Grane demo", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("builds the shop and proves the last-month decline story", async () => {
+  it("builds the shop and proves the last-month Germany decline", async () => {
     result = await runDemo({ dir, io: quiet });
-    expect(result.lastMonthRevenue).toBe(18200);
-    expect(result.priorMonthRevenue).toBe(21400);
-    expect(result.lastMonthRevenue).toBeLessThan(result.priorMonthRevenue);
+    expect(result.investigation.revenueLast).toBeCloseTo(184230, 0);
+    expect(result.investigation.revenueChangePct).toBeCloseTo(-14.3, 1);
 
-    const partner = result.lastMonthByChannel.find((row) => row.channel === "partner");
-    const web = result.lastMonthByChannel.find((row) => row.channel === "web");
-    expect(partner?.revenue).toBe(4800);
-    expect(web?.revenue).toBe(8000);
-    expect(partner!.revenue).toBeLessThan(web!.revenue);
+    const germany = result.investigation.byCountry.find((row) => row.country === "Germany");
+    expect(germany?.changePct).toBeCloseTo(-39, 0);
 
-    expect(result.mixedCodes).toContain("PARTNER20");
+    const auth = result.investigation.failures.find((row) => row.code === "CARD_AUTH_FAILED");
+    expect(auth).toBeTruthy();
+    expect(auth!.changePct).toBeGreaterThan(200);
+
     expect(result.productCategoryStatus).toBe("unsafe_query");
     expect(result.emailStatus).toBe("column_not_permitted");
     expect(result.generatedSql.toUpperCase()).toContain("SELECT");
     expect(result.generatedSql).toMatch(/net_amount/i);
-    expect(result.generatedSql.toLowerCase()).not.toContain("partner20");
   });
 
-  it("lists discount_code as explorable and hides customer email", async () => {
+  it("lists failure_code as explorable and hides customer email", async () => {
     const loaded = loadConfig(dir);
+    loaded.config.connection = {
+      type: "duckdb",
+      path: result.warehousePath ?? join(dir, "warehouse.duckdb"),
+      schema: "main",
+    };
     const kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
     try {
       const catalog = await kernel.catalog();
       const names = catalog.exploration.columns.map((c) => `${c.table}.${c.column}`);
-      expect(names).toContain("orders.discount_code");
+      expect(names).toContain("payments.failure_code");
       expect(names).not.toContain("customers.email");
     } finally {
       await kernel.close();
