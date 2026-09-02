@@ -23,5 +23,4 @@ jobs:
       # only when the harness is broken or a known defect-class mutation is
       # not detected. 100% is not the goal.
       - run: npm run test:gauntlet
-      - run: npm run test:gauntlet
       - run: npm run build
