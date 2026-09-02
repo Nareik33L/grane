@@ -12,6 +12,7 @@ import { loadConfig } from "../../src/config/load.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { GraneError } from "../../src/errors.js";
 import { DuckDbConnector } from "../../src/connectors/duckdb.js";
+import { buildDemoWarehouse } from "../../src/demo/warehouse.js";
 import { addDays, formatDate, resolveRelativeRange, type DateRange } from "../../src/query/time.js";
 import type { SemanticQueryInput, TrustLevel } from "../../src/query/model.js";
 import type { LimitsConfig } from "../../src/config/schema.js";
@@ -22,13 +23,19 @@ export const EXAMPLE_DIR = join(here, "../../example/analytics-duckdb");
 export const WAREHOUSE_PATH = join(EXAMPLE_DIR, "warehouse.duckdb");
 
 export async function duckdbAvailable(): Promise<boolean> {
-  if (!existsSync(WAREHOUSE_PATH)) return false;
   try {
     await import("@duckdb/node-api");
-    return true;
   } catch {
     return false;
   }
+  if (!existsSync(WAREHOUSE_PATH)) {
+    try {
+      await buildDemoWarehouse(WAREHOUSE_PATH);
+    } catch {
+      return false;
+    }
+  }
+  return existsSync(WAREHOUSE_PATH);
 }
 
 const LIMITS: LimitsConfig = { max_rows: 10000, default_rows: 1000, timeout_ms: 30000 };

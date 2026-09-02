@@ -1,10 +1,8 @@
--- Example e-commerce schema for DuckDB (same shape as the Postgres seed).
--- Dates are relative to now(), so last_month / 30d always have rows.
+-- Deterministic DuckDB demo shop. Same story as 02_data.sql:
+-- last-month revenue falls, concentrated in partner / PARTNER20.
 -- Foreign keys are omitted so MotherDuck can upload the file without
 -- checking constraints while tables are still being copied. Grane reads
 -- relationships from relationships.yml instead.
-
-SELECT setseed(0.42);
 
 CREATE TABLE customers (
   id INTEGER PRIMARY KEY,
@@ -27,6 +25,7 @@ CREATE TABLE orders (
   customer_id INTEGER NOT NULL,
   status VARCHAR NOT NULL,
   channel VARCHAR NOT NULL,
+  discount_code VARCHAR,
   net_amount DECIMAL(10, 2) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ
@@ -60,49 +59,83 @@ SELECT
   i,
   'Customer ' || i,
   'customer' || i || '@example.com',
-  ['United Kingdom', 'United States', 'Germany', 'France', 'Spain', 'Netherlands']
-    [1 + CAST(floor(random() * 6) AS INTEGER)],
-  CASE WHEN random() < 0.7 THEN 'consumer' ELSE 'business' END,
-  now() - (random() * INTERVAL '540 days')
-FROM generate_series(1, 200) AS t(i);
+  ['United Kingdom', 'United States', 'Germany', 'France', 'Spain', 'Netherlands'][1 + ((i - 1) % 6)],
+  CASE WHEN i % 5 = 0 THEN 'business' ELSE 'consumer' END,
+  date_trunc('month', CURRENT_DATE) - ((12 + (i % 18)) * INTERVAL '1 month')
+FROM generate_series(1, 60) AS t(i);
 
 INSERT INTO products (id, name, category, price)
 SELECT
   i,
   'Product ' || i,
-  ['electronics', 'home', 'outdoors', 'toys', 'office'][1 + CAST(floor(random() * 5) AS INTEGER)],
-  round((5 + random() * 195)::DECIMAL, 2)
-FROM generate_series(1, 40) AS t(i);
+  ['electronics', 'home', 'outdoors', 'toys', 'office'][1 + ((i - 1) % 5)],
+  round((20 + (i * 7) % 180)::DECIMAL, 2)
+FROM generate_series(1, 20) AS t(i);
 
-INSERT INTO orders (id, customer_id, status, channel, net_amount, created_at, completed_at)
-SELECT
-  row_number() OVER () AS id,
-  1 + CAST(floor(random() * 200) AS INTEGER),
-  CASE
-    WHEN r < 0.80 THEN 'completed'
-    WHEN r < 0.92 THEN 'cancelled'
-    ELSE 'pending'
-  END,
-  ['web', 'mobile', 'partner'][1 + CAST(floor(random() * 3) AS INTEGER)],
-  round((10 + random() * 490)::DECIMAL, 2),
-  created,
-  CASE WHEN r < 0.80 THEN created + (random() * INTERVAL '3 days') ELSE NULL END
-FROM (
+INSERT INTO orders (id, customer_id, status, channel, discount_code, net_amount, created_at, completed_at)
+WITH months AS (
   SELECT
-    random() AS r,
-    now() - (random() * INTERVAL '365 days') AS created
-  FROM generate_series(1, 1200)
-) AS g;
+    gs AS months_ago,
+    date_trunc('month', CURRENT_DATE) - (gs * INTERVAL '1 month') AS month_start
+  FROM generate_series(1, 12) AS t(gs)
+),
+plan AS (
+  SELECT months_ago, month_start, 'web' AS channel, 100 AS n, 80.00::DECIMAL(10, 2) AS amount, NULL::VARCHAR AS code
+  FROM months
+  UNION ALL
+  SELECT months_ago, month_start, 'mobile', 60, 90.00, NULL
+  FROM months
+  UNION ALL
+  SELECT
+    months_ago,
+    month_start,
+    'partner',
+    80,
+    CASE WHEN months_ago = 1 THEN 60.00 ELSE 100.00 END,
+    CASE WHEN months_ago = 1 THEN 'PARTNER20' ELSE NULL END
+  FROM months
+),
+numbered AS (
+  SELECT
+    row_number() OVER (ORDER BY p.months_ago, p.channel, n_i) AS id,
+    p.*,
+    n_i
+  FROM plan p, generate_series(1, 200) AS g(n_i)
+  WHERE n_i <= p.n
+)
+SELECT
+  id,
+  1 + ((id - 1) % 60),
+  'completed',
+  channel,
+  code,
+  amount,
+  month_start + ((n_i * 3) % 27) * INTERVAL '1 day' + INTERVAL '8 hours',
+  month_start + ((n_i * 3) % 27) * INTERVAL '1 day' + INTERVAL '12 hours'
+FROM numbered;
+
+INSERT INTO orders (id, customer_id, status, channel, discount_code, net_amount, created_at, completed_at)
+SELECT
+  (SELECT max(id) FROM orders) + i,
+  1 + ((i - 1) % 60),
+  CASE WHEN i % 3 = 0 THEN 'pending' ELSE 'cancelled' END,
+  ['web', 'mobile', 'partner'][1 + ((i - 1) % 3)],
+  NULL,
+  50.00,
+  date_trunc('month', CURRENT_DATE) - ((1 + (i % 12)) * INTERVAL '1 month') + ((i % 20) * INTERVAL '1 day'),
+  NULL
+FROM generate_series(1, 120) AS t(i);
 
 INSERT INTO order_items (id, order_id, product_id, quantity, unit_price)
 SELECT
   row_number() OVER () AS id,
   o.id,
-  1 + CAST(floor(random() * 40) AS INTEGER),
-  1 + CAST(floor(random() * 3) AS INTEGER),
-  round((5 + random() * 195)::DECIMAL, 2)
-FROM orders o, generate_series(1, 3)
-WHERE random() < 0.6;
+  1 + ((o.id + n) % 20),
+  1 + (n % 2),
+  o.net_amount
+FROM orders o, generate_series(0, 1) AS g(n)
+WHERE o.status = 'completed'
+  AND n <= CASE WHEN o.id % 4 = 0 THEN 1 ELSE 0 END;
 
 INSERT INTO payments (id, order_id, amount, status, paid_at)
 WITH split AS (
@@ -110,7 +143,7 @@ WITH split AS (
     o.id AS order_id,
     o.net_amount,
     o.completed_at,
-    CASE WHEN random() < 0.35 THEN 2 ELSE 1 END AS parts
+    CASE WHEN o.id % 5 = 0 THEN 2 ELSE 1 END AS parts
   FROM orders o
   WHERE o.status = 'completed'
 ),
@@ -133,19 +166,21 @@ FROM parts;
 
 INSERT INTO payments (id, order_id, amount, status, paid_at)
 SELECT
-  (SELECT coalesce(max(id), 0) FROM payments) + row_number() OVER () AS id,
+  (SELECT max(id) FROM payments) + row_number() OVER () AS id,
   o.id,
   round((o.net_amount * 0.5)::DECIMAL, 2),
   'failed',
   o.created_at
 FROM orders o
-WHERE random() < 0.08;
+WHERE o.status = 'completed' AND o.id % 11 = 0;
 
 INSERT INTO refunds (id, order_id, amount, created_at)
 SELECT
   row_number() OVER () AS id,
   o.id,
-  round((o.net_amount * (0.2 + random() * 0.6))::DECIMAL, 2),
-  o.completed_at + ((1 + random() * 20) * INTERVAL '1 day')
+  round((o.net_amount * 0.25)::DECIMAL, 2),
+  o.completed_at + INTERVAL '5 days'
 FROM orders o
-WHERE o.status = 'completed' AND random() < 0.15;
+WHERE o.status = 'completed'
+  AND o.completed_at < date_trunc('month', CURRENT_DATE) - INTERVAL '2 months'
+  AND o.id % 8 = 0;

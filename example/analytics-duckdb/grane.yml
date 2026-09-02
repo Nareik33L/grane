@@ -21,7 +21,8 @@ exploration:
   enabled: true
   schemas:
     - main
-  exclude: []
+  exclude:
+    - customers.email
 
 entities:
   customer:

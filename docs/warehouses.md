@@ -95,12 +95,14 @@ npm install @duckdb/node-api
 `:memory:` is useful for tests. A file path persists tables across `grane` runs.
 Relative file paths are resolved from the directory that contains `grane.yml`.
 
-A seeded e-commerce file ships at `example/analytics-duckdb/warehouse.duckdb`
-(rebuild with `python3 example/scripts/build_duckdb.py`). Point Grane at it:
+The demo command builds `example/analytics-duckdb/warehouse.duckdb` from
+`example/seed/duckdb.sql` (Node, not Python):
 
 ```bash
+npx grane-analytics demo
+# or: python3 example/scripts/build_duckdb.py   # also writes Parquet for Databricks
 grane -p example/analytics-duckdb validate
-grane -p example/analytics-duckdb query revenue -d country --last 30d
+grane -p example/analytics-duckdb query revenue -d channel --last last_month
 ```
 
 ### MotherDuck (hosted DuckDB)

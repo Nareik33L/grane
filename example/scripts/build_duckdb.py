@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build the example DuckDB warehouse and Parquet files for warehouse upload."""
+"""Build the example DuckDB warehouse and Parquet files for warehouse upload.
+
+The stranger path is `npx grane-analytics demo` (Node). This script is for
+Parquet / MotherDuck / Databricks exports from the same seed SQL.
+"""
 
 from __future__ import annotations
 

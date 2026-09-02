@@ -17,6 +17,7 @@ import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
 import { GRANE_YML, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
+import { runDemo } from "../demo/run.js";
 
 const program = new Command();
 
@@ -80,6 +81,25 @@ program
         ? `\nGrane project created. First week on your own Postgres:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane discover --write-relationships" to inspect schema and merge FKs\n  3. Define entities and about five metrics (see metrics.yml comments)\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md`
         : "\nNothing to do.",
     );
+  });
+
+// ---------------------------------------------------------------- demo
+program
+  .command("demo")
+  .description("Build the bundled shop, preview governed vs mixed results, and print the question to ask an agent")
+  .option("--dir <dir>", "write the DuckDB demo project here (default: example/analytics-duckdb or ~/.grane/demo)")
+  .option("--postgres", "use the Docker Postgres example instead of DuckDB")
+  .option("--connect <client>", "register the demo with an MCP client (cursor, claude, …)")
+  .action(async (options: { dir?: string; postgres?: boolean; connect?: string }) => {
+    try {
+      await runDemo({
+        dir: options.dir,
+        postgres: options.postgres,
+        connect: options.connect,
+      });
+    } catch (err) {
+      fail(err);
+    }
   });
 
 // ---------------------------------------------------------------- discover
