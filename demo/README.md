@@ -4,9 +4,9 @@ A small SaaS/e-commerce warehouse with a planted last-month revenue drop.
 
 ```bash
 # from the repo root
-docker compose up
-# or, with the DuckDB driver:
 npx grane-analytics demo
+# or: npm run demo
+# Postgres: docker compose up
 ```
 
 The 40-second walkthrough is [`why-revenue-fell.gif`](why-revenue-fell.gif) (still: [`why-revenue-fell.svg`](why-revenue-fell.svg)).

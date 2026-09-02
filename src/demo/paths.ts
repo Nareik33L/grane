@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,4 +24,30 @@ export function demoAnalyticsDir(root = packageRoot()): string {
 
 export function demoDuckdbSql(root = packageRoot()): string {
   return join(demoRoot(root), "seed", "duckdb.sql");
+}
+
+export function demoMarkdownPath(root = packageRoot()): string {
+  return join(demoRoot(root), "README.md");
+}
+
+/** YAML project used for both DuckDB and Postgres; connection is overridden in code. */
+export function bundledDuckdbProject(root = packageRoot()): string {
+  return demoAnalyticsDir(root);
+}
+
+export function bundledPostgresProject(root = packageRoot()): string {
+  return demoAnalyticsDir(root);
+}
+
+export function isWritableDir(dir: string): boolean {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function demoProjectExists(dir: string): boolean {
+  return existsSync(join(dir, "grane.yml"));
 }

@@ -16,6 +16,8 @@ limits:
 
 exploration:
   enabled: true
+  schemas:
+    - public
   exclude:
     - customers.email
 

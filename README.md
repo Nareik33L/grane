@@ -22,25 +22,38 @@ Agent → MCP → Grane → Warehouse
 
 ## Try it
 
+Requires Node 20+. No Docker. No API keys for Grane.
+
+```bash
+npx grane-analytics demo
+```
+
+From a clone:
+
 ```bash
 git clone https://github.com/Nareik33L/grane.git
 cd grane
-docker compose up
-```
-
-Ask your MCP agent:
-
-> Why did Revenue fall last month?
-
-Or, with the DuckDB driver and no Docker:
-
-```bash
 npm install
-npx tsx src/cli/index.ts demo
-# published CLI: npx grane-analytics demo
+npm run demo
 ```
 
 You should see: revenue down ~14%, Germany the outlier, card authentication failures the lead. Revenue and geography are governed. The failure-code slice is exploratory.
+
+Then connect a local agent:
+
+```bash
+grane -p demo/analytics mcp connect cursor
+```
+
+Ask:
+
+> Why did Revenue fall last month?
+
+Postgres (optional):
+
+```bash
+docker compose up
+```
 
 Demo project: [`demo/`](demo/). Questions: [`demo/questions.md`](demo/questions.md).
 
@@ -138,6 +151,7 @@ No dashboards, no chart builder, no built-in chatbot, no hosted data plane, no r
 
 ```bash
 npm install
+npm run demo
 npm run test:unit                                        # no database needed
 docker compose up -d postgres --wait
 npm test                                                 # unit + integration

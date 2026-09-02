@@ -24,7 +24,7 @@ database on `localhost:5433` (`docker compose up -d postgres --wait`).
 `npm run test:gauntlet` needs only `@duckdb/node-api`. See
 `tests/benchmark/README.md` and `tests/gauntlet/README.md`.
 
-The first experience is `docker compose up` or `npx tsx src/cli/index.ts demo`.
+The first experience is `npm run demo` or `docker compose up`.
 
 ## Scope
 

@@ -23,6 +23,7 @@ export interface Investigation {
   byCountry: { country: string; last: number; previous: number; changePct: number }[];
   failures: { code: string; last: number; previous: number; changePct: number }[];
   transcript: string;
+  generatedSql: string;
 }
 
 function money(value: unknown): number {
@@ -179,6 +180,7 @@ export async function runInvestigation(
     byCountry,
     failures,
     transcript,
+    generatedSql: revLast.provenance.generated_sql,
   };
 }
 

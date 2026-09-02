@@ -39,9 +39,9 @@ let warehousePathPromise: Promise<string> | null = null;
 
 export async function ensureDemoWarehouse(): Promise<string> {
   if (!warehousePathPromise) {
-    warehousePathPromise = buildDemoWarehouse().then((path) => {
-      WAREHOUSE_PATH = path;
-      return path;
+    warehousePathPromise = buildDemoWarehouse().then((result) => {
+      WAREHOUSE_PATH = result.path;
+      return result.path;
     });
   }
   return warehousePathPromise;

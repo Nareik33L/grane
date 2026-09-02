@@ -4,6 +4,14 @@ This is the path from an empty directory to five governed metrics on **your**
 warehouse. Postgres is the default. DuckDB is an optional extra, not the
 starting point.
 
+If you have not used Grane yet, run the bundled shop first:
+
+```bash
+npx grane-analytics demo
+```
+
+That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).
+
 You will: create a read-only database user → `grane init` → `discover` →
 define about five metrics → `validate`. Then connect an agent.
 
@@ -118,3 +126,4 @@ npm install @duckdb/node-api
 ```
 
 The repo's `demo/` shop is a try-it environment, not the default install.
+`grane demo` builds DuckDB from `demo/seed/duckdb.sql`.

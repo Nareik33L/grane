@@ -22,6 +22,7 @@
     "prepublishOnly": "npm run build && npm run test:unit",
     "dev": "tsx src/cli/index.ts",
     "demo": "tsx src/cli/index.ts demo",
+    "demo:postgres": "tsx src/cli/index.ts demo --postgres",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

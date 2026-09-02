@@ -1,24 +1,32 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { demoDuckdbSql } from "./paths.js";
+import { loadDuckDbModule, splitSqlStatements } from "./duckdb.js";
 
-type DuckDbConnection = {
-  run?: (sql: string) => Promise<unknown>;
-  runAndReadAll?: (sql: string) => Promise<unknown>;
-  closeSync?: () => void;
-  disconnectSync?: () => void;
-};
+const DEMO_TABLES = [
+  "customers",
+  "products",
+  "orders",
+  "order_items",
+  "payments",
+  "refunds",
+  "subscriptions",
+  "checkout_events",
+  "support_tickets",
+] as const;
 
-type DuckDbInstance = {
-  connect: () => Promise<DuckDbConnection>;
-};
+export interface BuildWarehouseOptions {
+  sqlPath?: string;
+  /** When set, also export Parquet copies for Databricks / warehouse upload. */
+  parquetDir?: string;
+}
 
-type DuckDbMod = {
-  DuckDBInstance: {
-    create: (path?: string) => Promise<DuckDbInstance>;
-  };
-};
+export interface BuildWarehouseResult {
+  path: string;
+  statements: number;
+  parquetDir?: string;
+}
 
 export async function duckdbDriverAvailable(): Promise<boolean> {
   try {
@@ -32,28 +40,49 @@ export async function duckdbDriverAvailable(): Promise<boolean> {
 /**
  * Materialise the demo shop into a DuckDB file. The connector opens warehouse
  * files read-only, so this uses a writable instance just for the load.
+ *
+ * Pass a destination path, or omit it to write a temp file (tests).
  */
-export async function buildDemoWarehouse(sqlPath = demoDuckdbSql()): Promise<string> {
-  const mod = (await import("@duckdb/node-api")) as DuckDbMod;
-  const dir = mkdtempSync(join(tmpdir(), "grane-demo-"));
-  const path = join(dir, "warehouse.duckdb");
+export async function buildDemoWarehouse(
+  destPath?: string,
+  options: BuildWarehouseOptions = {},
+): Promise<BuildWarehouseResult> {
+  const sqlPath = options.sqlPath ?? demoDuckdbSql();
+  const sql = readFileSync(sqlPath, "utf8");
+  const statements = splitSqlStatements(sql);
+  if (statements.length === 0) {
+    throw new Error(`Demo seed ${sqlPath} did not contain any SQL statements.`);
+  }
+
+  let path = destPath;
+  if (!path) {
+    const dir = mkdtempSync(join(tmpdir(), "grane-demo-"));
+    path = join(dir, "warehouse.duckdb");
+  }
+
+  mkdirSync(dirname(path), { recursive: true });
+  for (const leftover of [path, `${path}.wal`]) {
+    if (existsSync(leftover)) rmSync(leftover, { force: true });
+  }
+
+  const mod = await loadDuckDbModule();
   const instance = await mod.DuckDBInstance.create(path);
   const conn = await instance.connect();
   try {
-    const sql = readFileSync(sqlPath, "utf8");
-    if (typeof conn.run === "function") {
-      await conn.run(sql);
-    } else if (typeof conn.runAndReadAll === "function") {
-      await conn.runAndReadAll(sql);
-    } else {
-      throw new Error("DuckDB connection cannot execute SQL.");
+    for (const statement of statements) {
+      await conn.runAndReadAll(statement);
     }
-  } catch (err) {
-    rmSync(dir, { recursive: true, force: true });
-    throw err;
+    if (options.parquetDir) {
+      mkdirSync(options.parquetDir, { recursive: true });
+      for (const table of DEMO_TABLES) {
+        const parquet = join(options.parquetDir, `${table}.parquet`).replaceAll("'", "''");
+        await conn.runAndReadAll(`COPY ${table} TO '${parquet}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
+      }
+    }
   } finally {
     conn.closeSync?.();
     conn.disconnectSync?.();
   }
-  return path;
+
+  return { path, statements: statements.length, parquetDir: options.parquetDir };
 }

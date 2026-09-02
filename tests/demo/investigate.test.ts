@@ -15,7 +15,7 @@ describe.skipIf(!available)("demo investigation", () => {
   });
 
   it("shows a last-month revenue drop led by Germany and CARD_AUTH_FAILED", async () => {
-    const path = await buildDemoWarehouse();
+    const { path } = await buildDemoWarehouse();
     const loaded = loadConfig(demoAnalyticsDir());
     loaded.config.connection = { type: "duckdb", path, schema: "main" };
     kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir });

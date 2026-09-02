@@ -30,7 +30,8 @@ npm run test:benchmark
 
 The shop is built from `demo/seed/duckdb.sql` at the start of the run (relative
 dates, so last_month stays populated). Relative periods are anchored to the
-newest timestamp in the warehouse.
+newest timestamp in the warehouse, not wall-clock now. Without
+`@duckdb/node-api` the suite skips rather than failing.
 
 ## What is scored
 

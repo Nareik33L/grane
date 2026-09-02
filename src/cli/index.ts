@@ -17,7 +17,7 @@ import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
 import { GRANE_YML, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
-import { registerDemoCommand } from "./demo.js";
+import { runDemo } from "../demo/run.js";
 
 const program = new Command();
 
@@ -82,6 +82,40 @@ program
         : "\nNothing to do.",
     );
   });
+
+// ---------------------------------------------------------------- demo
+program
+  .command("demo")
+    .description("Build the demo shop, run the revenue-drop investigation, and print the question to ask an agent")
+    .option("--dir <dir>", "write the DuckDB demo project here (default: demo/analytics or ~/.grane/demo)")
+    .option("--postgres", "use Docker Postgres on localhost:5433 instead of DuckDB")
+    .option("--connect <client>", "register the demo with an MCP client (cursor, claude, …)")
+    .option("--serve", "start the MCP server after the investigation")
+    .option("--port <port>", "HTTP port when using --serve", "8080")
+    .option("--json", "print investigation results as JSON")
+    .action(
+      async (options: {
+        dir?: string;
+        postgres?: boolean;
+        connect?: string;
+        serve?: boolean;
+        port: string;
+        json?: boolean;
+      }) => {
+        try {
+          await runDemo({
+            dir: options.dir,
+            postgres: options.postgres,
+            connect: options.connect,
+            serve: options.serve,
+            port: Number(options.port),
+            json: options.json,
+          });
+        } catch (err) {
+          fail(err);
+        }
+      },
+    );
 
 // ---------------------------------------------------------------- discover
 program
@@ -438,6 +472,5 @@ function printTable(columns: string[], rows: Record<string, unknown>[]): void {
 }
 
 registerMcpCommands(program, { projectDir, fail });
-registerDemoCommand(program, { fail });
 
 program.parseAsync(process.argv).catch(fail);

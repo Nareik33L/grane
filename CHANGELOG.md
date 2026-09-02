@@ -3,8 +3,11 @@
 ## Unreleased
 
 - Canonical demo shop in `demo/`: planted last-month revenue drop (Germany /
-  `CARD_AUTH_FAILED`), `grane demo`, and `docker compose up` as the zero-to-query
-  path. The same dataset powers the A/B/C benchmark.
+  `CARD_AUTH_FAILED`). `npx grane-analytics demo` (or `npm run demo`) builds a
+  local DuckDB warehouse, runs the investigation, and prints the question to
+  ask an agent. `docker compose up` is the Postgres path. `--dir`, `--connect`,
+  `--postgres`, and `--serve` come along. The same dataset powers the A/B/C
+  benchmark. `warehouse.duckdb` is generated, not committed.
 - Benchmark expanded to ~50 questions with a permission score and a five-run
   compile check for Grane. Paths A and B remain representative SQL fixtures.
 - `time.period` accepts `this_quarter`, `last_quarter`, and `q2`–`q4`
