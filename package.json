@@ -21,6 +21,7 @@
     "build": "tsc",
     "prepublishOnly": "npm run build && npm run test:unit",
     "dev": "tsx src/cli/index.ts",
+    "demo": "tsx src/cli/index.ts demo",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
@@ -47,6 +48,9 @@
   "homepage": "https://github.com/Nareik33L/grane",
   "bugs": {
     "url": "https://github.com/Nareik33L/grane/issues"
+  },
+  "optionalDependencies": {
+    "@duckdb/node-api": "^1.5.5-r.4"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

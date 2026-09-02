@@ -8,6 +8,7 @@ not be accepted.
 
 ```bash
 npm install
+npm run demo
 npm run test:unit
 docker compose up -d postgres --wait
 npm test
