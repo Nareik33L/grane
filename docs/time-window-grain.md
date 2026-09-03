@@ -4,12 +4,16 @@ Characterization only. The DATE / timezone fix does **not** change this.
 
 ## What the gauntlet reported
 
-Against MetricFlow on Oakwell-like data:
+Against MetricFlow on Oakwell-like data, and independently on canonical
+Oakwell `380f13e` (UTC, after the DATE-timezone fix):
 
-- `ending_mrr` over a 30-day range → Grane `0`, MetricFlow `2,309,714.33`
-- Additive month-grain metrics where MetricFlow aligns the requested bounds
-  to the metric's declared `time_granularity`, while Grane filters the raw
-  civil dates.
+- `ending_mrr` 2026-08-01..2026-08-31 → Grane `2,309,714.33` (matches GT)
+- `ending_mrr` 2026-08-02..2026-08-31 → Grane `0` (no snapshot DATE in range)
+- `revenue` 2026-07-01..2026-07-31 → Grane `2,183,549.37` (matches GT)
+- `revenue` 2026-07-02..2026-07-31 → Grane `2,154,558.37` (strict civil subset)
+
+MetricFlow month-grain alignment would treat a window that overlaps August
+as the August snapshot (`2,309,714.33`), including some 30-day ranges.
 
 These look similar to the timezone bug (ending MRR August 2026 → 0) but they
 are a different question: **which rows does a requested `[from, to]` include

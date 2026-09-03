@@ -340,7 +340,17 @@ export function compileQuery(
     expr: string;
   }
 
+  const compiledScalars = new Map<string, MetricExpr>();
+
   const compileScalarMetric = (metric: Metric): MetricExpr => {
+    const cached = compiledScalars.get(metric.name);
+    if (cached) return cached;
+    const compiled = compileScalarMetricUncached(metric);
+    compiledScalars.set(metric.name, compiled);
+    return compiled;
+  };
+
+  const compileScalarMetricUncached = (metric: Metric): MetricExpr => {
     const measure = metric.measure!;
     const path = model.graph.findPath(baseTable, measure.table);
     if (!path) {

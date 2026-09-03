@@ -45,6 +45,7 @@ interface GtCase {
 }
 
 describe.skipIf(!available)("Oakwell interop (dbt provider vs MetricFlow)", () => {
+  if (!available) return;
   const dir = mkdtempSync(join(tmpdir(), "grane-oakwell-"));
   writeFileSync(
     join(dir, "grane.yml"),

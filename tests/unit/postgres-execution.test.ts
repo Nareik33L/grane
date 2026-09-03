@@ -93,13 +93,14 @@ describe.skipIf(!available)("A15 / B16 PostgreSQL execution", () => {
 
   it("A15: DATE one-day filter is 200 in UTC and America/New_York", async () => {
     for (const tz of ["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"]) {
-      const result = await kernel(tz).query({
+      const k = kernel(tz);
+      const result = await k.query({
         metrics: ["total_x"],
         time: { from: "2026-08-01", to: "2026-08-01" },
       });
       expect(result.trust, tz).toBe("governed");
       expect(Number(result.rows[0]!.total_x), tz).toBe(200);
-      const sql = kernel(tz).compile({
+      const sql = k.compile({
         metrics: ["total_x"],
         time: { from: "2026-08-01", to: "2026-08-01" },
       }).compiled.sql;
