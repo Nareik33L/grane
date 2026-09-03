@@ -1,25 +1,58 @@
-import type { DimensionConfig, MetricConfig, MetricType } from "../../config/schema.js";
+import {
+  semiAdditiveGranularitySchema,
+  type DimensionConfig,
+  type MetricConfig,
+  type MetricFilterItem,
+  type SemiAdditiveConfig,
+} from "../../config/schema.js";
 import type { SemanticContribution } from "../types.js";
-import { emptyContribution, withSource } from "../types.js";
+import { emptyContribution, skipDefinition, withSource } from "../types.js";
 import { translateMfFilter } from "./filters.js";
-import { mapAgg, simpleColumn, type MetricFlowGraph, type MfMetric, type MfSemanticModel } from "./graph.js";
+import {
+  isNumericLiteral,
+  mapAgg,
+  simpleColumn,
+  SUPPORTED_AGGS,
+  type MetricFlowGraph,
+  type MfMeasure,
+  type MfMetric,
+  type MfMetricInput,
+  type MfNonAdditive,
+  type MfSemanticModel,
+} from "./graph.js";
 
-function sqlRef(table: string, column: string): string {
-  return `\${${table}.${column}}`;
-}
-
-function timeColumn(model: MfSemanticModel, name: string | undefined): string | undefined {
-  if (!name) return undefined;
-  const dim = model.dimensions.find((d) => d.name === name || d.expr === name);
-  return dim?.expr ?? (simpleColumn(name) ?? undefined);
-}
-
+/**
+ * Map a MetricFlow graph onto Grane maps.
+ *
+ * Only constructs whose semantics Grane can reproduce exactly are imported.
+ * Everything else is recorded under `unsupported` with the reason, so agents
+ * can see that the upstream definition exists without Grane approximating it.
+ * No entity key, join key, snapshot key, or filter target is ever inferred
+ * from naming conventions.
+ */
 export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): SemanticContribution {
   const out = emptyContribution();
   out.warnings.push(...graph.warnings);
+  const skip = (kind: "metric" | "dimension" | "entity" | "relationship", name: string, reason: string, path: string) =>
+    skipDefinition(out, { kind, name, provider, path, reason });
 
-  const models = graph.models;
-  const entityByPrimary = new Map<string, MfSemanticModel>();
+  // ---- Entities: a primary entity backed by a plain column is required ----
+  const models: MfSemanticModel[] = [];
+  for (const model of graph.models) {
+    const primary = model.entities.find((e) => e.type === "primary");
+    if (!primary) {
+      const reason =
+        `semantic model "${model.name}" has no primary entity backed by a column; ` +
+        `Grane needs an explicit primary key and will not assume one.`;
+      skip("entity", model.primaryEntity ?? model.name, reason, model.sourcePath);
+      for (const measure of model.measures) {
+        if (measure.createMetric) skip("metric", measure.name, reason, model.sourcePath);
+      }
+      for (const metric of model.metrics) skip("metric", metric.name, reason, model.sourcePath);
+      continue;
+    }
+    models.push(model);
+  }
 
   for (const model of models) {
     const source = { provider, path: model.sourcePath };
@@ -28,28 +61,36 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
     if (existing && existing.table !== model.table) {
       entityName = model.name;
     }
-    const primary = model.entities.find((e) => e.type === "primary");
+    const primary = model.entities.find((e) => e.type === "primary")!;
     out.entities[entityName] = withSource(
       {
         table: model.table,
-        primary_key: primary?.expr ?? "id",
+        primary_key: primary.expr,
         description: model.description,
       },
       source,
     );
-    entityByPrimary.set(model.primaryEntity ?? model.name, model);
 
     for (const dim of model.dimensions) {
+      if (!dim.column) {
+        skip(
+          "dimension",
+          `${model.primaryEntity ?? model.name}__${dim.name}`,
+          `dimension expr "${dim.expr}" is a SQL expression; Grane compiles plain column dimensions only.`,
+          model.sourcePath,
+        );
+        continue;
+      }
       let dimName = dim.name;
       const clash = out.dimensions[dimName];
-      if (clash && clash.sql !== sqlRef(model.table, dim.expr)) {
+      if (clash && clash.sql !== sqlRef(model.table, dim.column)) {
         dimName = `${entityName}_${dim.name}`;
       }
       const config: DimensionConfig = withSource(
         {
-          description: undefined,
+          description: `MetricFlow dimension ${model.primaryEntity ?? model.name}__${dim.name} on semantic model "${model.name}" (${model.table}.${dim.column}).`,
           entity: entityName,
-          sql: sqlRef(model.table, dim.expr),
+          sql: sqlRef(model.table, dim.column),
           type: dim.type === "time" ? "timestamp" : "string",
         },
         source,
@@ -60,115 +101,98 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
     }
   }
 
+  // ---- Relationships: foreign entity → a model whose primary entity is that column ----
   for (const model of models) {
     const source = { provider, path: model.sourcePath };
     for (const entity of model.entities) {
       if (entity.type === "primary") continue;
-      const target = models.find((m) => m.primaryEntity === entity.name || m.name === entity.name);
-      if (!target || target.table === model.table) continue;
-      const targetPrimary = target.entities.find((e) => e.type === "primary");
-      const key = `${model.table}_to_${target.table}`;
-      if (key in out.relationships) continue;
-      out.relationships[key] = withSource(
-        {
-          from: `${model.table}.${entity.expr}`,
-          to: `${target.table}.${targetPrimary?.expr ?? "id"}`,
-          type: "many_to_one",
-        },
-        source,
+      // Every model whose declared primary entity is this name is a valid join target.
+      const targets = models.filter(
+        (m) => m.table !== model.table && (m.primaryEntity === entity.name || m.name === entity.name),
       );
+      for (const target of targets) {
+        const targetPrimary = target.entities.find((e) => e.type === "primary")!;
+        const key = `${model.table}_to_${target.table}`;
+        if (key in out.relationships) continue;
+        out.relationships[key] = withSource(
+          {
+            from: `${model.table}.${entity.expr}`,
+            to: `${target.table}.${targetPrimary.expr}`,
+            type: "many_to_one",
+          },
+          source,
+        );
+      }
     }
   }
 
-  const measureIndex = new Map<string, { model: MfSemanticModel; measure: MfSemanticModel["measures"][number] }>();
+  const measureIndex = new Map<string, { model: MfSemanticModel; measure: MfMeasure }>();
   for (const model of models) {
     for (const measure of model.measures) {
       measureIndex.set(measure.name, { model, measure });
     }
   }
 
-  const emitSimple = (
-    name: string,
-    model: MfSemanticModel,
-    agg: string,
-    expr: string,
-    opts: {
-      description?: string;
-      label?: string;
-      filter?: string;
-      aggTimeDimension?: string;
-      sourcePath: string;
-    },
-  ): void => {
-    const mapped = mapAgg(agg);
-    if (!mapped) {
-      out.warnings.push(`Skipping metric "${name}": aggregation "${agg}" is not supported by Grane.`);
-      return;
-    }
-    const entityName = entityNameFor(model, out);
-    const column =
-      mapped === "count" && (expr === "1" || !expr)
-        ? out.entities[entityName]?.primary_key ?? "id"
-        : simpleColumn(expr, expr);
-    if (!column) {
-      out.warnings.push(
-        `Skipping metric "${name}": expr "${expr}" is not a simple column. Grane compiles \${table.column} references only.`,
-      );
-      return;
-    }
-    const timeName = opts.aggTimeDimension ?? model.aggTimeDimension;
-    const timeCol = timeColumn(model, timeName);
-    let filters = undefined;
-    if (opts.filter) {
-      const translated = translateMfFilter(opts.filter, model, models);
-      if ("error" in translated) {
-        out.warnings.push(`Skipping metric "${name}": ${translated.error}.`);
-        return;
-      }
-      filters = Object.fromEntries(translated.filters.map((f) => [f.field, f.value as string | number | boolean | null]));
-    }
-    const synonyms = opts.label && opts.label !== name ? [opts.label] : [];
-    const config: MetricConfig = withSource(
-      {
-        description: opts.description,
-        entity: entityName,
-        type: mapped,
-        sql: sqlRef(model.table, column),
-        time_dimension: timeCol ? sqlRef(model.table, timeCol) : undefined,
-        synonyms,
-        filters: filters && Object.keys(filters).length > 0 ? filters : undefined,
-        status: "approved",
-      },
-      { provider, path: opts.sourcePath },
-    );
-    out.metrics[name] = config;
-  };
+  const ctx: MapContext = { out, provider, models, measureIndex, skip };
 
+  // ---- Simple metrics first (measures with create_metric, embedded, top-level) ----
+  const pending: { metric: MfMetric; model: MfSemanticModel | undefined }[] = [];
   for (const model of models) {
     for (const measure of model.measures) {
       if (!measure.createMetric) continue;
-      emitSimple(measure.name, model, measure.agg, measure.expr, {
+      emitSimple(ctx, measure.name, model, measure.agg, measure.expr, {
         description: measure.description,
         label: measure.label,
-        filter: measure.filter,
+        filters: [measure.filter],
         aggTimeDimension: measure.aggTimeDimension,
+        nonAdditive: measure.nonAdditive,
         sourcePath: model.sourcePath,
       });
     }
-    for (const metric of model.metrics) {
-      addMetric(metric, model, emitSimple, out, measureIndex, models, provider);
-    }
+    for (const metric of model.metrics) pending.push({ metric, model });
   }
-
   for (const metric of graph.metrics) {
     const model =
       (metric.semanticModel ? models.find((m) => m.name === metric.semanticModel) : undefined) ??
-      (metric.measure ? measureIndex.get(metric.measure)?.model : undefined) ??
-      guessModelForMetric(metric, models);
-    addMetric(metric, model, emitSimple, out, measureIndex, models, provider);
+      (metric.measure ? measureIndex.get(metric.measure.name)?.model : undefined);
+    pending.push({ metric, model });
   }
 
+  const compound: typeof pending = [];
+  for (const item of pending) {
+    const type = item.metric.type;
+    if (type === "ratio" || type === "derived") {
+      compound.push(item);
+    } else {
+      addSimpleMetric(ctx, item.metric, item.model);
+    }
+  }
+  // ---- Ratios and simple derived ratios, after every component is known ----
+  for (const item of compound) addCompoundMetric(ctx, item.metric);
+
   return out;
+}
+
+interface MapContext {
+  out: SemanticContribution;
+  provider: string;
+  models: MfSemanticModel[];
+  measureIndex: Map<string, { model: MfSemanticModel; measure: MfMeasure }>;
+  skip: (kind: "metric" | "dimension" | "entity" | "relationship", name: string, reason: string, path: string) => void;
+}
+
+interface SimpleOptions {
+  description?: string;
+  label?: string;
+  /** Filters from every layer (measure, metric, metric input) — all are applied. */
+  filters: (string | undefined)[];
+  aggTimeDimension?: string;
+  nonAdditive?: MfNonAdditive;
+  sourcePath: string;
+}
+
+function sqlRef(table: string, column: string): string {
+  return `\${${table}.${column}}`;
 }
 
 function entityNameFor(model: MfSemanticModel, out: SemanticContribution): string {
@@ -178,120 +202,259 @@ function entityNameFor(model: MfSemanticModel, out: SemanticContribution): strin
   return primary;
 }
 
-function addMetric(
-  metric: MfMetric,
-  model: MfSemanticModel | undefined,
-  emitSimple: (
-    name: string,
-    model: MfSemanticModel,
-    agg: string,
-    expr: string,
-    opts: {
-      description?: string;
-      label?: string;
-      filter?: string;
-      aggTimeDimension?: string;
-      sourcePath: string;
-    },
-  ) => void,
-  out: SemanticContribution,
-  measureIndex: Map<string, { model: MfSemanticModel; measure: MfSemanticModel["measures"][number] }>,
-  models: MfSemanticModel[],
-  provider: string,
+/** A declared time dimension's column, or null when the name is not a declared time dimension. */
+function timeDimensionColumn(model: MfSemanticModel, name: string | undefined): string | null {
+  if (!name) return null;
+  const dim = model.dimensions.find((d) => d.type === "time" && (d.name === name || d.column === name));
+  return dim?.column ?? null;
+}
+
+function emitSimple(
+  ctx: MapContext,
+  name: string,
+  model: MfSemanticModel,
+  agg: string,
+  expr: string,
+  opts: SimpleOptions,
 ): void {
-  const type = metric.type.toLowerCase();
-  if (type === "cumulative" || type === "conversion") {
-    out.warnings.push(
-      `Skipping metric "${metric.name}": MetricFlow type "${metric.type}" is not compiled by Grane yet.`,
-    );
-    return;
+  const { out } = ctx;
+  const fail = (reason: string) => ctx.skip("metric", name, reason, opts.sourcePath);
+
+  const mapped = mapAgg(agg);
+  if (!mapped) {
+    return fail(`aggregation "${agg}" is not compiled by Grane (supported: ${SUPPORTED_AGGS.join(", ")}).`);
   }
-  if (type === "derived") {
-    const ratio = parseDerivedRatio(metric.expr);
-    if (!ratio) {
-      out.warnings.push(
-        `Skipping metric "${metric.name}": MetricFlow derived expr is not a simple metric/metric ratio.`,
-      );
-      return;
+  const entityName = entityNameFor(model, out);
+
+  // Measure expression: a column, or a literal for row counts (COUNT(1)).
+  let column: string | null = null;
+  let countsRows = false;
+  if (isNumericLiteral(expr)) {
+    if (mapped !== "count") {
+      return fail(`expr "${expr}" is a literal; only agg: count over a literal (a row count) is compiled.`);
     }
-    metric.numerator = ratio.numerator;
-    metric.denominator = ratio.denominator;
-    // Fall through to ratio handling below.
-  }
-  if (type === "ratio" || type === "derived") {
-    const numerator = metric.numerator;
-    const denominator = metric.denominator;
-    if (!numerator || !denominator) {
-      out.warnings.push(`Skipping ratio metric "${metric.name}": numerator and denominator are required.`);
-      return;
+    countsRows = true;
+  } else {
+    column = simpleColumn(expr);
+    if (!column) {
+      return fail(`expr "${expr}" is not a plain column; Grane compiles \${table.column} references only.`);
     }
-    const numModel =
-      model ??
-      measureIndex.get(numerator)?.model ??
-      (out.metrics[numerator]
-        ? models.find((m) => m.table === tableFromSql(out.metrics[numerator]?.sql))
-        : undefined);
-    const entity = numModel ? entityNameFor(numModel, out) : out.metrics[numerator]?.entity;
-    if (!entity) {
-      out.warnings.push(`Skipping ratio metric "${metric.name}": could not resolve an entity.`);
-      return;
-    }
-    out.metrics[metric.name] = withSource(
-      {
-        description: metric.description,
-        entity,
-        type: "ratio" as MetricType,
-        numerator,
-        denominator,
-        synonyms: metric.label && metric.label !== metric.name ? [metric.label] : [],
-        status: "approved",
-      },
-      { provider, path: metric.sourcePath },
-    );
-    return;
   }
 
-  // simple
-  if (metric.measure) {
-    const found = measureIndex.get(metric.measure);
-    if (!found) {
-      out.warnings.push(`Skipping metric "${metric.name}": measure "${metric.measure}" was not found.`);
-      return;
+  // Time: must be a declared time dimension of this model, never a guessed column.
+  const timeName = opts.aggTimeDimension ?? model.aggTimeDimension;
+  const timeCol = timeDimensionColumn(model, timeName);
+  if (timeName && !timeCol) {
+    return fail(`agg_time_dimension "${timeName}" is not a declared time dimension on semantic model "${model.name}".`);
+  }
+
+  // Filters from every layer, operator preserved.
+  const filters: MetricFilterItem[] = [];
+  for (const raw of opts.filters) {
+    if (!raw) continue;
+    const translated = translateMfFilter(raw, model);
+    if ("error" in translated) return fail(`${translated.error}.`);
+    filters.push(...translated.filters);
+  }
+
+  // Semi-additive: everything comes from non_additive_dimension, explicitly.
+  let semi: SemiAdditiveConfig | undefined;
+  if (opts.nonAdditive) {
+    const na = opts.nonAdditive;
+    if (mapped !== "sum" && mapped !== "min" && mapped !== "max") {
+      return fail(`non_additive_dimension with agg "${agg}" is not compiled; Grane supports semi-additive sum, min, and max.`);
     }
-    emitSimple(metric.name, found.model, found.measure.agg, found.measure.expr, {
+    if (!timeCol) {
+      return fail(`non_additive_dimension "${na.name}" needs an agg_time_dimension on the metric or semantic model.`);
+    }
+    const asOfDim = model.dimensions.find((d) => d.type === "time" && (d.name === na.name || d.column === na.name));
+    if (!asOfDim?.column) {
+      return fail(`non_additive_dimension "${na.name}" is not a declared time dimension on semantic model "${model.name}".`);
+    }
+    if (asOfDim.column !== timeCol) {
+      return fail(
+        `non_additive_dimension "${na.name}" differs from agg_time_dimension "${timeName}"; ` +
+          `Grane chooses the snapshot on the metric's own time dimension only.`,
+      );
+    }
+    const window = na.windowAgg === "max" ? "last" : na.windowAgg === "min" ? "first" : null;
+    if (!window) {
+      return fail(`non_additive_dimension window "${na.windowAgg || "(missing)"}" is not min or max.`);
+    }
+    // MetricFlow compares the snapshot date at the dimension's declared granularity.
+    const granularity = semiAdditiveGranularitySchema.safeParse(asOfDim.granularity);
+    if (!granularity.success) {
+      return fail(
+        `non_additive_dimension "${na.name}" has time granularity "${asOfDim.granularity ?? "(missing)"}"; ` +
+          `Grane compiles snapshot selection at day, week, month, quarter, or year granularity only.`,
+      );
+    }
+    const groupBy: string[] = [];
+    for (const entityRef of na.groupBy) {
+      const entity = model.entities.find((e) => e.name === entityRef);
+      if (!entity) {
+        return fail(
+          `non_additive_dimension group_by "${entityRef}" is not an entity on semantic model "${model.name}"; ` +
+            `Grane will not infer the snapshot key.`,
+        );
+      }
+      groupBy.push(sqlRef(model.table, entity.expr));
+    }
+    semi = { window, group_by: groupBy, granularity: granularity.data };
+  }
+
+  const synonyms = opts.label && opts.label !== name ? [opts.label] : [];
+  const config: MetricConfig = withSource(
+    {
+      description: opts.description,
+      entity: entityName,
+      type: mapped,
+      sql: countsRows ? undefined : sqlRef(model.table, column!),
+      time_dimension: timeCol ? sqlRef(model.table, timeCol) : undefined,
+      synonyms,
+      filters: filters.length > 0 ? filters : undefined,
+      additive: semi ? "semi" : undefined,
+      semi_additive: semi,
+      status: "approved",
+    },
+    { provider: ctx.provider, path: opts.sourcePath },
+  );
+  out.metrics[name] = config;
+}
+
+function describeInput(input: MfMetricInput): string | null {
+  const parts: string[] = [];
+  if (input.offsetWindow) parts.push(`offset_window "${input.offsetWindow}"`);
+  if (input.offsetToGrain) parts.push(`offset_to_grain "${input.offsetToGrain}"`);
+  if (input.alias) parts.push(`alias "${input.alias}"`);
+  for (const key of input.extraKeys) parts.push(`"${key}"`);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function addSimpleMetric(ctx: MapContext, metric: MfMetric, model: MfSemanticModel | undefined): void {
+  const fail = (reason: string) => ctx.skip("metric", metric.name, reason, metric.sourcePath);
+  const type = metric.type;
+  if (type === "cumulative" || type === "conversion") {
+    return fail(`MetricFlow type "${type}" is not compiled by Grane.`);
+  }
+  if (type !== "simple") {
+    return fail(`MetricFlow type "${type}" is not recognised by Grane.`);
+  }
+
+  if (metric.measure) {
+    const found = ctx.measureIndex.get(metric.measure.name);
+    if (!found) {
+      return fail(`measure "${metric.measure.name}" was not found on any imported semantic model.`);
+    }
+    const unsupportedInput = describeInput(metric.measure);
+    if (unsupportedInput) return fail(`measure input uses ${unsupportedInput}, which Grane does not model.`);
+    if (metric.nonAdditive && found.measure.nonAdditive) {
+      return fail(`non_additive_dimension is declared on both the metric and measure "${found.measure.name}".`);
+    }
+    emitSimple(ctx, metric.name, found.model, found.measure.agg, found.measure.expr, {
       description: metric.description ?? found.measure.description,
       label: metric.label ?? found.measure.label,
-      filter: metric.filter ?? found.measure.filter,
+      filters: [found.measure.filter, metric.measure.filter, metric.filter],
       aggTimeDimension: metric.aggTimeDimension ?? found.measure.aggTimeDimension,
+      nonAdditive: metric.nonAdditive ?? found.measure.nonAdditive,
       sourcePath: metric.sourcePath,
     });
     return;
   }
   if (!model) {
-    out.warnings.push(`Skipping metric "${metric.name}": no semantic model to bind it to.`);
-    return;
+    return fail(`no semantic model to bind it to.`);
   }
   if (!metric.agg) {
-    out.warnings.push(`Skipping metric "${metric.name}": simple metrics need agg or a measure.`);
-    return;
+    return fail(`simple metrics need agg or a measure.`);
   }
-  emitSimple(metric.name, model, metric.agg, metric.expr ?? metric.name, {
+  emitSimple(ctx, metric.name, model, metric.agg, metric.expr ?? metric.name, {
     description: metric.description,
     label: metric.label,
-    filter: metric.filter,
+    filters: [metric.filter],
     aggTimeDimension: metric.aggTimeDimension,
+    nonAdditive: metric.nonAdditive,
     sourcePath: metric.sourcePath,
   });
 }
 
-function guessModelForMetric(metric: MfMetric, models: MfSemanticModel[]): MfSemanticModel | undefined {
-  if (metric.semanticModel) return models.find((m) => m.name === metric.semanticModel);
-  return undefined;
+function addCompoundMetric(ctx: MapContext, metric: MfMetric): void {
+  const { out } = ctx;
+  const fail = (reason: string) => ctx.skip("metric", metric.name, reason, metric.sourcePath);
+
+  let numerator = metric.numerator;
+  let denominator = metric.denominator;
+  if (metric.type === "derived") {
+    const complexInput = (metric.inputMetrics ?? []).map(describeInput).find((d) => d !== null);
+    if (complexInput) {
+      return fail(`derived metric inputs use ${complexInput}; offsets and aliases are not compiled by Grane.`);
+    }
+    const ratio = parseDerivedRatio(metric.expr);
+    if (!ratio) {
+      return fail(`MetricFlow derived expr is not a simple metric / metric ratio; Grane does not compile derived expressions.`);
+    }
+    numerator = { name: ratio.numerator, extraKeys: [] };
+    denominator = { name: ratio.denominator, extraKeys: [] };
+  }
+  if (!numerator || !denominator) {
+    return fail(`ratio metrics need a numerator and a denominator.`);
+  }
+  if (metric.filter) {
+    return fail(`a filter on a ratio metric is not compiled by Grane; filter the components instead.`);
+  }
+  for (const [role, input] of [
+    ["numerator", numerator],
+    ["denominator", denominator],
+  ] as const) {
+    const unsupportedInput = describeInput(input);
+    if (unsupportedInput || input.filter) {
+      return fail(`${role} "${input.name}" carries ${unsupportedInput ?? "a filter"}, which Grane does not apply to ratio components.`);
+    }
+    if (!out.metrics[input.name]) {
+      const skipped = out.unsupported.find((u) => u.kind === "metric" && u.name === input.name);
+      return fail(
+        skipped
+          ? `${role} "${input.name}" was not imported (${skipped.reason.replace(/\.$/, "")}).`
+          : `${role} "${input.name}" is not an imported metric.`,
+      );
+    }
+  }
+  const num = out.metrics[numerator.name]!;
+  const den = out.metrics[denominator.name]!;
+  if (num.entity !== den.entity) {
+    return fail(
+      `numerator "${numerator.name}" is at entity "${num.entity}" and denominator "${denominator.name}" at "${den.entity}"; ` +
+        `cross-grain ratios are not compiled by Grane.`,
+    );
+  }
+  if (num.type === "ratio" || den.type === "ratio") {
+    return fail(`nested ratios are not compiled by Grane.`);
+  }
+  if ((num.additive === "semi") !== (den.additive === "semi")) {
+    return fail(`mixes a semi-additive component with an additive one; the snapshot selection would apply to both.`);
+  }
+  if (num.additive === "semi" && snapshotSignature(num) !== snapshotSignature(den)) {
+    return fail(`its semi-additive components choose different snapshot rows (filters, window, or group_by differ).`);
+  }
+  out.metrics[metric.name] = withSource(
+    {
+      description: metric.description,
+      entity: num.entity,
+      type: "ratio",
+      numerator: numerator.name,
+      denominator: denominator.name,
+      synonyms: metric.label && metric.label !== metric.name ? [metric.label] : [],
+      status: "approved",
+    },
+    { provider: ctx.provider, path: metric.sourcePath },
+  );
 }
 
-function tableFromSql(sql: string | undefined): string | undefined {
-  const match = sql?.match(/\$\{([A-Za-z_][A-Za-z0-9_]*)\./);
-  return match?.[1];
+function snapshotSignature(metric: MetricConfig): string {
+  return JSON.stringify({
+    time: metric.time_dimension,
+    semi: metric.semi_additive,
+    filters: metric.filters,
+  });
 }
 
 /** `{{ Metric('a') }} / {{ Metric('b') }}` or `a / b` → a Grane ratio. */

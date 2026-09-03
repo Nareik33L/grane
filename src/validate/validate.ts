@@ -269,7 +269,52 @@ function validateMetric(
       });
       return issues;
     }
-    issues.push(...checkColumn(subject, metric.measure.table, metric.measure.column));
+    if (metric.countsRows) {
+      // COUNT(1) over the entity table: only the table has to exist.
+      if (!model.entityTable(config.entity)) {
+        issues.push({ severity: "error", code: "unknown_entity", subject, message: `Row-count metric needs a defined entity table.` });
+      }
+    } else {
+      issues.push(...checkColumn(subject, metric.measure.table, metric.measure.column));
+    }
+
+    if (metric.semiAdditive) {
+      if (metric.countsRows || !["sum", "min", "max"].includes(config.type)) {
+        issues.push({
+          severity: "error",
+          code: "unsupported_semi_additive",
+          subject,
+          message: `Semi-additive metrics must be sum, min, or max of a column (got "${config.type}").`,
+        });
+      }
+      if (!metric.timeDimension) {
+        issues.push({
+          severity: "error",
+          code: "missing_time_dimension",
+          subject,
+          message: `Semi-additive metrics require a time_dimension to choose the snapshot within the time range.`,
+        });
+      }
+      for (const key of metric.semiAdditive.keys) {
+        if (!key.table || !key.column) {
+          issues.push({
+            severity: "error",
+            code: "invalid_reference",
+            subject,
+            message: `semi_additive.group_by entry "${key.column}" must be a \${table.column} reference.`,
+          });
+        } else if (key.table !== baseTable) {
+          issues.push({
+            severity: "error",
+            code: "filter_out_of_scope",
+            subject,
+            message: `semi_additive.group_by "${key.table}.${key.column}" must be a column on the entity table "${baseTable}".`,
+          });
+        } else {
+          issues.push(...checkColumn(subject, key.table, key.column));
+        }
+      }
+    }
 
     // Measure reachability and fan-out safety.
     const path = model.graph.findPath(baseTable, metric.measure.table);
@@ -295,7 +340,7 @@ function validateMetric(
       // Other aggregations are handled by deterministic pre-aggregation in the compiler.
     }
 
-    if ((config.type === "sum" || config.type === "avg") && metric.measure) {
+    if ((config.type === "sum" || config.type === "avg") && metric.measure && !metric.countsRows) {
       const type = columnType(metric.measure.table, metric.measure.column);
       if (type && !isNumericType(type)) {
         issues.push({

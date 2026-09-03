@@ -12,8 +12,13 @@ npx grane-analytics demo
 
 That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).
 
-You will: create a read-only database user → `grane init` → `discover` →
-define about five metrics → `validate`. Then connect an agent.
+**Already have dbt/MetricFlow (or Cube, LookML, Ossie, Malloy)?** Do not
+recreate metrics here. Run `grane init --provider ../your_project`, set the
+connection, `grane validate`, connect the agent — steps 3 and 4 below are
+replaced by the import. See [providers.md](providers.md#already-have-dbt--metricflow).
+
+Otherwise you will: create a read-only database user → `grane init` →
+`discover` → define about five metrics → `validate`. Then connect an agent.
 
 ## 0. Install
 
@@ -78,7 +83,8 @@ Rename tables and columns to match `grane discover`. The init file comments
 show this set. Add two or three dimensions (`country`, `channel`, a status).
 
 If the company already defines these in dbt, Cube, Looker, Ossie, or Malloy,
-point `providers:` at that project instead of copying YAML. See
+skip this step: `grane init --provider ../that_project` (or add `providers:` to
+`grane.yml`) imports them instead of copying YAML. See
 [providers.md](providers.md).
 
 ## 5. Validate

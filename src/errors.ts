@@ -43,6 +43,27 @@ export function undefinedMetric(requested: string, similar: string[]): GraneErro
   });
 }
 
+/**
+ * The name exists upstream (dbt, Cube, …) but the provider deliberately did
+ * not import it. Same status as an unknown metric so agents keep one refusal
+ * contract; the message and details say why it is missing.
+ */
+export function unsupportedMetric(
+  requested: string,
+  skipped: { provider: string; path?: string; reason: string },
+  similar: string[],
+): GraneError {
+  return new GraneError({
+    status: "undefined_metric",
+    message:
+      `"${requested}" is defined in the ${skipped.provider} project but Grane did not import it: ${skipped.reason} ` +
+      `It is listed under catalog.unsupported. Do not approximate it with other metrics.`,
+    requested,
+    similar,
+    details: { unsupported: { provider: skipped.provider, path: skipped.path, reason: skipped.reason } },
+  });
+}
+
 export function undefinedDimension(requested: string, similar: string[]): GraneError {
   return new GraneError({
     status: "undefined_dimension",

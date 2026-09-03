@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- dbt/MetricFlow import hardened after an independent interoperability test
+  (76-metric SaaS fixture). Everything Grane imports from dbt now either
+  reproduces the upstream semantics or is skipped with a reason; nothing is
+  guessed:
+  - `agg: count` with `expr: 1` (any numeric literal) is a row count,
+    `COUNT(1)` — a `count` metric may now omit `sql`. Previously the metric
+    name was used as a column.
+  - Filters keep their operator (`=`, `!=`, `<>`) as `{ field, operator,
+    value }`. Previously `!=` collapsed into an equality map. Other predicates
+    (`or`, `in`, `>`/`<`, `null`, `TimeDimension`, `Entity`, cross-model
+    dimensions, SQL wrappers) skip the metric instead of degrading.
+  - `non_additive_dimension` maps to `additive: semi` with an explicit
+    `semi_additive` block: `window` (`max` → last, `min` → first), `group_by`
+    (only the declared entities; empty = one snapshot for the whole result,
+    MetricFlow's default) and `granularity` (the dimension's declared
+    `time_granularity`; all rows in the last period are kept). Filters and the
+    time range apply before the snapshot is chosen, both bounds are enforced,
+    and the snapshot key is never inferred from names or surrogate keys.
+  - Native `semi_additive.group_by` / `semi_additive.granularity` are available
+    for Grane YAML; `group_by` defaults to the entity primary key as before.
+  - Queries combining a semi-additive metric with a metric whose row selection
+    differs refuse (`unsafe_query`) instead of intersecting the two selections.
+  - Ratios whose numerator and denominator live at different entities are
+    skipped at import and refused by the compiler for native definitions.
+  - Providers record deliberate skips. `catalog` lists them under
+    `unsupported` (kind, name, reason, source) and requesting one returns
+    `undefined_metric` with the reason, so "not imported" is distinguishable
+    from "does not exist".
+  - Semantic models without a column-backed primary entity are skipped with
+    their metrics (Grane never assumes `id`); relationships are created only to
+    models whose declared primary entity matches; SQL-expression dimensions
+    are recorded as unsupported rather than dropped silently. Imported
+    dimension descriptions carry the MetricFlow identity (`invoice__country`)
+    and column.
+  - `grane init --provider <path>` writes `providers:` live and prints the
+    import-first next steps. Docs gained an "Already have dbt / MetricFlow?"
+    path.
+  - Semantic fidelity tests execute compiled SQL against a hand-computed
+    DuckDB warehouse (`tests/unit/semantic-fidelity.test.ts`).
 - HTTP MCP authentication denials (`missing` / `invalid` bearer token) append
   one `kind: "auth"` JSONL line. Existing `query` / `refusal` events still
   always include `query`; auth events omit it and never log the token.

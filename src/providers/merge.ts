@@ -25,6 +25,7 @@ export function mergeContributions(parts: SemanticContribution[]): SemanticContr
   const out = emptyContribution();
   for (const part of parts) {
     out.warnings.push(...part.warnings);
+    out.unsupported.push(...part.unsupported);
     for (const { key, singular } of KINDS) {
       const incoming = part[key];
       const target = out[key] as Record<string, { source?: { provider?: string; path?: string } }>;

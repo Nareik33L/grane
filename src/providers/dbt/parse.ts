@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  exprText,
   extractRef,
   simpleColumn,
   type MetricFlowGraph,
@@ -9,6 +10,8 @@ import {
   type MfEntity,
   type MfMeasure,
   type MfMetric,
+  type MfMetricInput,
+  type MfNonAdditive,
   type MfSemanticModel,
 } from "./graph.js";
 
@@ -145,6 +148,8 @@ function parseLatestSemanticModel(raw: unknown, sourcePath: string): MfSemanticM
         name: str(dimRaw.name) ?? colName,
         type: str(dimRaw.type) ?? (column.granularity ? "time" : "categorical"),
         expr: str(dimRaw.expr) ?? colName,
+        type_params: dimRaw.type_params,
+        granularity: dimRaw.granularity ?? column.granularity,
       });
       if (dim) dimensions.push(dim);
     }
@@ -196,9 +201,22 @@ function parseLegacyDimension(raw: unknown): MfDimension | null {
   if (!name) return null;
   const typeRaw = (str(raw.type) ?? "categorical").toLowerCase();
   const type = typeRaw === "time" ? "time" : "categorical";
-  const expr = simpleColumn(str(raw.expr), name);
-  if (!expr) return null;
-  return { name, type, expr };
+  const expr = str(raw.expr) ?? name;
+  const params = isRecord(raw.type_params) ? raw.type_params : {};
+  const granularity = type === "time" ? (str(params.time_granularity) ?? str(raw.granularity))?.toLowerCase() : undefined;
+  return { name, type, expr, column: simpleColumn(expr), ...(granularity ? { granularity } : {}) };
+}
+
+function parseNonAdditive(raw: unknown): MfNonAdditive | undefined {
+  if (!isRecord(raw)) return undefined;
+  const name = str(raw.name);
+  if (!name) return undefined;
+  const windowAgg = (str(raw.window_agg) ?? str(raw.window_choice) ?? "").toLowerCase();
+  const groupings = raw.group_by ?? raw.window_groupings;
+  const groupBy = asArray(groupings)
+    .map((g) => (typeof g === "string" ? g.trim() : isRecord(g) ? str(g.name) : undefined))
+    .filter((g): g is string => Boolean(g));
+  return { name, windowAgg, groupBy };
 }
 
 function parseMeasure(raw: unknown): MfMeasure | null {
@@ -209,12 +227,13 @@ function parseMeasure(raw: unknown): MfMeasure | null {
   return {
     name,
     agg,
-    expr: str(raw.expr) ?? name,
+    expr: exprText(raw.expr) ?? name,
     createMetric: bool(raw.create_metric, false),
     aggTimeDimension: str(raw.agg_time_dimension),
     filter: str(raw.filter),
     description: str(raw.description),
     label: str(raw.label),
+    nonAdditive: parseNonAdditive(raw.non_additive_dimension),
   };
 }
 
@@ -222,6 +241,7 @@ function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: st
   if (!isRecord(raw)) return null;
   const name = str(raw.name);
   if (!name) return null;
+  const params = isRecord(raw.type_params) ? raw.type_params : {};
   return {
     name,
     type: (str(raw.type) ?? "simple").toLowerCase(),
@@ -229,11 +249,13 @@ function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: st
     label: str(raw.label),
     filter: str(raw.filter),
     agg: str(raw.agg),
-    expr: str(raw.expr) ?? str(nested(raw, "type_params", "expr")),
-    measure: str(raw.measure),
+    expr: exprText(raw.expr) ?? exprText(params.expr),
+    measure: metricInput(raw.measure ?? params.measure),
     aggTimeDimension: str(raw.agg_time_dimension),
-    numerator: metricRef(raw.numerator ?? nested(raw, "type_params", "numerator")),
-    denominator: metricRef(raw.denominator ?? nested(raw, "type_params", "denominator")),
+    numerator: metricInput(raw.numerator ?? params.numerator),
+    denominator: metricInput(raw.denominator ?? params.denominator),
+    inputMetrics: metricInputs(raw.input_metrics ?? params.metrics),
+    nonAdditive: parseNonAdditive(raw.non_additive_dimension ?? params.non_additive_dimension),
     semanticModel,
     sourcePath,
   };
@@ -243,23 +265,34 @@ function parseTopLevelMetric(raw: unknown, sourcePath: string): MfMetric | null 
   const parsed = parseEmbeddedMetric(raw, sourcePath, "");
   if (!parsed || !isRecord(raw)) return parsed;
   const params = isRecord(raw.type_params) ? raw.type_params : {};
-  parsed.measure = parsed.measure ?? metricRef(params.measure);
-  parsed.expr = parsed.expr ?? str(params.expr);
-  parsed.numerator = parsed.numerator ?? metricRef(params.numerator);
-  parsed.denominator = parsed.denominator ?? metricRef(params.denominator);
   parsed.semanticModel = parsed.semanticModel || str(params.semantic_model) || undefined;
   return parsed;
 }
 
-function nested(raw: Record<string, unknown>, a: string, b: string): unknown {
-  const inner = raw[a];
-  return isRecord(inner) ? inner[b] : undefined;
+const KNOWN_INPUT_KEYS = new Set(["name", "alias", "filter", "offset_window", "offset_to_grain"]);
+
+/** A metric/measure input: bare name or `{ name, filter, alias, offset_window, ... }`. Nothing is dropped silently. */
+function metricInput(value: unknown): MfMetricInput | undefined {
+  if (typeof value === "string" && value.trim()) return { name: value.trim(), extraKeys: [] };
+  if (!isRecord(value)) return undefined;
+  const name = str(value.name);
+  if (!name) return undefined;
+  const extraKeys = Object.keys(value).filter(
+    (key) => !KNOWN_INPUT_KEYS.has(key) && !["join_to_timespine", "fill_nulls_with"].includes(key),
+  );
+  return {
+    name,
+    alias: str(value.alias),
+    filter: str(value.filter),
+    offsetWindow: str(value.offset_window),
+    offsetToGrain: str(value.offset_to_grain),
+    extraKeys,
+  };
 }
 
-function metricRef(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (isRecord(value)) return str(value.name);
-  return undefined;
+function metricInputs(value: unknown): MfMetricInput[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.map(metricInput).filter((input): input is MfMetricInput => input !== undefined);
 }
 
 export function parseSemanticManifest(path: string, contents?: string): MetricFlowGraph {

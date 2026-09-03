@@ -5,10 +5,12 @@ import type {
   GraneConfig,
   MetricConfig,
   MetricFilterItem,
+  SemiAdditiveGranularity,
+  UnsupportedDefinition,
 } from "../config/schema.js";
 import { RelationshipGraph } from "./graph.js";
 import { parseColumnRef, type ColumnRef } from "./refs.js";
-import { undefinedDimension, undefinedMetric } from "../errors.js";
+import { undefinedDimension, undefinedMetric, unsupportedMetric } from "../errors.js";
 
 /** Normalised metric filter (the map form is converted to equality items). */
 export function normaliseMetricFilters(config: MetricConfig): MetricFilterItem[] {
@@ -21,15 +23,34 @@ export function normaliseMetricFilters(config: MetricConfig): MetricFilterItem[]
   }));
 }
 
+/**
+ * Resolved semi-additive behaviour. `keys` is the explicit series key set
+ * (empty = one snapshot for all rows); `granularity` truncates snapshot dates
+ * before comparing them (null = raw values).
+ */
+export interface SemiAdditiveSpec {
+  window: "last" | "first";
+  keys: ColumnRef[];
+  granularity: SemiAdditiveGranularity | null;
+}
+
 export interface Metric {
   name: string;
   config: MetricConfig;
   /** Short content hash identifying this exact definition (provenance). */
   definitionVersion: string;
-  /** Parsed measure column for non-ratio metrics. */
+  /**
+   * Parsed measure column for non-ratio metrics. For a row-count metric
+   * (`type: count` without `sql`) this is the entity table with `column: ""`;
+   * see `countsRows`.
+   */
   measure: ColumnRef | null;
+  /** `COUNT(1)` over the entity table rather than `COUNT(column)`. */
+  countsRows: boolean;
   timeDimension: ColumnRef | null;
   filters: MetricFilterItem[];
+  /** Present only when `additive: semi`. Null keys entries are unparseable references (validation reports them). */
+  semiAdditive: SemiAdditiveSpec | null;
 }
 
 export interface Dimension {
@@ -83,6 +104,22 @@ function editDistance(a: string, b: string): number {
   return dp[n]!;
 }
 
+function resolveSemiAdditive(metric: MetricConfig, entity: EntityConfig | undefined): SemiAdditiveSpec | null {
+  if (metric.additive !== "semi") return null;
+  const window = metric.semi_additive?.window ?? "last";
+  const groupBy = metric.semi_additive?.group_by ?? "entity";
+  const granularity = metric.semi_additive?.granularity ?? null;
+  if (groupBy === "entity") {
+    return { window, granularity, keys: entity ? [{ table: entity.table, column: entity.primary_key }] : [] };
+  }
+  const keys: ColumnRef[] = [];
+  for (const ref of groupBy) {
+    const parsed = parseColumnRef(ref);
+    keys.push(parsed ?? { table: "", column: ref });
+  }
+  return { window, granularity, keys };
+}
+
 function similarNames(requested: string, candidates: string[], max = 5): string[] {
   const lower = requested.toLowerCase();
   const scored = candidates.map((name) => {
@@ -112,6 +149,8 @@ export class SemanticModel {
   readonly entities = new Map<string, Entity>();
   readonly metrics = new Map<string, Metric>();
   readonly dimensions = new Map<string, Dimension>();
+  /** Upstream definitions providers saw but did not import, by lower-cased name. */
+  readonly unsupported = new Map<string, UnsupportedDefinition>();
   private readonly metricSynonyms = new Map<string, string>();
 
   constructor(config: GraneConfig) {
@@ -121,17 +160,28 @@ export class SemanticModel {
     for (const [name, entity] of Object.entries(config.entities)) {
       this.entities.set(name, { name, config: entity });
     }
+    for (const item of config.unsupported) {
+      if (item.kind === "metric") this.unsupported.set(item.name.toLowerCase(), item);
+    }
 
     for (const [name, metric] of Object.entries(config.metrics)) {
-      const measure = metric.sql ? parseColumnRef(metric.sql) : null;
+      const entityTable = config.entities[metric.entity]?.table;
+      const countsRows = metric.type === "count" && !metric.sql;
+      const measure = metric.sql
+        ? parseColumnRef(metric.sql)
+        : countsRows && entityTable
+          ? { table: entityTable, column: "" }
+          : null;
       const timeDimension = metric.time_dimension ? parseColumnRef(metric.time_dimension) : null;
       this.metrics.set(name, {
         name,
         config: metric,
         definitionVersion: hashDefinition(name, metric),
         measure,
+        countsRows,
         timeDimension,
         filters: normaliseMetricFilters(metric),
+        semiAdditive: resolveSemiAdditive(metric, config.entities[metric.entity]),
       });
       for (const synonym of metric.synonyms) {
         this.metricSynonyms.set(synonym.toLowerCase(), name);
@@ -180,10 +230,10 @@ export class SemanticModel {
     }
     const viaSynonym = this.metricSynonyms.get(lower);
     if (viaSynonym) return this.metrics.get(viaSynonym)!;
-    throw undefinedMetric(
-      requested,
-      similarNames(requested, [...this.metrics.keys(), ...this.metricSynonyms.keys()]),
-    );
+    const similar = similarNames(requested, [...this.metrics.keys(), ...this.metricSynonyms.keys()]);
+    const skipped = this.unsupported.get(lower);
+    if (skipped) throw unsupportedMetric(requested, skipped, similar);
+    throw undefinedMetric(requested, similar);
   }
 
   /** Resolve a dimension by name (case-insensitive). Throws a structured refusal. */

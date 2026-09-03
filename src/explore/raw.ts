@@ -133,7 +133,7 @@ export function governedColumnKeys(model: SemanticModel): Set<string> {
     if (dimension.column.table) keys.add(formatColumnRef(dimension.column).toLowerCase());
   }
   for (const metric of model.metrics.values()) {
-    if (metric.measure) keys.add(formatColumnRef(metric.measure).toLowerCase());
+    if (metric.measure && !metric.countsRows) keys.add(formatColumnRef(metric.measure).toLowerCase());
     if (metric.timeDimension) keys.add(formatColumnRef(metric.timeDimension).toLowerCase());
   }
   return keys;

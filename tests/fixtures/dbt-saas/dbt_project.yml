@@ -1,0 +1,4 @@
+name: saas_fixture
+version: "1.0.0"
+profile: saas_fixture
+model-paths: ["models"]

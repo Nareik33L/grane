@@ -65,11 +65,23 @@ export interface CatalogExploration {
   columns: ExplorableColumn[];
 }
 
+/**
+ * An upstream definition (dbt/MetricFlow, …) Grane saw and deliberately did
+ * not import. Requesting it refuses with `undefined_metric` and this reason.
+ */
+export interface CatalogUnsupported {
+  kind: "metric" | "dimension" | "entity" | "relationship";
+  name: string;
+  reason: string;
+  source: { provider: string; path?: string };
+}
+
 export interface Catalog {
   server: ServerInfo;
   metrics: CatalogMetric[];
   dimensions: CatalogDimension[];
   entities: CatalogEntity[];
+  unsupported: CatalogUnsupported[];
   exploration: CatalogExploration;
 }
 
@@ -254,7 +266,15 @@ export class GraneKernel {
         description: e.config.description ?? null,
         source: e.config.source ?? { provider: "native" },
       }));
-    return { server: this.serverInfo(), metrics, dimensions, entities };
+    const unsupported = this.config.unsupported
+      .filter((u) => !filter || u.name.toLowerCase().includes(search!.toLowerCase()))
+      .map((u) => ({
+        kind: u.kind,
+        name: u.name,
+        reason: u.reason,
+        source: { provider: u.provider, ...(u.path ? { path: u.path } : {}) },
+      }));
+    return { server: this.serverInfo(), metrics, dimensions, entities, unsupported };
   }
 
   async catalog(search?: string): Promise<Catalog> {

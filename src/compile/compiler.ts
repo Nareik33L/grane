@@ -72,6 +72,8 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   const baseTable = resolved.baseTable;
   const ident = (name: string) => dialect.ident(name);
   const col = (ref: ColumnRef): string => `${ident(ref.table)}.${ident(ref.column)}`;
+  /** Aggregation input: the measure column, or the literal 1 for row counts (COUNT(1)). */
+  const measureSql = (metric: Metric): string => (metric.countsRows ? "1" : col(metric.measure!));
   const qualify = (table: string): string => dialect.qualifyTable(schema, table);
 
   const localTime = (ref: ColumnRef): string => dialect.localizeTime(col(ref), timezone);
@@ -140,7 +142,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       );
     }
 
-    if (metric.config.additive === "semi") {
+    if (metric.semiAdditive) {
       return compileSemiAdditiveMetric(metric);
     }
 
@@ -153,8 +155,8 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       const fn = aggregateFn(metric);
       return {
         expr: filterClause
-          ? dialect.filteredAggregate(fn, col(measure), filterClause)
-          : directAggregate(metric, col(measure)),
+          ? dialect.filteredAggregate(fn, measureSql(metric), filterClause)
+          : directAggregate(metric, measureSql(metric)),
       };
     }
 
@@ -162,68 +164,128 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     return compilePreAggregatedMetric(metric, path.edges, perMetricTime);
   };
 
+  /**
+   * Semi-additive metrics keep one snapshot row per key tuple (or one snapshot
+   * date overall when the key set is empty) within the requested time range —
+   * and within each time bucket when a grain is requested — then aggregate.
+   * Filters are applied before the snapshot is chosen, matching MetricFlow's
+   * non_additive_dimension semantics.
+   *
+   * The snapshot selection is an inner join on the base table, so it applies
+   * to every metric in the query. The caller has already refused queries that
+   * mix semi-additive metrics with anything whose row selection differs; the
+   * one shared CTE is built on first use.
+   */
+  let sharedSnapshotCte: { signature: string; name: string } | null = null;
+
   const compileSemiAdditiveMetric = (metric: Metric): MetricExpr => {
     const measure = metric.measure!;
-    const entity = model.entities.get(metric.config.entity);
-    if (!entity) {
-      throw invalidQuery(`Entity "${metric.config.entity}" is not defined.`);
-    }
-    const pk = entity.config.primary_key;
+    const spec = metric.semiAdditive!;
     const timeRef = metric.timeDimension;
     if (!timeRef) {
       throw unsafeQuery(
-        `Semi-additive metric "${metric.name}" requires a time_dimension so Grane can take last-as-of rather than summing across dates.`,
+        `Semi-additive metric "${metric.name}" requires a time_dimension so Grane can take one snapshot per key rather than summing across dates.`,
       );
     }
-    if (measure.table !== baseTable) {
+    if (measure.table !== baseTable || timeRef.table !== baseTable) {
       throw unsafeQuery(
-        `Semi-additive metric "${metric.name}" must measure a column on the entity table ("${baseTable}"); last-as-of across a join is not supported.`,
+        `Semi-additive metric "${metric.name}" must measure a column and time on the entity table ("${baseTable}"); snapshot selection across a join is not supported.`,
       );
     }
-    if (metric.config.type !== "sum" && metric.config.type !== "min" && metric.config.type !== "max") {
+    if (metric.countsRows || (metric.config.type !== "sum" && metric.config.type !== "min" && metric.config.type !== "max")) {
       throw unsafeQuery(
-        `Semi-additive metric "${metric.name}" of type "${metric.config.type}" is not supported; use sum, min, or max.`,
+        `Semi-additive metric "${metric.name}" of type "${metric.config.type}" is not supported; use sum, min, or max of a column.`,
       );
     }
-
-    joinPathTo(measure.table, `measure of metric "${metric.name}"`);
-    const cteName = `last_${metric.name}`;
-    const pkExpr = `${ident(measure.table)}.${ident(pk)}`;
-    const timeExpr = col(timeRef);
-    const whereParts: string[] = [];
-    if (resolved.time) {
-      const toExclusive = exclusiveEnd(resolved.time.to);
-      whereParts.push(`${localTime(timeRef)} < ${dialect.castTimestamp(params.add(toExclusive))}`);
-      if (resolved.time.grain) {
-        whereParts.push(`${localTime(timeRef)} >= ${dialect.castTimestamp(params.add(resolved.time.from))}`);
+    for (const key of spec.keys) {
+      if (key.table !== baseTable || !key.column) {
+        throw unsafeQuery(
+          `Semi-additive metric "${metric.name}": semi_additive.group_by "${key.table ? `${key.table}.${key.column}` : key.column}" must be a column on "${baseTable}".`,
+        );
       }
     }
-    const metricWhere = compileMetricFilters(metric.filters, params, col);
-    if (metricWhere) whereParts.push(metricWhere);
+    for (const filter of metric.filters) {
+      const ref = parseColumnRef(filter.field);
+      if (!ref || ref.table !== baseTable) {
+        throw unsafeQuery(
+          `Semi-additive metric "${metric.name}": filter "${filter.field}" must be a column on "${baseTable}" so it can be applied before the snapshot is chosen.`,
+        );
+      }
+    }
 
-    const grainExpr = resolved.time?.grain
-      ? dialect.dateTrunc(resolved.time.grain, localTime(timeRef))
-      : null;
-    const cteSql = [
-      `${ident(cteName)} AS (`,
-      `  SELECT ${pkExpr} AS ${ident("_key")}, MAX(${timeExpr}) AS ${ident("_as_of")}` +
-        (grainExpr ? `, ${grainExpr} AS ${ident("_period")}` : ""),
-      `  FROM ${qualify(measure.table)}`,
-      ...(whereParts.length > 0 ? [`  WHERE ${whereParts.join(" AND ")}`] : []),
-      `  GROUP BY ${pkExpr}` + (grainExpr ? `, ${grainExpr}` : ""),
-      `)`,
-    ].join("\n");
-    ctes.push(cteSql);
-    cteJoins.push(
-      `JOIN ${ident(cteName)} ON ${ident(cteName)}.${ident("_key")} = ${pkExpr} AND ${ident(cteName)}.${ident("_as_of")} = ${timeExpr}`,
-    );
+    const signature = semiAdditiveSignature(metric);
+    if (sharedSnapshotCte && sharedSnapshotCte.signature !== signature) {
+      // Guarded upstream; kept as a hard stop so a refactor cannot silently intersect two selections.
+      throw unsafeQuery(`Semi-additive metric "${metric.name}" has a different snapshot selection from another metric in this query.`);
+    }
+    if (
+      resolved.time &&
+      (resolved.time.column.table !== timeRef.table || resolved.time.column.column !== timeRef.column)
+    ) {
+      throw unsafeQuery(
+        `Semi-additive metric "${metric.name}" chooses its snapshot on its own time dimension ` +
+          `("${timeRef.table}.${timeRef.column}"); the requested time.dimension "${resolved.time.qualified}" cannot be applied to it.`,
+      );
+    }
+    if (spec.granularity && resolved.time?.grain && GRAIN_ORDER[resolved.time.grain] < GRAIN_ORDER[spec.granularity]) {
+      throw unsafeQuery(
+        `Semi-additive metric "${metric.name}" chooses its snapshot at ${spec.granularity} granularity; ` +
+          `a ${resolved.time.grain} grain would split one snapshot period across buckets. Use ${spec.granularity} or coarser.`,
+      );
+    }
+    if (!sharedSnapshotCte) {
+      const cteName = `last_${metric.name}`;
+      // Snapshot dates are compared at the declared granularity (every row in the last period is kept).
+      const timeExpr = spec.granularity ? dialect.dateTrunc(spec.granularity, localTime(timeRef)) : col(timeRef);
+      const keyExprs = spec.keys.map((key) => col(key));
+      const whereParts: string[] = [];
+      if (resolved.time) {
+        whereParts.push(timeBoundsSql(timeRef));
+      }
+      const cteMetricWhere = compileMetricFilters(metric.filters, params, col);
+      if (cteMetricWhere) whereParts.push(cteMetricWhere);
+      let needsJoins = false;
+      for (const filter of resolved.filters) {
+        whereParts.push(compileQueryFilter(filter, params, col));
+        if (filter.column.table !== baseTable) needsJoins = true;
+      }
+      const grainExpr = resolved.time?.grain ? dialect.dateTrunc(resolved.time.grain, localTime(timeRef)) : null;
+      const groupBy = [...keyExprs, ...(grainExpr ? [grainExpr] : [])];
+      const agg = spec.window === "first" ? "MIN" : "MAX";
+      const selects = [
+        ...keyExprs.map((expr, i) => `${expr} AS ${ident(`_key${i}`)}`),
+        `${agg}(${timeExpr}) AS ${ident("_as_of")}`,
+        ...(grainExpr ? [`${grainExpr} AS ${ident("_period")}`] : []),
+      ];
+      const cteSql = [
+        `${ident(cteName)} AS (`,
+        `  SELECT ${selects.join(", ")}`,
+        `  FROM ${qualify(baseTable)}`,
+        ...(needsJoins ? joins.map((join) => `  JOIN ${qualify(join.table)} ON ${join.on}`) : []),
+        ...(whereParts.length > 0 ? [`  WHERE ${whereParts.join(" AND ")}`] : []),
+        ...(groupBy.length > 0 ? [`  GROUP BY ${groupBy.join(", ")}`] : []),
+        `)`,
+      ].join("\n");
+      ctes.push(cteSql);
+      const onParts = [
+        ...keyExprs.map((expr, i) => `${ident(cteName)}.${ident(`_key${i}`)} = ${expr}`),
+        `${ident(cteName)}.${ident("_as_of")} = ${timeExpr}`,
+      ];
+      cteJoins.push(`JOIN ${ident(cteName)} ON ${onParts.join(" AND ")}`);
+      sharedSnapshotCte = { signature, name: cteName };
+    }
+    // Rows at the chosen snapshot date that fail the metric filter must not be aggregated.
+    const metricWhere = compileMetricFilters(metric.filters, params, col);
     preAggregations.push({
       metric: metric.name,
-      cte: cteName,
+      cte: sharedSnapshotCte.name,
       measureTable: measure.table,
-      keyColumn: `${measure.table}.${pk}`,
+      keyColumn: spec.keys.map((key) => `${key.table}.${key.column}`).join(", ") || "(single snapshot date)",
     });
-    return { expr: `${aggregateFn(metric)}(${col(measure)})` };
+    const fn = aggregateFn(metric);
+    return {
+      expr: metricWhere ? dialect.filteredAggregate(fn, col(measure), metricWhere) : `${fn}(${col(measure)})`,
+    };
   };
 
   const timeBoundsSql = (ref: ColumnRef): string => {
@@ -239,7 +301,24 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     return timeBoundsSql(metric.timeDimension);
   };
 
-  const anySemiAdditive = resolved.metrics.some((metric) => isSemiAdditive(model, metric));
+  const components = expandComponents(model, resolved.metrics);
+  const semiComponents = components.filter((metric) => metric.semiAdditive);
+  const anySemiAdditive = semiComponents.length > 0;
+  if (anySemiAdditive) {
+    const other = components.find((metric) => !metric.semiAdditive);
+    const first = semiComponents[0]!;
+    const conflicting = semiComponents.find(
+      (metric) => semiAdditiveSignature(metric) !== semiAdditiveSignature(first),
+    );
+    const clash = other ?? conflicting;
+    if (clash) {
+      throw unsafeQuery(
+        `Semi-additive metric "${first.name}" keeps one snapshot row per key within the time range; ` +
+          `combining it with "${clash.name}" in one query would apply that row selection to both and corrupt at least one number. ` +
+          `Query them separately.`,
+      );
+    }
+  }
   const skipOuterTime = Boolean(resolved.time && (!resolved.time.shared || anySemiAdditive));
 
   const compilePreAggregatedMetric = (metric: Metric, edges: Edge[], extraTimeFilter: string | null): MetricExpr => {
@@ -285,7 +364,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
     const valueColumns: string[] = [];
     let outerExpr: string;
-    const measureCol = col(measure);
+    const measureCol = measureSql(metric);
     switch (metric.config.type) {
       case "sum":
         valueColumns.push(`SUM(${measureCol}) AS ${ident("value")}`);
@@ -358,6 +437,18 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
         throw invalidQuery(
           `Ratio metric "${metric.name}" references undefined component metrics. Run "grane validate".`,
         );
+      }
+      for (const [role, component] of [
+        ["numerator", numerator],
+        ["denominator", denominator],
+      ] as const) {
+        if (component.config.entity !== metric.config.entity) {
+          throw unsafeQuery(
+            `Ratio "${metric.name}" mixes grains: ${role} "${component.name}" is defined at entity "${component.config.entity}" ` +
+              `but the ratio is at "${metric.config.entity}". Aggregating "${component.name}" at the "${baseTable}" grain would change its meaning. ` +
+              `Ratio components must share one entity.`,
+          );
+        }
       }
       metricVersions[numerator.name] = numerator.definitionVersion;
       metricVersions[denominator.name] = denominator.definitionVersion;
@@ -522,16 +613,35 @@ function andFilters(...parts: Array<string | null | undefined>): string | null {
   return ok.length > 0 ? ok.join(" AND ") : null;
 }
 
-function isSemiAdditive(model: SemanticModel, metric: Metric): boolean {
-  if (metric.config.additive === "semi") return true;
-  if (metric.config.type === "ratio") {
-    const numerator = model.metrics.get(metric.config.numerator!);
-    const denominator = model.metrics.get(metric.config.denominator!);
-    return Boolean(
-      (numerator && isSemiAdditive(model, numerator)) || (denominator && isSemiAdditive(model, denominator)),
-    );
+/** Scalar metrics behind the requested metrics (ratios contribute their components). */
+function expandComponents(model: SemanticModel, metrics: Metric[]): Metric[] {
+  const out: Metric[] = [];
+  for (const metric of metrics) {
+    if (metric.config.type === "ratio") {
+      const numerator = model.metrics.get(metric.config.numerator!);
+      const denominator = model.metrics.get(metric.config.denominator!);
+      if (numerator) out.push(numerator);
+      if (denominator) out.push(denominator);
+    } else {
+      out.push(metric);
+    }
   }
-  return false;
+  return out;
+}
+
+const GRAIN_ORDER = { day: 0, week: 1, month: 2, quarter: 3, year: 4 } as const;
+
+/** Everything that decides which snapshot rows a semi-additive metric keeps. */
+function semiAdditiveSignature(metric: Metric): string {
+  const spec = metric.semiAdditive!;
+  return JSON.stringify({
+    table: metric.measure?.table,
+    time: metric.timeDimension,
+    window: spec.window,
+    granularity: spec.granularity,
+    keys: spec.keys,
+    filters: metric.filters.map((filter) => JSON.stringify(filter)).sort(),
+  });
 }
 
 function compileMetricFilters(
