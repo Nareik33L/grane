@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { GraneKernel } from "../kernel.js";
 import { buildMcpServer } from "./server.js";
 import { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "../auth/agents.js";
+import { recordAudit } from "../audit.js";
 
 export interface HttpMcpHandle {
   port: number;
@@ -81,6 +82,13 @@ export async function serveHttp(kernel: GraneKernel, port: number): Promise<Http
     if (requireAuth) {
       const result = authenticateAgent(kernel.config, bearerTokenFromHeaders(req.headers));
       if (result === "missing" || result === "invalid") {
+        recordAudit(kernel.config, kernel.projectDir, {
+          ts: new Date().toISOString(),
+          kind: "auth",
+          operation: "http",
+          agent: null,
+          reason: result,
+        });
         await drainRequest(req);
         writeJson(
           res,

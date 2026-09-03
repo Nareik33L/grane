@@ -29,7 +29,8 @@ limits:
   default_rows: 1000
   timeout_ms: 30000
 
-# Append-only query audit (JSONL). No row payloads, no agent tokens.
+# Append-only query audit (JSONL). Queries, refusals, HTTP auth denials.
+# No row payloads, no agent tokens.
 # Relative path is resolved from this project directory. Override in Docker
 # with GRANE_AUDIT_PATH=/var/log/grane/audit.jsonl
 audit:

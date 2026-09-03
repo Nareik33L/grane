@@ -117,7 +117,9 @@ Point the agent at `https://analytics.example.com/mcp`.
 
 ## Audit log
 
-Every `query` (and every `explain`/`query` refusal) appends one JSON line:
+Every `query` (and every `explain`/`query` refusal) appends one JSON line.
+`kind: "query"` and `kind: "refusal"` always include the semantic `query`
+object — that field is not optional on those lines.
 
 ```json
 {
@@ -135,8 +137,24 @@ Every `query` (and every `explain`/`query` refusal) appends one JSON line:
 ```
 
 Refusals use `"kind": "refusal"` with `refusal.status` / `message` / `requested`.
-Row payloads and agent tokens are never written. Compiled SQL uses placeholders;
-bind values are not logged.
+
+When `auth.agents` is configured, a missing or invalid HTTP bearer token also
+appends one line. Discriminate on `kind`: auth events have no `query` field
+and never include the token.
+
+```json
+{
+  "ts": "2026-09-03T00:00:00.000Z",
+  "kind": "auth",
+  "operation": "http",
+  "agent": null,
+  "reason": "missing"
+}
+```
+
+`reason` is `"missing"` (no token) or `"invalid"` (token did not match any
+agent). Row payloads and agent tokens are never written. Compiled SQL uses
+placeholders; bind values are not logged.
 
 Defaults: `audit.enabled: true`, path `.grane/audit.jsonl`. On a read-only
 project mount, set `GRANE_AUDIT_PATH` (or `audit.path`) to a writable volume.

@@ -107,8 +107,8 @@ dimensions, governed filters, and `time.dimension`. Unknown names suggest only
 granted fields. An agent's `exploration: false` cannot turn exploration on if
 it is globally disabled.
 
-Queries and refusals are appended to `.grane/audit.jsonl` (see
-[production.md](production.md#audit-log)).
+Queries, refusals, and HTTP authentication denials are appended to
+`.grane/audit.jsonl` (see [production.md](production.md#audit-log)).
 
 ## Example database
 
