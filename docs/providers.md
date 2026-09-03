@@ -65,6 +65,30 @@ Looker, or MetricFlow at query time. Import happens at load; Grane compiles SQL.
 Unsupported constructs (derived metrics, subqueries, untranslatable filters)
 are **skipped with a warning**, not guessed.
 
+### What Grane can compile from a provider
+
+Every reader targets the same deterministic compiler, so the ceiling is the
+same for all of them:
+
+- Measures must be a simple aggregate of one column: `sum`, `count`,
+  `count_distinct`, `avg`, `min`, `max`. SQL expressions (`CASE WHEN …`,
+  arithmetic, `percentile`, `median`) are skipped.
+- Ratios of two imported metrics are imported. Other derived metrics are not.
+- Filters must be equality / inequality on a dimension joined with `and`.
+- Table references resolve into `connection.schema`; schema prefixes in
+  upstream definitions are dropped. Multi-schema projects need one schema (or a
+  search path) that can see every table.
+- Anything else stays defined upstream and is reported, never approximated.
+
+### Where skipped definitions show up
+
+- `grane validate` and `grane serve` print each one as `WARNING …`.
+- The MCP `catalog()` result carries them in `warnings` (filtered by `search`),
+  so an agent asked for a skipped metric can answer "defined in dbt, not
+  compiled by Grane" instead of "undefined". Agents with metric or dimension
+  allow-lists get an empty `warnings` list — they only see their granted
+  catalog.
+
 ### dbt / MetricFlow
 
 See the original MetricFlow notes: simple metrics, ratios, entity joins,
@@ -72,12 +96,25 @@ See the original MetricFlow notes: simple metrics, ratios, entity joins,
 are a simple `metric / metric` ratio are imported; cumulative and conversion
 metrics are skipped with a warning.
 
+Measures with `non_additive_dimension` (balances, MRR snapshots) are **never**
+imported as plain aggregates — that would sum snapshot rows across the window.
+They are skipped with a warning naming the window. If last-as-of per entity key
+is the intended semantics, define the metric natively with `additive: semi`.
+
+Table names come from `ref('model')`; `target/manifest.json` (from `dbt
+compile`) supplies aliases when present.
+
 ### Cube
 
 `sql_table` cubes in YAML **or** `cube('name', { … })` JavaScript. `sum` / `count` /
 `countDistinct` / `avg` / `min` / `max` measures, dimensions, and
 `{CUBE}.fk = {other}.pk` (or `${CUBE}` JS) joins. JavaScript is parsed, never
 eval'd. SQL-subquery cubes are bound to the cube name with a warning.
+
+Measure `filters` are imported when each entry is a same-cube
+`{CUBE}.column = 'value'` / `!=` / `<>` condition (joined by `and`). A measure
+whose filter Grane cannot translate is skipped with a warning — it is never
+imported without its filter.
 
 ### LookML
 

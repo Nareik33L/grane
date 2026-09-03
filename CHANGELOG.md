@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- dbt/MetricFlow measures with `non_additive_dimension` are no longer imported
+  as fully additive aggregates (which would have summed snapshot rows under
+  `trust: governed`). They are skipped with a warning that names the window
+  and points at native `additive: semi`.
+- dbt/MetricFlow `{{ Dimension('x') }} != 'v'` filters were imported as
+  `= 'v'` (the equality-only map form of metric filters). Filters with a `!=`
+  now keep the list form; all-equality filters are unchanged, so existing
+  `definition_version` hashes do not move.
+- Cube measure `filters` (YAML and `cube()` JS) were ignored and the measure
+  imported unfiltered. Simple same-cube `{CUBE}.column = 'value'` / `!=`
+  conditions are now translated; anything else skips the measure with a
+  warning.
+- MCP `catalog()` returns `warnings`: upstream definitions a semantic provider
+  could not import, filtered by `search`. Empty for agents with metric or
+  dimension allow-lists. `LoadedConfig.providerWarnings` carries provider-only
+  warnings; `warnings` still includes auth config lint for `grane validate`.
+  `grane serve` (HTTP) prints load warnings at startup.
+- Positioning: README, package description, and agent docs describe Grane as
+  the analytics runtime that reads existing dbt / Cube / LookML / Malloy /
+  Ossie definitions (or Grane YAML) and compiles and executes itself, and
+  state the compilable subset explicitly.
 - HTTP MCP authentication denials (`missing` / `invalid` bearer token) append
   one `kind: "auth"` JSONL line. Existing `query` / `refusal` events still
   always include `query`; auth events omit it and never log the token.
