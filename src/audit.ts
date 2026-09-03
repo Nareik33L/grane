@@ -5,10 +5,10 @@ import { GraneError } from "./errors.js";
 import type { SemanticQueryInput, TrustLevel } from "./query/model.js";
 
 /**
- * One append-only audit record. Never include row payloads, SQL bind params,
- * or agent tokens.
+ * Query / explain audit record. `query` stays required so existing JSONL
+ * readers and the public TypeScript type keep the 0.6.4 contract.
  */
-export interface AuditEvent {
+export interface SemanticAuditEvent {
   ts: string;
   kind: "query" | "refusal";
   operation: "query" | "explain";
@@ -26,7 +26,26 @@ export interface AuditEvent {
   };
 }
 
-export function refusalFromError(err: unknown): NonNullable<AuditEvent["refusal"]> {
+/**
+ * HTTP MCP authentication denial. Separate variant so `query` is never
+ * optional on query/refusal lines, and so tokens are never logged.
+ */
+export interface AuthAuditEvent {
+  ts: string;
+  kind: "auth";
+  operation: "http";
+  agent: string | null;
+  reason: "missing" | "invalid";
+}
+
+/**
+ * One append-only audit record. Never include row payloads, SQL bind params,
+ * or agent tokens. Discriminate on `kind`: query/refusal events always have
+ * `query`; auth events never do.
+ */
+export type AuditEvent = SemanticAuditEvent | AuthAuditEvent;
+
+export function refusalFromError(err: unknown): NonNullable<SemanticAuditEvent["refusal"]> {
   if (err instanceof GraneError) {
     return {
       status: err.refusal.status,

@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { GraneKernel } from "../../src/kernel.js";
 import { exampleConfig } from "../fixtures.js";
@@ -131,9 +134,24 @@ describe("per-agent grants", () => {
 });
 
 describe("HTTP bearer auth", () => {
-  const kernel = new GraneKernel(authConfig());
+  const projectDir = mkdtempSync(join(tmpdir(), "grane-auth-audit-"));
+  mkdirSync(join(projectDir, ".grane"), { recursive: true });
+  const kernel = new GraneKernel(authConfig(), { projectDir });
+  const auditPath = join(projectDir, ".grane", "audit.jsonl");
   let port = 0;
   let close: () => Promise<void> = async () => undefined;
+
+  function readAudit(): Record<string, unknown>[] {
+    try {
+      return readFileSync(auditPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      return [];
+    }
+  }
 
   it("requires a bearer token when agents are configured", async () => {
     expect(httpAuthRequired(kernel.config)).toBe(true);
@@ -145,6 +163,37 @@ describe("HTTP bearer auth", () => {
     expect(denied.status).toBe(401);
     expect(denied.headers.get("www-authenticate")).toMatch(/Bearer/i);
 
+    const afterMissing = readAudit();
+    expect(afterMissing).toHaveLength(1);
+    expect(afterMissing[0]).toEqual(
+      expect.objectContaining({
+        kind: "auth",
+        operation: "http",
+        agent: null,
+        reason: "missing",
+      }),
+    );
+    expect(afterMissing[0]!).not.toHaveProperty("query");
+    expect(JSON.stringify(afterMissing[0])).not.toContain(financeToken);
+
+    const rejected = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: { Authorization: "Bearer nope", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(rejected.status).toBe(401);
+    const afterInvalid = readAudit();
+    expect(afterInvalid).toHaveLength(2);
+    expect(afterInvalid[1]).toEqual(
+      expect.objectContaining({
+        kind: "auth",
+        operation: "http",
+        agent: null,
+        reason: "invalid",
+      }),
+    );
+    expect(afterInvalid[1]!).not.toHaveProperty("query");
+
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     expect(health.status).toBe(200);
 
@@ -154,10 +203,12 @@ describe("HTTP bearer auth", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(authed.status).not.toBe(401);
+    expect(readAudit().filter((event) => event.kind === "auth")).toHaveLength(2);
   });
 
   afterAll(async () => {
     await close();
+    rmSync(projectDir, { recursive: true, force: true });
   });
 });
 

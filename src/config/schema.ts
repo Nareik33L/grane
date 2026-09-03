@@ -227,7 +227,8 @@ export type AuthConfig = z.infer<typeof authConfigSchema>;
 
 /**
  * Append-only query audit log. Records time, agent, trust, the semantic query,
- * compiled SQL, row count, and refusals. Never writes row payloads or tokens.
+ * compiled SQL, row count, refusals, and HTTP authentication denials. Never
+ * writes row payloads or tokens.
  */
 export const auditConfigSchema = z.object({
   enabled: z.boolean().default(true),

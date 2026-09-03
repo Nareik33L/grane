@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- HTTP MCP authentication denials (`missing` / `invalid` bearer token) append
+  one `kind: "auth"` JSONL line. Existing `query` / `refusal` events still
+  always include `query`; auth events omit it and never log the token.
 - Canonical demo shop in `demo/`: planted last-month revenue drop (Germany /
   `CARD_AUTH_FAILED`). `npx grane-analytics demo` (or `npm run demo`) builds a
   local DuckDB warehouse, runs the investigation, and prints the question to

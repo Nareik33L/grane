@@ -8,6 +8,7 @@ import { getDialect } from "../../src/connectors/dialect.js";
 import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneError } from "../../src/errors.js";
 import { loadConfig } from "../../src/config/load.js";
+import { recordAudit } from "../../src/audit.js";
 
 const secretRow = "SECRET_ROW_PAYLOAD";
 const dirs: string[] = [];
@@ -79,11 +80,13 @@ describe("query audit log", () => {
     expect(event.operation).toBe("query");
     expect(event.agent).toBe("finance");
     expect(event.trust).toBe("governed");
+    expect(event).toHaveProperty("query");
     expect(event.query).toEqual({
       metrics: ["revenue"],
       dimensions: ["country"],
       time: { from: "2026-07-01", to: "2026-07-31" },
     });
+    expect(event).not.toHaveProperty("reason");
     expect(event.query_id).toBe(result.provenance.query_id);
     expect(String(event.sql)).toContain("SELECT");
     expect(event.row_count).toBe(1);
@@ -107,6 +110,9 @@ describe("query audit log", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.kind).toBe("refusal");
     expect(events[0]!.operation).toBe("query");
+    expect(events[0]!).toHaveProperty("query");
+    expect(events[0]!.query).toEqual({ metrics: ["not_a_metric"] });
+    expect(events[0]!).not.toHaveProperty("reason");
     expect(events[0]!.refusal).toEqual(
       expect.objectContaining({
         status: "undefined_metric",
@@ -156,7 +162,32 @@ describe("query audit log", () => {
     const events = readJsonl(join(dir, ".grane", "audit.jsonl"));
     expect(events[0]!.kind).toBe("refusal");
     expect(events[0]!.operation).toBe("explain");
+    expect(events[0]!).toHaveProperty("query");
+    expect(events[0]!.query).toEqual({ metrics: ["not_a_metric"] });
+    expect(events[0]!).not.toHaveProperty("reason");
     expect(events[0]!.row_count).toBeUndefined();
+  });
+
+  it("writes auth denials without a query field", () => {
+    const dir = tempProject();
+    const kernel = kernelWithAudit(dir);
+    recordAudit(kernel.config, dir, {
+      ts: "2026-09-03T00:00:00.000Z",
+      kind: "auth",
+      operation: "http",
+      agent: null,
+      reason: "missing",
+    });
+    const events = readJsonl(join(dir, ".grane", "audit.jsonl"));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      ts: "2026-09-03T00:00:00.000Z",
+      kind: "auth",
+      operation: "http",
+      agent: null,
+      reason: "missing",
+    });
+    expect(events[0]!).not.toHaveProperty("query");
   });
 });
 

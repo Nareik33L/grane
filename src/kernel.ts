@@ -14,7 +14,7 @@ import { recordRawUsage } from "./explore/usage.js";
 import type { AgentGrant } from "./auth/agents.js";
 import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
 import { recordAudit, refusalFromError } from "./audit.js";
-import type { AuditEvent } from "./audit.js";
+import type { SemanticAuditEvent } from "./audit.js";
 
 export const GRANE_VERSION = "0.6.4";
 
@@ -326,7 +326,7 @@ export class GraneKernel {
     return this.compile(input);
   }
 
-  private audit(event: Omit<AuditEvent, "ts" | "agent">): void {
+  private audit(event: Omit<SemanticAuditEvent, "ts" | "agent">): void {
     recordAudit(this.config, this.projectDir, {
       ts: new Date().toISOString(),
       agent: this.agent?.id ?? null,
