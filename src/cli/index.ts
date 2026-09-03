@@ -18,6 +18,7 @@ import { usageRanked } from "../explore/usage.js";
 import { graneYml, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
+import { parseFilterSpec } from "./args.js";
 
 const program = new Command();
 
@@ -250,7 +251,7 @@ program
   .option("-d, --dimension <name...>", "governed dimension(s) to group by")
   .option("--raw-dimension <ref...>", "ungoverned table.column field(s) to group by")
   .option("--raw-metric <spec...>", "ungoverned aggregation(s), e.g. count:orders.id")
-  .option("-f, --filter <expr...>", "filter(s) as dimension=value or table.column=value")
+  .option("-f, --filter <expr...>", "filter(s) as dimension=value, dimension!=value (or <>), or table.column=value")
   .option("--last <period>", "relative period, e.g. 30d, 6m, last_month")
   .option("--from <date>", "start date (YYYY-MM-DD)")
   .option("--to <date>", "end date (YYYY-MM-DD), inclusive")
@@ -284,13 +285,7 @@ program
           query.raw_metrics = options.rawMetric.map(parseRawMetricSpec);
         }
         if (options.filter) {
-          query.filters = options.filter.map((expr) => {
-            const eq = expr.indexOf("=");
-            if (eq < 1) {
-              throw new Error(`Invalid --filter "${expr}"; use field=value.`);
-            }
-            return { field: expr.slice(0, eq), operator: "=" as const, value: expr.slice(eq + 1) };
-          });
+          query.filters = options.filter.map(parseFilterSpec);
         }
         if (options.last || options.from || options.to) {
           if (options.last) {

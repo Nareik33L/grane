@@ -19,6 +19,8 @@
   available on Grane metrics too). `join_to_timespine: true` is carried and a
   per-period breakdown of such a metric is refused (`unsafe_query`) instead of
   being returned sparse; totals and non-time groupings are exact.
+- `--filter` on the CLI accepts `!=` and `<>` alongside `=`, matching the
+  kernel and MCP filter operators.
 - dbt/MetricFlow import hardened after an independent interoperability test
   (76-metric SaaS fixture). Everything Grane imports from dbt now either
   reproduces the upstream semantics or is skipped with a reason; nothing is
