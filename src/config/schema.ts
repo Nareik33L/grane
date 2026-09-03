@@ -219,10 +219,13 @@ export const connectionConfigSchema = z.object({
 });
 export type ConnectionConfig = z.infer<typeof connectionConfigSchema>;
 
+export const weekStartsSchema = z.enum(["monday", "sunday"]);
+export type WeekStarts = z.infer<typeof weekStartsSchema>;
+
 export const projectConfigSchema = z.object({
   name: z.string().default("grane-project"),
   timezone: z.string().default("UTC"),
-  week: z.object({ starts: z.enum(["monday", "sunday"]).default("monday") }).default({ starts: "monday" }),
+  week: z.object({ starts: weekStartsSchema.default("monday") }).default({ starts: "monday" }),
   fiscal_year: z
     .object({
       starts_month: z.enum([

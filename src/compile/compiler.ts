@@ -233,8 +233,14 @@ export function compileQuery(
       ? dialect.castDate(params.add(value))
       : dialect.castTimestamp(params.add(value));
 
+  const weekStarts = model.config.project.week.starts;
   const truncTime = (grain: string, ref: ColumnRef): string =>
-    dialect.dateTrunc(grain, timeExpr(ref), temporalKind(ref) === "date" ? "date" : undefined);
+    dialect.dateTrunc(
+      grain,
+      timeExpr(ref),
+      temporalKind(ref) === "date" ? "date" : undefined,
+      weekStarts,
+    );
 
   // ---- Join planning for the outer query (dimensions, filters, time, direct measures) ----
   const joinedTables = new Set<string>([baseTable]);

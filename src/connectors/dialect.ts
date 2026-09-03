@@ -1,4 +1,4 @@
-import type { Scalar } from "../config/schema.js";
+import type { Scalar, WeekStarts } from "../config/schema.js";
 
 export type WarehouseType =
   | "postgres"
@@ -29,7 +29,11 @@ export interface SqlDialect {
   /** Qualify a table with the configured schema/dataset/database, if any. */
   qualifyTable(schema: string | undefined, table: string): string;
   placeholder(index: number, value: Scalar): string;
-  dateTrunc(grain: string, expr: string, kind?: TemporalKind): string;
+  /**
+   * Truncate a (already localized, or civil DATE) time expression.
+   * `weekStarts` is required for grain `week`; ignored for other grains.
+   */
+  dateTrunc(grain: string, expr: string, kind?: TemporalKind, weekStarts?: WeekStarts): string;
   localizeTime(expr: string, timezone: string): string;
   castTimestamp(placeholder: string): string;
   /** Bind a civil YYYY-MM-DD as a DATE, never as a timestamp. */
@@ -49,6 +53,24 @@ function quoteBacktick(name: string): string {
 
 function lit(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
+}
+
+function asDate(expr: string, kind?: TemporalKind): string {
+  return kind === "date" ? expr : `CAST(${expr} AS DATE)`;
+}
+
+/**
+ * Civil week-start DATE. EXTRACT(DOW) is Sunday=0 on Postgres, DuckDB, and
+ * Redshift and is not a session setting. Used instead of date_trunc('week')
+ * so sunday/monday cannot collapse to the warehouse default.
+ */
+function ansiCivilWeekStart(expr: string, kind: TemporalKind | undefined, starts: WeekStarts = "monday"): string {
+  const d = asDate(expr, kind);
+  const offset =
+    starts === "sunday"
+      ? `EXTRACT(DOW FROM ${d})::integer`
+      : `((EXTRACT(DOW FROM ${d})::integer + 6) % 7)`;
+  return `(${d} - ${offset})`;
 }
 
 /**
@@ -115,7 +137,8 @@ const ansiPostgresLike: Omit<SqlDialect, "type"> = {
   placeholder(index) {
     return `$${index}`;
   },
-  dateTrunc(grain, expr) {
+  dateTrunc(grain, expr, kind, weekStarts) {
+    if (grain === "week") return ansiCivilWeekStart(expr, kind, weekStarts ?? "monday");
     return `date_trunc(${lit(grain)}, ${expr})`;
   },
   localizeTime(expr, timezone) {
@@ -168,12 +191,14 @@ export const mysqlDialect: SqlDialect = {
   placeholder() {
     return "?";
   },
-  dateTrunc(grain, expr) {
+  dateTrunc(grain, expr, _kind, weekStarts) {
     switch (grain) {
       case "day":
         return `DATE(${expr})`;
       case "week":
-        return `DATE_SUB(DATE(${expr}), INTERVAL WEEKDAY(${expr}) DAY)`;
+        return (weekStarts ?? "monday") === "sunday"
+          ? `DATE_SUB(DATE(${expr}), INTERVAL (DAYOFWEEK(${expr}) - 1) DAY)`
+          : `DATE_SUB(DATE(${expr}), INTERVAL WEEKDAY(${expr}) DAY)`;
       case "month":
         return `DATE_FORMAT(${expr}, '%Y-%m-01')`;
       case "quarter":
@@ -218,7 +243,13 @@ export const snowflakeDialect: SqlDialect = {
   placeholder() {
     return "?";
   },
-  dateTrunc(grain, expr) {
+  dateTrunc(grain, expr, kind, weekStarts) {
+    if (grain === "week") {
+      const d = asDate(expr, kind);
+      return (weekStarts ?? "monday") === "sunday"
+        ? `DATEADD('day', -MOD(DAYOFWEEKISO(${d}), 7), ${d})`
+        : `DATEADD('day', 1 - DAYOFWEEKISO(${d}), ${d})`;
+    }
     return `DATE_TRUNC(${lit(grain.toUpperCase())}, ${expr})`;
   },
   localizeTime(expr, timezone) {
@@ -252,7 +283,12 @@ export const bigqueryDialect: SqlDialect = {
   placeholder(index) {
     return `@p${index}`;
   },
-  dateTrunc(grain, expr, kind) {
+  dateTrunc(grain, expr, kind, weekStarts) {
+    if (grain === "week") {
+      const week = (weekStarts ?? "monday") === "sunday" ? "WEEK(SUNDAY)" : "WEEK(MONDAY)";
+      if (kind === "date") return `DATE_TRUNC(${expr}, ${week})`;
+      return `TIMESTAMP_TRUNC(${expr}, ${week})`;
+    }
     const g = grain.toUpperCase();
     if (kind === "date") return `DATE_TRUNC(${expr}, ${g})`;
     return `TIMESTAMP_TRUNC(${expr}, ${g})`;
@@ -293,7 +329,13 @@ export const databricksDialect: SqlDialect = {
   placeholder() {
     return "?";
   },
-  dateTrunc(grain, expr) {
+  dateTrunc(grain, expr, kind, weekStarts) {
+    if (grain === "week") {
+      const d = asDate(expr, kind);
+      return (weekStarts ?? "monday") === "sunday"
+        ? `date_sub(${d}, dayofweek(${d}) - 1)`
+        : `date_sub(${d}, (dayofweek(${d}) + 5) % 7)`;
+    }
     return `DATE_TRUNC(${lit(grain.toUpperCase())}, ${expr})`;
   },
   localizeTime(expr, timezone) {
@@ -338,12 +380,12 @@ export const clickhouseDialect: SqlDialect = {
           : "String";
     return `{p${index}:${chType}}`;
   },
-  dateTrunc(grain, expr) {
+  dateTrunc(grain, expr, _kind, weekStarts) {
     switch (grain) {
       case "day":
         return `toStartOfDay(${expr})`;
       case "week":
-        return `toStartOfWeek(${expr}, 1)`;
+        return `toStartOfWeek(${expr}, ${(weekStarts ?? "monday") === "sunday" ? 0 : 1})`;
       case "month":
         return `toStartOfMonth(${expr})`;
       case "quarter":

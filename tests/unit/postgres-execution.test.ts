@@ -66,25 +66,33 @@ async function setup(): Promise<void> {
     CREATE TABLE skus (id INTEGER, sku TEXT, amount NUMERIC);
     INSERT INTO skus VALUES
       (1, 'A_B', 10), (2, 'AXB', 1100), (3, 'A%B', 1000), (4, 'ABC', 10000);
+    CREATE TABLE weeks (id INTEGER, d DATE, x NUMERIC);
+    INSERT INTO weeks VALUES
+      (1, DATE '2026-08-29', 1), (2, DATE '2026-08-30', 2),
+      (3, DATE '2026-08-31', 4), (4, DATE '2026-09-01', 8),
+      (5, DATE '2026-09-05', 16), (6, DATE '2026-09-06', 32),
+      (7, DATE '2026-09-07', 64);
   `);
 }
 
-function kernel(timezone: string, productsTable = "products", now?: Date): GraneKernel {
+function kernel(timezone: string, productsTable = "products", now?: Date, weekStarts: "monday" | "sunday" = "monday"): GraneKernel {
   const k = new GraneKernel(
     graneConfigSchema.parse({
-      project: { name: "pg-fix", timezone },
+      project: { name: "pg-fix", timezone, week: { starts: weekStarts } },
       connection: { type: "postgres", url: URL, schema: SCHEMA },
       entities: {
         fact: { table: "t", primary_key: "id" },
         order: { table: "orders", primary_key: "id" },
         day: { table: "days", primary_key: "id" },
         sku: { table: "skus", primary_key: "id" },
+        week: { table: "weeks", primary_key: "id" },
       },
       metrics: {
         total_x: { entity: "fact", type: "sum", sql: "${t.x}", time_dimension: "${t.d}" },
         order_weight: { entity: "order", type: "sum", sql: `\${${productsTable}.weight_kg}`, time_dimension: "${orders.ordered_at}" },
         march_revenue: { entity: "day", type: "sum", sql: "${days.x}", time_dimension: "${days.d}" },
         sku_total: { entity: "sku", type: "sum", sql: "${skus.amount}" },
+        week_total: { entity: "week", type: "sum", sql: "${weeks.x}", time_dimension: "${weeks.d}" },
       },
       dimensions: {
         sku: { entity: "sku", sql: "${skus.sku}" },
@@ -170,5 +178,31 @@ describe.skipIf(!available)("A15 / B16 PostgreSQL execution", () => {
     });
     expect(compiled.params).toContain("A_B");
     expect(compiled.sql).toMatch(/ESCAPE '!'/);
+  });
+
+  it("week.starts monday vs sunday produce different DATE buckets", async () => {
+    const civil = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+    const run = async (starts: "monday" | "sunday") => {
+      const k = kernel("UTC", "products", undefined, starts);
+      const result = await k.query({
+        metrics: ["week_total"],
+        time: { from: "2026-08-29", to: "2026-09-07", grain: "week" },
+      });
+      expect(result.trust).toBe("governed");
+      return Object.fromEntries(result.rows.map((r) => [civil(r.period_week), Number(r.week_total)]));
+    };
+    expect(await run("monday")).toEqual({ "2026-08-24": 3, "2026-08-31": 60, "2026-09-07": 64 });
+    expect(await run("sunday")).toEqual({ "2026-08-23": 1, "2026-08-30": 30, "2026-09-06": 96 });
+    const ny = kernel("America/New_York", "products", undefined, "monday");
+    const nyResult = await ny.query({
+      metrics: ["week_total"],
+      time: { from: "2026-08-29", to: "2026-09-07", grain: "week" },
+    });
+    expect(nyResult.trust).toBe("governed");
+    expect(Object.fromEntries(nyResult.rows.map((r) => [civil(r.period_week), Number(r.week_total)]))).toEqual({
+      "2026-08-24": 3,
+      "2026-08-31": 60,
+      "2026-09-07": 64,
+    });
   });
 });
