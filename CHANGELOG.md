@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Relative `<N>m` / `last_<N>m` periods clamp the shifted civil day to the
+  last valid day of the target month. JavaScript `Date` overflow no longer
+  turns `2026-03-31` minus one month into `2026-03-03` (and a `1m` window
+  of `2026-03-04..2026-03-31`). The documented contract is unchanged: N
+  calendar months ending today, i.e. the day after the clamped shift
+  through today. `last_month`, `<N>d`, and explicit `from`/`to` are
+  unchanged. See `tests/unit/relative-month.test.ts`.
+- `contains` is literal substring containment. User `%`, `_`, and the LIKE
+  escape character are escaped in SQL (`ESCAPE '!'`) on every dialect;
+  the bound parameter stays the raw string. Case-insensitive behaviour
+  (ILIKE / LOWER) is unchanged. See `tests/unit/contains-literal.test.ts`.
+
 - Time dimensions are classified from the live warehouse type, not by name.
   A `DATE` is a civil calendar value: `project.timezone` no longer rewrites
   `2026-08-01` into another day via `::timestamptz AT TIME ZONE`. Filtering

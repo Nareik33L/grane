@@ -105,9 +105,33 @@ export function startOfMonth(date: CalendarDate): CalendarDate {
   return { ...date, day: 1 };
 }
 
+/** Gregorian length of a civil month. February uses the 4/100/400 leap rule. */
+export function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+}
+
+/**
+ * Shift a civil date by calendar months without JavaScript Date overflow.
+ *
+ * Target year/month is computed from the linear month index; the day is
+ * clamped to the last valid civil day of that month.
+ *
+ *   2026-03-31 - 1 month → 2026-02-28
+ *   2024-03-31 - 1 month → 2024-02-29
+ *   2026-05-31 - 1 month → 2026-04-30
+ *
+ * `<N>m` / `last_<N>m` then apply the existing inclusive window
+ * `addDays(shifted, 1) .. today` ("N calendar months ending today").
+ */
 export function addMonths(date: CalendarDate, months: number): CalendarDate {
-  const utc = new Date(Date.UTC(date.year, date.month - 1 + months, date.day));
-  return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
+  const total = date.year * 12 + (date.month - 1) + months;
+  const year = Math.floor(total / 12);
+  const month = total - year * 12 + 1;
+  return { year, month, day: Math.min(date.day, daysInMonth(year, month)) };
 }
 
 function compareDates(a: CalendarDate, b: CalendarDate): number {
@@ -177,8 +201,10 @@ export interface RelativeRangeOptions {
 /**
  * Resolve a relative period spec to an explicit date range.
  *
- * Supported: `<N>d` (N days ending today), `<N>w`, `<N>m` (calendar months
- * ending today), `today`, `yesterday`, `this_month`, `last_month`,
+ * Supported: `<N>d` (N days ending today), `<N>w`, `<N>m` / `last_<N>m`
+ * (N calendar months ending today: the day after `today` shifted back N
+ * clamped months, through today), `today`, `yesterday`, `this_month`,
+ * `last_month`,
  * `this_quarter`, `last_quarter`, `q2`–`q4`, `this_year`, `last_year`,
  * `this_fiscal_year`, `last_fiscal_year`. `q1` is calendar Q1 year-to-date,
  * or `ambiguous_query` when a fiscal year is configured.
@@ -261,6 +287,8 @@ export function resolveRelativeRange(
       if (unit === "w") {
         return { from: formatDate(addDays(today, -(amount * 7 - 1))), to: formatDate(today) };
       }
+      // N calendar months ending today: clamp the shifted day, then take
+      // the next civil day through today (inclusive).
       return { from: formatDate(addDays(addMonths(today, -amount), 1)), to: formatDate(today) };
     }
   }

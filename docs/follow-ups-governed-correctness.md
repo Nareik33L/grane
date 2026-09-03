@@ -1,9 +1,10 @@
 # Follow-ups from the post-GAUNTLET governed-correctness review
 
-Recorded during the DATE / pre-aggregation / untimed-metric fix. None of
-these were changed in that patch. Investigate separately; do not fold them
-into timezone or cardinality work unless a later review proves they are
-inseparable.
+Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
+(`contains` LIKE wildcards) was later fixed when an independent gauntlet
+produced a governed-wrong counterexample. The rest stay deferred. Do not
+fold them into timezone, cardinality, month-arithmetic, or contains work
+unless a later review proves they are inseparable.
 
 ## 1. `project.week.starts` accepted but ignored
 
@@ -25,14 +26,12 @@ inseparable.
   as complete.
 - **Priority:** Medium. Add an explicit `truncated` / `row_limit` field.
 
-## 3. `contains` treats `%` and `_` as SQL wildcards
+## 3. `contains` LIKE wildcards — fixed
 
-- **Observed:** Values are interpolated into `ILIKE '%' || $n || '%'`.
-- **Supported/documented:** Documented as substring match; wildcard
-  escaping is not documented.
-- **Governed-contract impact:** A search for `100%` matches more than the
-  literal.
-- **Priority:** Medium. Escape LIKE metacharacters.
+Resolved: `contains` is literal substring containment. Dialects wrap the
+bound value with LIKE-metacharacter escaping and `ESCAPE '!'`. See
+`tests/unit/contains-literal.test.ts`. Do not reopen as a wildcard
+operator.
 
 ## 4. Semi-additive grouping by its own primary entity can make snapshot selection vacuous
 

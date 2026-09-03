@@ -51,6 +51,45 @@ function lit(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+/**
+ * LIKE / ILIKE escape character. Chosen as `!` so the ESCAPE clause is a
+ * single-quoted ASCII literal on every dialect (backslash string escapes
+ * differ between Postgres, MySQL, and BigQuery).
+ */
+export const LIKE_ESCAPE_CHAR = "!";
+
+/**
+ * Escape a user string so it is a literal LIKE pattern under
+ * {@link LIKE_ESCAPE_CHAR}. `%`, `_`, and the escape character itself lose
+ * metacharacter meaning. Used by tests; SQL generation applies the same
+ * replacements to the bound placeholder so the parameter stays the raw
+ * user value.
+ */
+export function escapeLikeLiteral(value: string): string {
+  const e = LIKE_ESCAPE_CHAR;
+  return value.replaceAll(e, e + e).replaceAll("%", `${e}%`).replaceAll("_", `${e}_`);
+}
+
+/** SQL expression that escapes LIKE metacharacters in `expr` (a placeholder). */
+function escapeLikeExpr(expr: string, replaceFn = "replace"): string {
+  const e = lit(LIKE_ESCAPE_CHAR);
+  const ee = lit(LIKE_ESCAPE_CHAR + LIKE_ESCAPE_CHAR);
+  return `${replaceFn}(${replaceFn}(${replaceFn}(${expr}, ${e}, ${ee}), ${lit("%")}, ${lit(`${LIKE_ESCAPE_CHAR}%`)}), ${lit("_")}, ${lit(`${LIKE_ESCAPE_CHAR}_`)})`;
+}
+
+function likeContains(
+  columnExpr: string,
+  patternExpr: string,
+  concat: "pipe" | "concat",
+  predicate: "ilike" | "like",
+): string {
+  const wrapped =
+    concat === "pipe"
+      ? `'%' || ${patternExpr} || '%'`
+      : `CONCAT('%', ${patternExpr}, '%')`;
+  return `${columnExpr} ${predicate === "ilike" ? "ILIKE" : "LIKE"} ${wrapped} ESCAPE ${lit(LIKE_ESCAPE_CHAR)}`;
+}
+
 function filteredWithCase(
   fn: "SUM" | "COUNT" | "AVG" | "MIN" | "MAX",
   expr: string,
@@ -93,7 +132,7 @@ const ansiPostgresLike: Omit<SqlDialect, "type"> = {
     return `(${expr})::numeric`;
   },
   contains(columnExpr, placeholder) {
-    return `${columnExpr} ILIKE '%' || ${placeholder} || '%'`;
+    return likeContains(columnExpr, escapeLikeExpr(placeholder), "pipe", "ilike");
   },
   filteredAggregate: filteredWithFilter,
 };
@@ -159,7 +198,12 @@ export const mysqlDialect: SqlDialect = {
     return `CAST((${expr}) AS DECIMAL(38, 12))`;
   },
   contains(columnExpr, placeholder) {
-    return `LOWER(${columnExpr}) LIKE CONCAT('%', LOWER(${placeholder}), '%')`;
+    return likeContains(
+      `LOWER(${columnExpr})`,
+      escapeLikeExpr(`LOWER(${placeholder})`),
+      "concat",
+      "like",
+    );
   },
   filteredAggregate: filteredWithCase,
 };
@@ -191,7 +235,7 @@ export const snowflakeDialect: SqlDialect = {
     return `TO_NUMBER(${expr})`;
   },
   contains(columnExpr, placeholder) {
-    return `${columnExpr} ILIKE '%' || ${placeholder} || '%'`;
+    return likeContains(columnExpr, escapeLikeExpr(placeholder), "pipe", "ilike");
   },
   filteredAggregate: filteredWithFilter,
 };
@@ -227,7 +271,12 @@ export const bigqueryDialect: SqlDialect = {
     return `CAST((${expr}) AS NUMERIC)`;
   },
   contains(columnExpr, placeholder) {
-    return `LOWER(CAST(${columnExpr} AS STRING)) LIKE CONCAT('%', LOWER(${placeholder}), '%')`;
+    return likeContains(
+      `LOWER(CAST(${columnExpr} AS STRING))`,
+      escapeLikeExpr(`LOWER(${placeholder})`),
+      "concat",
+      "like",
+    );
   },
   filteredAggregate: filteredWithCase,
 };
@@ -261,7 +310,12 @@ export const databricksDialect: SqlDialect = {
     return `CAST((${expr}) AS DOUBLE)`;
   },
   contains(columnExpr, placeholder) {
-    return `LOWER(CAST(${columnExpr} AS STRING)) LIKE CONCAT('%', LOWER(${placeholder}), '%')`;
+    return likeContains(
+      `LOWER(CAST(${columnExpr} AS STRING))`,
+      escapeLikeExpr(`LOWER(${placeholder})`),
+      "concat",
+      "like",
+    );
   },
   filteredAggregate: filteredWithFilter,
 };
@@ -314,7 +368,7 @@ export const clickhouseDialect: SqlDialect = {
     return `toFloat64(${expr})`;
   },
   contains(columnExpr, placeholder) {
-    return `${columnExpr} ILIKE concat('%', ${placeholder}, '%')`;
+    return `${columnExpr} ILIKE concat('%', ${escapeLikeExpr(placeholder, "replaceAll")}, '%') ESCAPE ${lit(LIKE_ESCAPE_CHAR)}`;
   },
   filteredAggregate: filteredWithCase,
 };

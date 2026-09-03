@@ -175,9 +175,16 @@ column's introspected type and distinguishes:
 | Timestamp without time zone | Postgres/DuckDB `timestamp`, MySQL `DATETIME`, Snowflake `TIMESTAMP_NTZ` | Treated as a UTC wall-clock instant (the session timezone is pinned to UTC), then localized to `project.timezone`. |
 | Instant | `timestamptz`, `TIMESTAMP WITH TIME ZONE`, BigQuery `TIMESTAMP`, Snowflake `TIMESTAMP_TZ` / `TIMESTAMP_LTZ` | Localized to `project.timezone` (existing `AT TIME ZONE` / `CONVERT_TIMEZONE` / …). |
 
-Relative periods (`last_month`, `30d`, …) still resolve to civil `from`/`to`
-in the project timezone before compilation. That is "which calendar dates
-did the user ask for?", not "reinterpret this DATE column".
+Relative periods (`last_month`, `30d`, `<N>m`, …) still resolve to civil
+`from`/`to` in the project timezone before compilation. That is "which
+calendar dates did the user ask for?", not "reinterpret this DATE column".
+`<N>m` is N calendar months ending today: shift today back N months,
+clamp the day to the last valid civil day of the target month, then take
+the day after that through today. JavaScript `Date` overflow is not used.
+
+`contains` is literal substring match (case-insensitive where the dialect
+already was). `%` and `_` in the user value do not become SQL LIKE
+wildcards.
 
 If the warehouse type is unknown at compile time and `project.timezone` is
 not UTC, Grane refuses (`unsafe_query`) instead of applying timezone
