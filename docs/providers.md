@@ -106,7 +106,7 @@ Imported, with the upstream semantics preserved:
 | MetricFlow | Grane |
 | --- | --- |
 | Primary entity backed by a column | Entity + primary key. Models without one are skipped; Grane never assumes `id`. |
-| Foreign entity → a model whose primary entity has that name | `many_to_one` relationship on the declared columns only |
+| Foreign (or natural) entity → another semantic model that declares the **same entity name** as its `primary` or `unique` entity | `many_to_one` relationship from the entity's column to the target's declared entity column — the unique column when that is how the target declares it, never its surrogate primary key. Semantic model names and table names are not join keys; an entity no model declares, one declared only as `foreign` elsewhere, a `natural` target (validity windows) or an entity whose `expr` is a SQL expression is recorded under `unsupported` with the reason. Primary/unique-to-primary/unique (one-to-one) joins are recorded as unsupported rather than imported. |
 | Categorical / time dimension with a plain column `expr` | Dimension. The description keeps the MetricFlow identity (`invoice__country`) and the column, so an agent can tell same-named dimensions apart. |
 | `agg: sum / count / count_distinct / average / min / max` over a column | Same aggregation. `agg: count` with `expr: 1` (any numeric literal) is a row count, `COUNT(1)`. |
 | `filter: {{ Dimension('order__status') }} = 'completed'` — `=`, `!=`, `<>`, string / number / boolean literal, joined with `and`, on the metric's own model | Metric filter with the **same operator** |
@@ -119,8 +119,16 @@ numerator and denominator sit at different grains, ratios with their own
 filter or filtered inputs, filters using `or`, `in`, `>`/`<`, `null`,
 `TimeDimension`, `Entity`, SQL wrappers or another model's dimension,
 SQL-expression dimensions, and snapshot dimensions at sub-day granularity.
-`fill_nulls_with` / `join_to_timespine` are not applied: Grane returns no row
-rather than 0 for an empty period.
+`fill_nulls_with` (an integer) is applied as `COALESCE(<aggregate>, n)` after
+aggregation — the declared semantics, and what MetricFlow compiles for a
+`type_params.measure` input (note: dbt-core 1.12 does not pass the field
+through for model-embedded `metrics:`, so `mf query` on that toolchain shows
+`null` where Grane shows the declared value). Ratio components keep their own
+fill; `fill_nulls_with` on a non-simple metric skips it, as MetricFlow rejects
+it. `join_to_timespine: true` is carried on the metric: totals and non-time
+groupings are exact, but a per-period breakdown is refused (`unsafe_query`)
+because Grane has no time spine to produce the empty periods MetricFlow would
+return — it is never returned sparse as if it were complete.
 
 A query that combines a semi-additive metric with a metric whose row selection
 differs (an additive one, or a semi-additive one with a different filter,

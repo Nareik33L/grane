@@ -1,0 +1,124 @@
+version: 2
+
+semantic_models:
+  # case 1 + 10: plain primary entity; also carries a foreign key two hops out.
+  - name: customers
+    model: ref('dim_customers')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+      - name: account_manager
+        type: foreign
+        expr: manager_id
+    dimensions:
+      - name: customer_name
+        type: categorical
+        expr: customer_name
+      - name: segment
+        type: categorical
+        expr: segment
+
+  - name: managers
+    model: ref('dim_managers')
+    entities:
+      - name: account_manager
+        type: primary
+        expr: manager_id
+    dimensions:
+      - name: manager_name
+        type: categorical
+        expr: manager_name
+
+  # case 2/3/8: model NAMED after the entity, surrogate primary key, natural unique key.
+  # The join must land on product_id, never on product_row_id.
+  - name: product
+    model: ref('dim_product_rows')
+    entities:
+      - name: product_row
+        type: primary
+        expr: product_row_id
+      - name: product
+        type: unique
+        expr: product_id
+    dimensions:
+      - name: product_name
+        type: categorical
+        expr: product_name
+
+  # case 4: table named "warehouse", but the declared entity is `site`.
+  - name: sites
+    model: ref('warehouse')
+    entities:
+      - name: site
+        type: primary
+        expr: site_id
+    dimensions:
+      - name: site_name
+        type: categorical
+        expr: site_name
+
+  # case 5: two different models both declare `region`.
+  - name: regions
+    model: ref('dim_regions')
+    entities:
+      - name: region
+        type: primary
+        expr: region_id
+    dimensions:
+      - name: region_name
+        type: categorical
+        expr: region_name
+
+  - name: region_targets
+    model: ref('dim_region_targets')
+    entities:
+      - name: region
+        type: primary
+        expr: region_id
+    dimensions:
+      - name: region_manager
+        type: categorical
+        expr: region_manager
+
+  # case 6: model NAMED "supplier", but it declares entity `vendor`.
+  - name: supplier
+    model: ref('dim_vendors')
+    entities:
+      - name: vendor
+        type: primary
+        expr: vendor_id
+    dimensions:
+      - name: vendor_name
+        type: categorical
+        expr: vendor_name
+
+  # case 7: the matching entity is a SQL expression.
+  - name: coupons
+    model: ref('dim_coupons')
+    entities:
+      - name: coupon_row
+        type: primary
+        expr: coupon_row_id
+      - name: coupon
+        type: unique
+        expr: UPPER(code)
+    dimensions:
+      - name: coupon_kind
+        type: categorical
+        expr: coupon_kind
+
+  # unique -> primary one-to-one: a profile table keyed 1:1 to customers.
+  - name: customer_profiles
+    model: ref('dim_customer_profiles')
+    entities:
+      - name: profile
+        type: primary
+        expr: profile_id
+      - name: customer
+        type: unique
+        expr: customer_id
+    dimensions:
+      - name: industry
+        type: categorical
+        expr: industry

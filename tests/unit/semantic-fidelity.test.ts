@@ -147,11 +147,27 @@ describe("dbt import: what is and is not imported", () => {
     expect(Object.keys(contribution.relationships).some((k) => k.includes("fct_events"))).toBe(false);
   });
 
-  it("keeps join targets on declared primary keys only", () => {
+  it("keeps join targets on declared entities only", () => {
     expect(contribution.relationships.fct_mrr_snapshot_to_dim_customers).toEqual(
       expect.objectContaining({ from: "fct_mrr_snapshot.customer_id", to: "dim_customers.customer_id" }),
     );
     expect(contribution.relationships.fct_balances_to_dim_customers).toBeUndefined();
+  });
+
+  it("fill_nulls_with is carried (integers only) and join_to_timespine is flagged, never dropped", () => {
+    expect(contribution.metrics.revenue_filled?.fill_nulls_with).toBe(0);
+    expect(contribution.metrics.revenue_filled_minus_one?.fill_nulls_with).toBe(-1);
+    expect(contribution.metrics.ending_mrr?.fill_nulls_with).toBe(0);
+    expect(contribution.metrics.revenue?.fill_nulls_with).toBeUndefined();
+    expect(contribution.metrics.invoice_count_dense).toEqual(
+      expect.objectContaining({ fill_nulls_with: 0, join_to_timespine: true }),
+    );
+    expect(contribution.metrics.invoice_count?.join_to_timespine).toBeUndefined();
+    // Legacy spec: the measure input's setting applies; a metric-level one next to a measure input is ignored upstream.
+    expect(contribution.metrics.balance_rows_filled?.fill_nulls_with).toBe(0);
+    expect(contribution.metrics.balance_rows_unfilled?.fill_nulls_with).toBeUndefined();
+    expect(reasonFor("revenue_bad_fill")).toMatch(/fill_nulls_with 0.5 is not an integer/);
+    expect(reasonFor("paid_share_filled")).toMatch(/only defined for simple metrics/);
   });
 
   it("records every deliberate skip with a reason and imports nothing ambiguous", () => {
@@ -195,18 +211,24 @@ describe("dbt import: what is and is not imported", () => {
         "active_customers",
         "arpu",
         "balance_rows",
+        "balance_rows_filled",
+        "balance_rows_unfilled",
         "billed_amount",
         "billed_amount_ne",
         "ending_mrr",
         "ending_mrr_by_customer",
         "enterprise_ending_mrr",
+        "filled_revenue_per_invoice",
         "invoice_count",
+        "invoice_count_dense",
         "monthly_balance",
         "new_mrr",
         "opening_mrr",
         "paid_invoices",
         "paying_signups",
         "revenue",
+        "revenue_filled",
+        "revenue_filled_minus_one",
         "revenue_per_invoice",
         "signups",
         "simple_derived_ratio",
@@ -581,6 +603,56 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
     it("simple derived ratios of imported components execute", async () => {
       expect(await value({ metrics: ["revenue_per_invoice"], time: JUL }, "revenue_per_invoice")).toBe(60);
       expect(await value({ metrics: ["simple_derived_ratio"], time: JUL }, "simple_derived_ratio")).toBe(60);
+    });
+  });
+
+  describe("F. fill_nulls_with (COALESCE over the aggregate, as MetricFlow compiles it)", () => {
+    const EMPTY = { from: "2025-01-01", to: "2025-01-31" };
+
+    it("SUM with rows is unchanged; SUM over no rows becomes the declared literal, not null", async () => {
+      expect(await value({ metrics: ["revenue_filled"], time: JUL }, "revenue_filled")).toBe(300);
+      const filled = await kernel.query({ metrics: ["revenue_filled"], time: EMPTY });
+      expect(filled.rows).toEqual([{ revenue_filled: 0 }]);
+      expect(filled.trust).toBe("governed");
+      expect(filled.provenance.generated_sql).toMatch(/COALESCE\(SUM\("fct_invoices"\."paid_amount"\), 0\)/);
+      expect(await value({ metrics: ["revenue_filled_minus_one"], time: EMPTY }, "revenue_filled_minus_one")).toBe(-1);
+    });
+
+    it("a metric without fill_nulls_with still reports SQL's null over no rows", async () => {
+      const plain = await kernel.query({ metrics: ["revenue"], time: EMPTY });
+      expect(plain.rows).toEqual([{ revenue: null }]);
+      expect(plain.provenance.generated_sql).not.toMatch(/COALESCE/);
+    });
+
+    it("the semi-additive ending_mrr (fill_nulls_with: 0) is 0, not null, for a window with no snapshots", async () => {
+      const r = await kernel.query({ metrics: ["ending_mrr"], time: EMPTY });
+      expect(r.rows).toEqual([{ ending_mrr: 0 }]);
+      expect(r.trust).toBe("governed");
+    });
+
+    it("COUNT over no rows is 0 with or without a fill; a join_to_timespine metric refuses per-period breakdowns", async () => {
+      expect(await value({ metrics: ["invoice_count_dense"], time: EMPTY }, "invoice_count_dense")).toBe(0);
+      expect(await value({ metrics: ["invoice_count_dense"], time: JUL }, "invoice_count_dense")).toBe(5);
+      const byCountry = await kernel.query({ metrics: ["invoice_count_dense"], dimensions: ["invoice_country"], time: JUL });
+      expect(byCountry.rows).toEqual([
+        { invoice_country: "DE", invoice_count_dense: 3n },
+        { invoice_country: "US", invoice_count_dense: 2n },
+      ]);
+      const refused = await refusalAsync(() =>
+        kernel.query({ metrics: ["invoice_count_dense"], time: { ...JUN_AUG, grain: "month" } }),
+      );
+      expect(refused.status).toBe("unsafe_query");
+      expect(refused.message).toMatch(/join_to_timespine.*does not generate empty periods/);
+      // The same breakdown of a metric without join_to_timespine is exact and allowed (sparse is what MetricFlow returns too).
+      const sparse = await kernel.query({ metrics: ["invoice_count"], time: { ...JUN_AUG, grain: "month" } });
+      expect(sparse.rows.map((row) => row.invoice_count)).toEqual([5n, 2n]);
+    });
+
+    it("ratio components keep their own fill; the ratio itself follows NULLIF on the denominator", async () => {
+      expect(await value({ metrics: ["filled_revenue_per_invoice"], time: JUL }, "filled_revenue_per_invoice")).toBe(60);
+      const r = await kernel.query({ metrics: ["filled_revenue_per_invoice"], time: EMPTY });
+      expect(r.rows).toEqual([{ filled_revenue_per_invoice: null }]);
+      expect(r.provenance.generated_sql).toMatch(/COALESCE\(SUM\("fct_invoices"\."paid_amount"\), 0\)/);
     });
   });
 });

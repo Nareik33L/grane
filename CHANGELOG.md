@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- dbt/MetricFlow relationships are resolved from declared entities only. An
+  adversarial review found Grane joining `orders.customer_id` to the surrogate
+  primary key of a semantic model merely *named* `customer` — a wrong row with
+  `trust: governed`. A relationship is now imported only when another semantic
+  model declares the same entity name as `primary` or `unique`, and it joins
+  to that entity's declared column (the unique column when that is how the
+  target declares it). Semantic model names, table names and key names play no
+  part. Entities with no such target, `natural` targets, SQL-expression
+  entities and one-to-one (primary/unique-to-primary/unique) joins are
+  recorded under `unsupported` with the reason. Relationship conformance tests
+  execute the compiled joins against DuckDB
+  (`tests/unit/relationship-fidelity.test.ts`).
+- `fill_nulls_with` is no longer dropped from imported metrics: it compiles as
+  `COALESCE(<aggregate>, n)` after aggregation (native `fill_nulls_with` is
+  available on Grane metrics too). `join_to_timespine: true` is carried and a
+  per-period breakdown of such a metric is refused (`unsafe_query`) instead of
+  being returned sparse; totals and non-time groupings are exact.
+- `--filter` on the CLI accepts `!=` and `<>` alongside `=`, matching the
+  kernel and MCP filter operators.
 - dbt/MetricFlow import hardened after an independent interoperability test
   (76-metric SaaS fixture). Everything Grane imports from dbt now either
   reproduces the upstream semantics or is skipped with a reason; nothing is

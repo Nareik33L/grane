@@ -1,0 +1,60 @@
+version: 2
+
+# Relationship conformance fixture. Every semantic model here exists to pin
+# down one way a join target can (or must not) be established. See
+# tests/unit/relationship-fidelity.test.ts for the hand-computed answers.
+semantic_models:
+  - name: orders
+    model: ref('fct_orders')
+    defaults:
+      agg_time_dimension: ordered_at
+    entities:
+      - name: order
+        type: primary
+        expr: order_id
+      - name: customer          # case 1: foreign -> primary (customers)
+        type: foreign
+        expr: customer_id
+      - name: product           # case 2/3/8: foreign -> unique on a model NAMED "product" whose primary key differs
+        type: foreign
+        expr: product_id
+      - name: warehouse         # case 4: a TABLE is named "warehouse" but declares no such entity
+        type: foreign
+        expr: warehouse_id
+      - name: region            # case 5: two models declare `region`
+        type: foreign
+        expr: region_id
+      - name: supplier          # case 6: a MODEL is named "supplier" but declares no such entity
+        type: foreign
+        expr: supplier_id
+      - name: promo             # case 6: nothing declares `promo`
+        type: foreign
+        expr: promo_code
+      - name: coupon            # case 7: the only target declares `coupon` with a SQL expression
+        type: foreign
+        expr: coupon_code
+    dimensions:
+      - name: ordered_at
+        type: time
+        expr: ordered_at
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+        expr: channel
+    measures:
+      - name: revenue
+        agg: sum
+        expr: amount
+        create_metric: true
+      - name: order_count
+        agg: count
+        expr: 1
+        create_metric: true
+
+metrics:
+  - name: web_revenue
+    type: simple
+    type_params:
+      measure: revenue
+    filter: "{{ Dimension('order__channel') }} = 'web'"

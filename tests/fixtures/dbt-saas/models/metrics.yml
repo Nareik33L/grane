@@ -13,6 +13,34 @@ metrics:
     numerator: revenue
     denominator: invoice_count
 
+  # Components carry their own fill_nulls_with, as MetricFlow computes them.
+  - name: filled_revenue_per_invoice
+    type: ratio
+    numerator: revenue_filled
+    denominator: invoice_count
+
+  # fill_nulls_with is only defined for simple metrics.
+  - name: paid_share_filled
+    type: ratio
+    numerator: revenue
+    denominator: invoice_count
+    fill_nulls_with: 0
+
+  # Legacy spec: the measure input carries fill_nulls_with ...
+  - name: balance_rows_filled
+    type: simple
+    type_params:
+      measure:
+        name: balance_rows
+        fill_nulls_with: 0
+
+  # ... and a metric-level fill_nulls_with next to a measure input is ignored by MetricFlow.
+  - name: balance_rows_unfilled
+    type: simple
+    type_params:
+      measure: balance_rows
+      fill_nulls_with: 0
+
   # Cross-grain: tickets are at ticket grain, active customers at snapshot grain.
   - name: tickets_per_active_customer
     type: ratio

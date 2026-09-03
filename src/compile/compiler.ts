@@ -427,6 +427,24 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     return { expr: outerExpr };
   };
 
+  /**
+   * `fill_nulls_with` is applied after aggregation (COALESCE over the
+   * aggregate), exactly where MetricFlow applies it. It cannot invent rows: a
+   * metric declared `join_to_timespine` expects a row per period even when the
+   * period has no data, and Grane has no time spine to draw those rows from, so
+   * a per-period breakdown is refused instead of returned sparse.
+   */
+  const fillNulls = (metric: Metric, expr: string): string => {
+    if (metric.config.join_to_timespine && resolved.time?.grain) {
+      throw unsafeQuery(
+        `Metric "${metric.name}" is declared join_to_timespine: a per-${resolved.time.grain} breakdown must include periods with no rows, ` +
+          `and Grane does not generate empty periods. Query the total for the time range, or group by a non-time dimension.`,
+      );
+    }
+    const fill = metric.config.fill_nulls_with;
+    return fill === undefined ? expr : `COALESCE(${expr}, ${fill})`;
+  };
+
   const compileMetricExpr = (metric: Metric): string => {
     metricVersions[metric.name] = metric.definitionVersion;
     if (metric.config.source) metricSources[metric.name] = metric.config.source;
@@ -454,11 +472,11 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       metricVersions[denominator.name] = denominator.definitionVersion;
       if (numerator.config.source) metricSources[numerator.name] = numerator.config.source;
       if (denominator.config.source) metricSources[denominator.name] = denominator.config.source;
-      const num = compileScalarMetric(numerator).expr;
-      const den = compileScalarMetric(denominator).expr;
-      return `${dialect.castNumeric(num)} / NULLIF(${dialect.castNumeric(den)}, 0)`;
+      const num = fillNulls(numerator, compileScalarMetric(numerator).expr);
+      const den = fillNulls(denominator, compileScalarMetric(denominator).expr);
+      return fillNulls(metric, `${dialect.castNumeric(num)} / NULLIF(${dialect.castNumeric(den)}, 0)`);
     }
-    return compileScalarMetric(metric).expr;
+    return fillNulls(metric, compileScalarMetric(metric).expr);
   };
 
   // Pre-plan joins for dimensions/filters/time before metric CTE joins so the
