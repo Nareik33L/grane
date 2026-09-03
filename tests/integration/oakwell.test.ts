@@ -171,6 +171,104 @@ describe.skipIf(!available)("Oakwell interop (dbt provider vs MetricFlow)", () =
     });
   });
 
+  describe("result completeness under an execution cap", () => {
+    const aug = { from: "2026-08-01", to: "2026-08-31" };
+    const seg = () => dimension("customer_month__customer_segment");
+    const status = () => dimension("customer__customer_status");
+
+    function cappedKernel(defaultRows: number): GraneKernel {
+      const dirCap = mkdtempSync(join(tmpdir(), "grane-oakwell-cap-"));
+      writeFileSync(
+        join(dirCap, "grane.yml"),
+        [
+          "project:",
+          "  name: oakwell-interop",
+          "  timezone: UTC",
+          "connection:",
+          "  type: duckdb",
+          `  path: ${JSON.stringify(WAREHOUSE)}`,
+          "  schema: main",
+          "limits:",
+          `  default_rows: ${defaultRows}`,
+          "  max_rows: 10000",
+          "providers:",
+          "  - type: dbt",
+          `    path: ${JSON.stringify(PROJECT)}`,
+          "",
+        ].join("\n"),
+      );
+      const loadedCap = loadConfig(dirCap);
+      return new GraneKernel(loadedCap.config, {
+        projectDir: loadedCap.projectDir,
+        providerWarnings: loadedCap.warnings,
+      });
+    }
+
+    it("scalar ending_mrr is a complete one-row result with the canonical total", async () => {
+      const k = cappedKernel(1);
+      try {
+        const result = await k.query({ metrics: ["ending_mrr"], time: aug });
+        expect(result.trust).toBe("governed");
+        expect(result.rows).toHaveLength(1);
+        expect(close(Number(result.rows[0]!.ending_mrr), 2309714.33)).toBe(true);
+        expect(result.completeness.status).toBe("complete");
+        expect(result.completeness.source).toBe("default");
+        expect(result.provenance.completeness).toEqual(result.completeness);
+      } finally {
+        await k.close();
+      }
+    });
+
+    it("grouped ending_mrr by segment is truncated at default_rows=1 and complete at the exact segment count", async () => {
+      const k1 = cappedKernel(1);
+      try {
+        const truncated = await k1.query({ metrics: ["ending_mrr"], dimensions: [seg()], time: aug });
+        expect(truncated.trust).toBe("governed");
+        expect(truncated.rows).toHaveLength(1);
+        expect(truncated.completeness).toEqual({ status: "truncated", limit: 1, source: "default" });
+        expect(truncated.provenance.row_count).toBe(1);
+        expect(truncated.columns).not.toContain("__grane_n");
+        for (const row of truncated.rows) expect(row).not.toHaveProperty("__grane_n");
+      } finally {
+        await k1.close();
+      }
+
+      const k3 = cappedKernel(3);
+      try {
+        const exact = await k3.query({ metrics: ["ending_mrr"], dimensions: [seg()], time: aug });
+        expect(exact.trust).toBe("governed");
+        expect(exact.rows).toHaveLength(3);
+        expect(exact.completeness.status).toBe("complete");
+        const bySeg = Object.fromEntries(
+          exact.rows.map((r) => [String(r[seg()]), Number(r.ending_mrr)]),
+        );
+        expect(close(bySeg.Enterprise!, 1912046.67)).toBe(true);
+        expect(close(bySeg["Mid-Market"]!, 330153.5)).toBe(true);
+        expect(close(bySeg.SMB!, 67514.16)).toBe(true);
+      } finally {
+        await k3.close();
+      }
+    });
+
+    it("PR #19 Enterprise × status remains 1,912,046.67 when the cap is above the result size", async () => {
+      const k = cappedKernel(1);
+      try {
+        const result = await k.query({
+          metrics: ["ending_mrr"],
+          dimensions: [status()],
+          filters: [{ field: seg(), operator: "=", value: "Enterprise" }],
+          time: aug,
+        });
+        expect(result.trust).toBe("governed");
+        expect(result.rows).toHaveLength(1);
+        expect(close(Number(result.rows[0]!.ending_mrr), 1912046.67)).toBe(true);
+        expect(result.completeness.status).toBe("complete");
+      } finally {
+        await k.close();
+      }
+    });
+  });
+
   describe("DATE-backed ground truths are invariant under project.timezone", () => {
     const dateTimezones = ["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"] as const;
 

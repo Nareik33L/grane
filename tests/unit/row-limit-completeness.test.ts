@@ -400,6 +400,9 @@ describe.skipIf(!duckdbOk)("row-limit completeness (DuckDB)", () => {
       time: Q,
     });
     expect(metricFilter.completeness.source).toBe("default");
+    const isNull = await grouped(k, { filters: [{ field: "region", operator: "is_null" }] });
+    expect(isNull.rows).toEqual([]);
+    expect(isNull.completeness.status).toBe("complete");
   });
 
   it("joined grouped query keeps cardinality refusals; completeness is only on success", async () => {
