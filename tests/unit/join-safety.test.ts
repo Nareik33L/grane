@@ -185,7 +185,7 @@ describe.skipIf(!available)("join safety matrix", () => {
     expect(refused.status).toBe("unsafe_query");
     expect(refused.message).toMatch(/dim_tags\.customer_id/);
     expect(refused.message).toMatch(/multiply/);
-    expect(refused.message).not.toMatch(/deduplicat/i);
+    expect(refused.message).toMatch(/will not deduplicate/);
   });
 
   it("F: duplicate PRIMARY target refuses rather than multiplying facts", async () => {

@@ -558,7 +558,13 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   for (const metric of components) {
     for (const filter of metric.filters) {
       const ref = parseColumnRef(filter.field);
-      if (ref) joinPathTo(ref.table, `metric filter "${filter.field}" of "${metric.name}"`);
+      if (!ref || ref.table === baseTable) continue;
+      const path = model.graph.findPath(baseTable, ref.table);
+      // Filters on a one_to_many path belong inside the pre-aggregation CTE,
+      // not as an outer join that would fan out the grain.
+      if (path && !path.fansOut && !path.ambiguous) {
+        joinPathTo(ref.table, `metric filter "${filter.field}" of "${metric.name}"`);
+      }
     }
   }
   if (resolved.time) {
