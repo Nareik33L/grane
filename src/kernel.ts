@@ -71,6 +71,13 @@ export interface Catalog {
   dimensions: CatalogDimension[];
   entities: CatalogEntity[];
   exploration: CatalogExploration;
+  /**
+   * Semantic provider warnings: upstream definitions (dbt, Cube, LookML, …)
+   * that Grane could not import. Lets an agent report "defined upstream but
+   * not compiled by Grane" instead of "undefined". Empty for agents with
+   * metric or dimension allow-lists, who only see their granted catalog.
+   */
+  warnings: string[];
 }
 
 export interface ExplainResult {
@@ -100,6 +107,7 @@ export interface ExplainResult {
 export interface KernelOptions {
   projectDir?: string;
   schema?: DatabaseSchema;
+  /** Provider-only load warnings (see LoadedConfig.providerWarnings). Surfaced in catalog(). */
   providerWarnings?: string[];
   now?: Date;
   agent?: AgentGrant | null;
@@ -254,7 +262,14 @@ export class GraneKernel {
         description: e.config.description ?? null,
         source: e.config.source ?? { provider: "native" },
       }));
-    return { server: this.serverInfo(), metrics, dimensions, entities };
+    return { server: this.serverInfo(), metrics, dimensions, entities, warnings: this.catalogWarnings(search) };
+  }
+
+  private catalogWarnings(search?: string): string[] {
+    if (this.agent?.metrics || this.agent?.dimensions) return [];
+    if (!search) return [...this.providerWarnings];
+    const term = search.toLowerCase();
+    return this.providerWarnings.filter((w) => w.toLowerCase().includes(term));
   }
 
   async catalog(search?: string): Promise<Catalog> {

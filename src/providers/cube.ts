@@ -1,7 +1,7 @@
 import { relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { configError } from "../errors.js";
-import type { SemanticProviderConfig } from "../config/schema.js";
+import type { MetricFilterItem, SemanticProviderConfig } from "../config/schema.js";
 import type { ProviderContext, SemanticContribution } from "./types.js";
 import { emptyContribution, withSource } from "./types.js";
 import {
@@ -10,7 +10,9 @@ import {
   isDir,
   isFile,
   isRecord,
+  metricFilters,
   parseAggExpression,
+  parseLiteral,
   readText,
   simpleColumn,
   specRoot,
@@ -21,31 +23,55 @@ import {
   walkYamlFiles,
 } from "./helpers.js";
 
+/** `{CUBE}.col`, `{CUBE.col}`, `{other}.col`, `{other.col}` → cube + column. */
+function cubeIdent(raw: string, cubeName: string): { cube: string; column: string } | null {
+  const cubeField = raw.match(/^\{\s*CUBE\.(\w+)\s*\}$/i);
+  if (cubeField) return { cube: cubeName, column: cubeField[1]! };
+  const cubeDot = raw.match(/^\{\s*CUBE\s*\}\.(\w+)$/i);
+  if (cubeDot) return { cube: cubeName, column: cubeDot[1]! };
+  const otherField = raw.match(/^\{\s*(\w+)\.(\w+)\s*\}$/);
+  if (otherField) return { cube: otherField[1]!, column: otherField[2]! };
+  const otherDot = raw.match(/^\{\s*(\w+)\s*\}\.(\w+)$/);
+  if (otherDot) return { cube: otherDot[1]!, column: otherDot[2]! };
+  return null;
+}
+
 function parseJoinSql(
   sql: string,
   cubeName: string,
   cubeTable: string,
 ): { from: string; to: string } | null {
   const text = sql.replace(/\s+/g, " ").trim();
-  const ident = (raw: string): { cube: string; column: string } | null => {
-    const cubeField = raw.match(/^\{\s*CUBE\.(\w+)\s*\}$/i);
-    if (cubeField) return { cube: cubeName, column: cubeField[1]! };
-    const cubeDot = raw.match(/^\{\s*CUBE\s*\}\.(\w+)$/i);
-    if (cubeDot) return { cube: cubeName, column: cubeDot[1]! };
-    const otherField = raw.match(/^\{\s*(\w+)\.(\w+)\s*\}$/);
-    if (otherField) return { cube: otherField[1]!, column: otherField[2]! };
-    const otherDot = raw.match(/^\{\s*(\w+)\s*\}\.(\w+)$/);
-    if (otherDot) return { cube: otherDot[1]!, column: otherDot[2]! };
-    return null;
-  };
   const parts = text.split(/\s*=\s*/);
   if (parts.length !== 2) return null;
-  const left = ident(parts[0]!.trim());
-  const right = ident(parts[1]!.trim());
+  const left = cubeIdent(parts[0]!.trim(), cubeName);
+  const right = cubeIdent(parts[1]!.trim(), cubeName);
   if (!left || !right) return null;
   const leftTable = left.cube === cubeName ? cubeTable : left.cube;
   const rightTable = right.cube === cubeName ? cubeTable : right.cube;
   return { from: `${leftTable}.${left.column}`, to: `${rightTable}.${right.column}` };
+}
+
+/**
+ * Cube measure `filters: [{ sql: "{CUBE}.status = 'completed'" }]` → Grane
+ * metric filters. Only same-cube `=` / `!=` / `<>` against a literal, joined
+ * by `and`, is translated; anything else returns null so the measure is
+ * skipped rather than imported without its filter.
+ */
+function parseCubeFilterSql(sql: string, cubeName: string, cubeTable: string): MetricFilterItem[] | null {
+  const text = sql.replace(/\s+/g, " ").trim();
+  if (!text || /\bor\b/i.test(text)) return null;
+  const items: MetricFilterItem[] = [];
+  for (const part of text.split(/\s+and\s+/i)) {
+    const match = part.trim().match(/^(.+?)\s*(!=|<>|=)\s*(.+)$/);
+    if (!match) return null;
+    const ident = cubeIdent(match[1]!.trim(), cubeName);
+    if (!ident || ident.cube !== cubeName) return null;
+    const value = parseLiteral(match[3]!);
+    if (value === undefined) return null;
+    items.push({ field: `${cubeTable}.${ident.column}`, operator: match[2] === "=" ? "=" : "!=", value });
+  }
+  return items;
 }
 
 function extractBrace(text: string, openAt: number): string | null {
@@ -67,6 +93,28 @@ function jsField(body: string, key: string): string | undefined {
 
 function jsBool(body: string, key: string): boolean {
   return new RegExp(`${key}\\s*:\\s*true\\b`).test(body);
+}
+
+/** `filters: [{ sql: \`${CUBE}.status = 'completed'\` }]` → the sql strings, `${X}` normalised to `{X}`. */
+function jsFilterSqls(body: string): { sql: string }[] {
+  const match = body.match(/filters\s*:\s*\[/);
+  if (!match || match.index === undefined) return [];
+  let depth = 1;
+  let i = match.index + match[0].length;
+  const start = i;
+  while (i < body.length && depth > 0) {
+    if (body[i] === "[") depth += 1;
+    else if (body[i] === "]") depth -= 1;
+    i += 1;
+  }
+  const inner = body.slice(start, i - 1);
+  const out: { sql: string }[] = [];
+  const re = /sql\s*:\s*(`|'|")((?:\\.|(?!\1)[^\\])*)\1/g;
+  let hit: RegExpExecArray | null;
+  while ((hit = re.exec(inner))) {
+    out.push({ sql: hit[2]!.replace(/\$\{([^}]+)\}/g, "{$1}") });
+  }
+  return out;
 }
 
 function jsNamedObjects(body: string): { name: string; body: string }[] {
@@ -115,6 +163,7 @@ export function parseCubeJavaScript(text: string): Record<string, unknown>[] {
       sql: jsField(m.body, "sql"),
       type: jsField(m.body, "type") ?? "count",
       title: jsField(m.body, "title"),
+      filters: jsFilterSqls(m.body),
     }));
     const joins = jsNamedObjects(jsSection(body, "joins") ?? "").map((j) => ({
       name: j.name,
@@ -239,6 +288,22 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
           out.warnings.push(`Skipping Cube measure "${name}.${measureName}": sql is not a simple column.`);
           continue;
         }
+        const filterItems: MetricFilterItem[] = [];
+        let filtersOk = true;
+        for (const filter of asArray(measure.filters)) {
+          const filterSql = isRecord(filter) ? str(filter.sql) : undefined;
+          const translated = filterSql ? parseCubeFilterSql(filterSql, name, table) : null;
+          if (!translated) {
+            out.warnings.push(
+              `Skipping Cube measure "${name}.${measureName}": filter ${JSON.stringify(filterSql ?? filter)} is not a ` +
+                `simple {CUBE}.column = 'value' condition. Grane will not import the measure without its filter.`,
+            );
+            filtersOk = false;
+            break;
+          }
+          filterItems.push(...translated);
+        }
+        if (!filtersOk) continue;
         let published = measureName;
         if (published in out.metrics) published = `${name}_${measureName}`;
         const timeDim = asArray(cube.dimensions).find((d) => isRecord(d) && str(d.type)?.toLowerCase() === "time");
@@ -250,6 +315,7 @@ export function loadCubeProvider(spec: SemanticProviderConfig, ctx: ProviderCont
             type: agg,
             sql: sqlRef(parsed?.table ?? table, column),
             time_dimension: timeCol ? sqlRef(table, timeCol) : undefined,
+            filters: metricFilters(filterItems),
             synonyms: str(measure.title) && str(measure.title) !== measureName ? [str(measure.title)!] : [],
             status: "approved" as const,
           },

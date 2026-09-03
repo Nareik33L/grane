@@ -13,6 +13,17 @@ export interface MfDimension {
   expr: string;
 }
 
+/**
+ * MetricFlow `non_additive_dimension`: the measure must not be summed across
+ * this time dimension (balances, MRR snapshots). Grane cannot reproduce the
+ * window semantics generically, so such measures are skipped, never summed.
+ */
+export interface MfNonAdditive {
+  name: string;
+  windowChoice: string;
+  windowGroupings: string[];
+}
+
 export interface MfMeasure {
   name: string;
   agg: string;
@@ -22,6 +33,7 @@ export interface MfMeasure {
   filter?: string;
   description?: string;
   label?: string;
+  nonAdditive?: MfNonAdditive;
 }
 
 export interface MfMetric {
@@ -36,6 +48,7 @@ export interface MfMetric {
   aggTimeDimension?: string;
   numerator?: string;
   denominator?: string;
+  nonAdditive?: MfNonAdditive;
   /** Semantic model this simple metric belongs to, when known. */
   semanticModel?: string;
   sourcePath: string;

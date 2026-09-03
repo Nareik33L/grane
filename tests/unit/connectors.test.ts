@@ -150,6 +150,86 @@ describe("Cube JavaScript", () => {
   });
 });
 
+describe("Cube measure filters", () => {
+  function cubeDir(files: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), "grane-cube-filters-"));
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+    return dir;
+  }
+
+  it("imports simple {CUBE}.column filters and never drops a filter silently", () => {
+    const dir = cubeDir({
+      "orders.yml": `
+cubes:
+  - name: orders
+    sql_table: public.orders
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: status
+        sql: status
+        type: string
+    measures:
+      - name: revenue
+        sql: net_amount
+        type: sum
+      - name: completed_revenue
+        sql: net_amount
+        type: sum
+        filters:
+          - sql: "{CUBE}.status = 'completed'"
+      - name: live_revenue
+        sql: net_amount
+        type: sum
+        filters:
+          - sql: "{CUBE}.status <> 'cancelled'"
+          - sql: "{CUBE}.is_test = false"
+      - name: either_revenue
+        sql: net_amount
+        type: sum
+        filters:
+          - sql: "{CUBE}.status = 'completed' OR {CUBE}.status = 'shipped'"
+      - name: cross_cube
+        sql: net_amount
+        type: sum
+        filters:
+          - sql: "{customers}.country = 'DE'"
+`,
+    });
+    const contribution = loadCubeProvider({ type: "cube", path: dir }, { projectDir: dir });
+    expect(contribution.metrics.revenue?.filters).toBeUndefined();
+    expect(contribution.metrics.completed_revenue?.filters).toEqual({ "orders.status": "completed" });
+    expect(contribution.metrics.live_revenue?.filters).toEqual([
+      { field: "orders.status", operator: "!=", value: "cancelled" },
+      { field: "orders.is_test", operator: "=", value: false },
+    ]);
+    expect(contribution.metrics.either_revenue).toBeUndefined();
+    expect(contribution.metrics.cross_cube).toBeUndefined();
+    expect(contribution.warnings.filter((w) => w.includes("Grane will not import the measure without its filter"))).toHaveLength(2);
+  });
+
+  it("reads filters from cube() JavaScript template strings", () => {
+    const dir = cubeDir({
+      "Orders.js": `
+cube('orders', {
+  sql_table: 'public.orders',
+  dimensions: { id: { sql: 'id', type: 'number', primary_key: true } },
+  measures: {
+    completed_count: { type: 'count', filters: [{ sql: \`\${CUBE}.status = 'completed'\` }] },
+    odd_count: { type: 'count', filters: [{ sql: \`LOWER(\${CUBE}.status) = 'completed'\` }] },
+  },
+});
+`,
+    });
+    const contribution = loadCubeProvider({ type: "cube", path: dir }, { projectDir: dir });
+    expect(contribution.metrics.completed_count?.filters).toEqual({ "orders.status": "completed" });
+    expect(contribution.metrics.odd_count).toBeUndefined();
+    expect(contribution.warnings.some((w) => w.includes('"orders.odd_count"'))).toBe(true);
+  });
+});
+
 describe("Malloy", () => {
   it("imports table() sources, measures and join_one", () => {
     const contribution = loadMalloyProvider({ path: malloyShop }, { projectDir: malloyShop });

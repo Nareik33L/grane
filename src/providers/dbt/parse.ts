@@ -9,6 +9,7 @@ import {
   type MfEntity,
   type MfMeasure,
   type MfMetric,
+  type MfNonAdditive,
   type MfSemanticModel,
 } from "./graph.js";
 
@@ -201,6 +202,17 @@ function parseLegacyDimension(raw: unknown): MfDimension | null {
   return { name, type, expr };
 }
 
+function parseNonAdditive(raw: unknown): MfNonAdditive | undefined {
+  if (!isRecord(raw)) return undefined;
+  const name = str(raw.name);
+  if (!name) return undefined;
+  return {
+    name,
+    windowChoice: (str(raw.window_choice) ?? "min").toLowerCase(),
+    windowGroupings: asArray(raw.window_groupings).map(str).filter((g): g is string => Boolean(g)),
+  };
+}
+
 function parseMeasure(raw: unknown): MfMeasure | null {
   if (!isRecord(raw)) return null;
   const name = str(raw.name);
@@ -215,6 +227,7 @@ function parseMeasure(raw: unknown): MfMeasure | null {
     filter: str(raw.filter),
     description: str(raw.description),
     label: str(raw.label),
+    nonAdditive: parseNonAdditive(raw.non_additive_dimension),
   };
 }
 
@@ -234,6 +247,7 @@ function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: st
     aggTimeDimension: str(raw.agg_time_dimension),
     numerator: metricRef(raw.numerator ?? nested(raw, "type_params", "numerator")),
     denominator: metricRef(raw.denominator ?? nested(raw, "type_params", "denominator")),
+    nonAdditive: parseNonAdditive(raw.non_additive_dimension ?? nested(raw, "type_params", "non_additive_dimension")),
     semanticModel,
     sourcePath,
   };

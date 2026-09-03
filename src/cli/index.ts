@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Command } from "commander";
 import { stringify as stringifyYaml } from "yaml";
-import { loadConfig } from "../config/load.js";
+import { loadConfig, type LoadedConfig } from "../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
@@ -31,12 +31,17 @@ function projectDir(): string {
   return resolve(program.opts<{ project: string }>().project);
 }
 
-function loadKernel(): GraneKernel {
+function loadProject(): { kernel: GraneKernel; loaded: LoadedConfig } {
   const loaded = loadConfig(projectDir());
-  return new GraneKernel(loaded.config, {
+  const kernel = new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
-    providerWarnings: loaded.warnings,
+    providerWarnings: loaded.providerWarnings,
   });
+  return { kernel, loaded };
+}
+
+function loadKernel(): GraneKernel {
+  return loadProject().kernel;
 }
 
 function fail(err: unknown): never {
@@ -196,7 +201,7 @@ program
   .description("Validate the semantic model (structure, references, join safety)")
   .option("--offline", "skip live database schema checks")
   .action(async (options: { offline?: boolean }) => {
-    const kernel = loadKernel();
+    const { kernel, loaded } = loadProject();
     try {
       const schema = options.offline ? undefined : await kernel.introspectSchema();
       const report = kernel.validate(schema);
@@ -224,9 +229,9 @@ program
       console.log(`${report.relationshipCount} relationships defined`);
       const providers = kernel.serverInfo().semantic_providers;
       console.log(`providers     ${providers.join(", ")}`);
-      if (kernel.providerWarnings.length > 0) {
+      if (loaded.warnings.length > 0) {
         console.log("");
-        for (const warning of kernel.providerWarnings) {
+        for (const warning of loaded.warnings) {
           console.log(`WARNING ${warning}`);
         }
       }
@@ -353,7 +358,7 @@ program
   .option("--stdio", "serve MCP over stdio (for local agent configs)")
   .option("--port <port>", "HTTP port", "8080")
   .action(async (options: { stdio?: boolean; port: string }) => {
-    const kernel = loadKernel();
+    const { kernel, loaded } = loadProject();
     try {
       if (options.stdio) {
         await serveStdio(kernel);
@@ -364,6 +369,8 @@ program
       const catalog = await kernel.catalog();
       const agents = kernel.config.auth.agents.length;
       console.log("Grane MCP Server\n");
+      for (const warning of loaded.warnings) console.error(`WARNING ${warning}`);
+      if (loaded.warnings.length > 0) console.log("");
       console.log(`Database      ${kernel.config.connection.type}`);
       console.log(`Providers     ${kernel.serverInfo().semantic_providers.join(", ")}`);
       console.log(

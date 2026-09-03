@@ -71,7 +71,7 @@ agent tokens: [production.md](production.md).
 
 | Tool | Input | Returns |
 | --- | --- | --- |
-| `catalog` | `{ search? }` | metrics, dimensions, entities, explorable columns, server capabilities |
+| `catalog` | `{ search? }` | metrics, dimensions, entities, explorable columns, server capabilities, `warnings` (upstream definitions Grane could not import; empty for allow-listed agents) |
 | `query` | `{ query: QueryModelV1 }` | trust headline, then rows + `trust` + provenance |
 | `validate` | `{ query: QueryModelV1 }` | dry-run with trust headline and SQL, or structured refusal |
 | `explain` | `{ query: QueryModelV1 }` | trust headline, definitions, join plan, SQL (no execution) |

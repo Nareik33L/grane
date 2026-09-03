@@ -1,7 +1,7 @@
 {
   "name": "grane-analytics",
   "version": "0.6.4",
-  "description": "Open-source deterministic analytics harness for AI agents. Connect your warehouse, define business metrics in code, and let MCP agents query them — plus permitted raw warehouse columns, clearly labeled.",
+  "description": "Open-source analytics runtime for AI agents. Connect your warehouse and the semantic definitions you already have (dbt, Cube, LookML, Malloy, Ossie, or Grane YAML); MCP agents send intent, Grane compiles and executes deterministically — plus permitted raw warehouse columns, clearly labeled.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {

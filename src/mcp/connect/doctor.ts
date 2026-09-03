@@ -25,7 +25,10 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
 
   try {
     const loaded = loadConfig(projectDir);
-    kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
+    kernel = new GraneKernel(loaded.config, {
+      projectDir: loaded.projectDir,
+      providerWarnings: loaded.providerWarnings,
+    });
     checks.push({
       name: "project",
       ok: true,

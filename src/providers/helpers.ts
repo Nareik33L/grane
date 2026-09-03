@@ -1,6 +1,32 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import type { MetricConfig, MetricFilterItem } from "../config/schema.js";
 import type { ProviderContext } from "./types.js";
+
+/**
+ * The map form of `filters` is equality-only; collapsing a `!=` filter into it
+ * would invert the metric. Use the map form when every operator is `=` (keeps
+ * definition_version stable for existing imports) and the list form otherwise.
+ */
+export function metricFilters(items: MetricFilterItem[]): MetricConfig["filters"] {
+  if (items.length === 0) return undefined;
+  if (items.every((f) => f.operator === "=")) {
+    return Object.fromEntries(items.map((f) => [f.field, f.value as string | number | boolean | null]));
+  }
+  return items;
+}
+
+/** `'x'`, `"x"`, `42`, `true` → scalar; anything else (columns, functions) → undefined. */
+export function parseLiteral(raw: string): string | number | boolean | null | undefined {
+  const text = raw.trim();
+  const quoted = text.match(/^'((?:[^'\\]|\\.)*)'$/) ?? text.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (quoted) return quoted[1]!;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  if (/^true$/i.test(text)) return true;
+  if (/^false$/i.test(text)) return false;
+  if (/^null$/i.test(text)) return null;
+  return undefined;
+}
 
 export const SKIP_DIRS = new Set([
   "target",

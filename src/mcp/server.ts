@@ -72,6 +72,8 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
       description:
         "List approved metrics, dimensions and entities in the Grane semantic model, with " +
         "definitions, synonyms, units, available dimensions per metric, and server capabilities. " +
+        "`warnings` lists upstream definitions (dbt, Cube, LookML, …) that Grane could not import; " +
+        "if a user asks for one of those, say it exists upstream but Grane does not compile it. " +
         "When exploration is enabled, also lists permitted ungoverned warehouse columns. " +
         "Optionally filter by a search term (matches names, synonyms, descriptions and raw columns).",
       inputSchema: {

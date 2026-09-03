@@ -1,6 +1,7 @@
 # Grane
 
-The open-source analytics harness for AI agents.
+The open-source analytics runtime for AI agents.
+Connect the analytics stack you already have.
 
 **Agents reason. Grane executes.**
 
@@ -9,12 +10,14 @@ That doesn't mean it knows what Revenue means.
 
 ```text
 Agent → MCP → Grane → Warehouse
+               ↑
+  dbt · Cube · LookML · Malloy · Ossie · Grane YAML
 ```
 
 - Deterministic business metrics
 - Safe joins and grain
 - Governed + exploratory analytics
-- Works with existing semantic definitions
+- Reads the semantic definitions you already maintain; Grane YAML when you have none
 - No LLM inside Grane
 - Fully self-hosted
 
@@ -65,6 +68,8 @@ AI agents can already write SQL. Your database does not know the approved defini
 
 Grane sits between the warehouse and the agent. The agent sends intent (`revenue by country`, `period: last_month`). Grane resolves the definition, plans joins, compiles SQL, and executes it read-only. Permitted raw columns can be explored without writing SQL, and every result is labelled `governed`, `mixed`, or `exploratory`.
 
+The definitions come from the semantic system your company already trusts — dbt/MetricFlow, Cube, LookML, Malloy, or Apache Ossie — or from Grane's own YAML when there is none. Grane reads them at load and compiles and executes every request itself; it never calls those systems at query time, and any definition it cannot compile deterministically is skipped with a warning agents can see, never guessed.
+
 If Grane cannot safely resolve the meaning, it **refuses**. That is a feature.
 
 Connect Claude, ChatGPT, Gemini, Cursor, or any MCP agent. Grane does not need their API keys.
@@ -84,18 +89,26 @@ grane mcp connect cursor
 
 Use a **read-only database user**. Grane also wraps every query in a `READ ONLY` transaction with a statement timeout.
 
+Already have dbt, Cube, LookML, Malloy, or Ossie? Point `providers:` in
+`grane.yml` at that project instead of writing `metrics.yml` — see
+[docs/providers.md](docs/providers.md). Grane YAML is still there for anything
+the upstream system does not define.
+
 ## Architecture
 
 ```text
 Claude / ChatGPT / Cursor / internal agents
                  |
-                 |  MCP
+                 |  MCP  (intent, never SQL)
                  v
-              GRANE          metrics, dimensions, relationships,
-                 |           deterministic compiler, validation,
-                 |  SQL      join/grain safety, provenance
+              GRANE          resolve → validate → plan joins/grain →
+                 |           compile SQL → execute read-only →
+                 |  SQL      provenance + audit; refuse otherwise
                  v
            Your warehouse
+
+  Definitions loaded at start from:
+  dbt / MetricFlow · Cube · LookML · Malloy · Apache Ossie · Grane YAML
 ```
 
 Four MCP tools: `catalog`, `query`, `validate`, `explain`. Agents send analytical intent, not SQL.
@@ -139,7 +152,7 @@ Methodology: [`tests/benchmark/README.md`](tests/benchmark/README.md).
 
 ## Warehouses and semantic providers
 
-Postgres is bundled. Other engines are optional installs. dbt, Cube, LookML, Ossie, and Malloy can be connected instead of copying YAML. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
+Postgres is bundled. Other engines are optional installs. dbt, Cube, LookML, Ossie, and Malloy can be connected instead of copying YAML. Grane imports the subset it can compile deterministically (simple column aggregates, ratios, `=`/`!=` filters, `${table.column}` references); anything else is skipped with a warning shown in `grane validate` and in the agent's `catalog()`. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
 
 Production HTTP (Docker, TLS, agent tokens, audit log): [docs/production.md](docs/production.md).
 

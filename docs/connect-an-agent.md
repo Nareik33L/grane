@@ -1,6 +1,6 @@
 # Connect an AI agent to Grane
 
-Grane is the analytics harness between **your AI agent** and **your warehouse**.
+Grane is the analytics runtime between **your AI agent** and **your warehouse**.
 This guide is client-agnostic: it applies to ChatGPT, Claude, Gemini, Cursor,
 or any MCP-compatible agent.
 
@@ -25,7 +25,7 @@ YOUR POSTGRES  ──your data──►  DATABASE_URL / read-only DB user
 | Component | Needs an LLM API key? | What it needs |
 | --- | --- | --- |
 | ChatGPT, Claude, Gemini, Cursor | **Yes** — your account or API key | Normal sign-in / API billing on the agent side |
-| Grane | **No** | A Postgres connection string and YAML metric definitions |
+| Grane | **No** | A read-only warehouse connection and semantic definitions — your existing dbt / Cube / LookML / Malloy / Ossie project, or Grane YAML |
 | Your database | **No** | A read-only Postgres user Grane can query |
 
 Grane never calls OpenAI, Anthropic, or Google. You pay for inference on the
@@ -105,7 +105,9 @@ Use a **read-only** database user. Grane also wraps every query in a
 `READ ONLY` transaction, but the database remains the final security boundary.
 
 Define your metrics in `metrics.yml`, dimensions in `dimensions.yml`, and
-relationships in `relationships.yml`. Then:
+relationships in `relationships.yml` — or, if the company already defines them
+in dbt, Cube, LookML, Malloy, or Ossie, point `providers:` at that project
+instead ([providers.md](providers.md)). Then:
 
 ```bash
 grane validate
@@ -401,7 +403,7 @@ Example provenance in the response:
 | ChatGPT can't connect | localhost or HTTP-only URL | Deploy Grane with public **HTTPS** |
 | Tools don't appear | Config not reloaded | Restart the agent app; open a **new chat** |
 | Query fails | Database not reachable | Check `DATABASE_URL`, run `grane validate` |
-| "undefined_metric" | Metric not in YAML | Define it in `metrics.yml`, run `grane validate` |
+| "undefined_metric" | Not defined, or defined upstream (dbt/Cube/…) but skipped at load | Check `catalog()` `warnings` or `grane validate`; define it in `metrics.yml` if it is genuinely missing |
 
 ---
 

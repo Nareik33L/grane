@@ -22,7 +22,13 @@ export interface LoadedConfig {
   config: GraneConfig;
   projectDir: string;
   files: string[];
+  /** Every load warning (provider skips plus auth config lint). Operator-facing. */
   warnings: string[];
+  /**
+   * Warnings raised by semantic providers only (definitions Grane could not
+   * import). Safe to show agents; never mentions auth agents or tokens.
+   */
+  providerWarnings: string[];
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
@@ -195,15 +201,16 @@ export function loadConfig(projectDir: string): LoadedConfig {
   const config = finalParsed.data;
   applyAuditEnvOverrides(config);
   validateAuthConfig(config);
+  const authWarnings: string[] = [];
   for (const agent of config.auth.agents) {
     for (const name of agent.metrics ?? []) {
       if (!(name in config.metrics)) {
-        combined.warnings.push(`auth agent "${agent.id}" allows metric "${name}", which is not a defined metric.`);
+        authWarnings.push(`auth agent "${agent.id}" allows metric "${name}", which is not a defined metric.`);
       }
     }
     for (const name of agent.dimensions ?? []) {
       if (!(name in config.dimensions)) {
-        combined.warnings.push(
+        authWarnings.push(
           `auth agent "${agent.id}" allows dimension "${name}", which is not a defined dimension.`,
         );
       }
@@ -220,5 +227,11 @@ export function loadConfig(projectDir: string): LoadedConfig {
     config.connection.path = resolve(dir, duckPath);
   }
 
-  return { config, projectDir: dir, files, warnings: combined.warnings };
+  return {
+    config,
+    projectDir: dir,
+    files,
+    warnings: [...combined.warnings, ...authWarnings],
+    providerWarnings: combined.warnings,
+  };
 }

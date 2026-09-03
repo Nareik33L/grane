@@ -82,7 +82,7 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
 
   const kernel = new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
-    providerWarnings: loaded.warnings,
+    providerWarnings: loaded.providerWarnings,
   });
 
   try {
