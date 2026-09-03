@@ -2,15 +2,26 @@
 
 ## Unreleased
 
-- Runtime cardinality checks are now scoped to the query's **analytical
-  population** — the fact-side rows after query-level time bounds and base-table
-  filters (and after snapshot selection for semi-additive metrics). Duplicates
-  in dimension rows that are never reached by any participating FK no longer
-  cause a false `unsafe_query` refusal. Empty-population queries (no relevant
-  FK values) are governed-safe; a grouped query whose analytical GROUP BY
-  produces zero rows still observes the guard through a wrapper CTE so an
-  empty result cannot bypass a genuine violation. See
-  `tests/unit/query-cardinality.test.ts` for the adversarial matrix.
+- Runtime cardinality checks are scoped to the rows a relationship could
+  actually multiply: the **metric-contributing population** (base rows inside
+  the time bounds and base-table filters that can contribute to at least one
+  requested metric — its own base-table filters and time window, the selected
+  snapshot rows for semi-additive metrics; the union across metrics and ratio
+  components) and, for every hop, the **reachable population** of the joined
+  table (rows referenced by a non-NULL FK of the previous hop's population,
+  the same rule at every depth). Duplicated keys that no contributing fact
+  reaches — unused, filtered out, outside the time range, not
+  snapshot-selected, behind another branch of an earlier hop, or reachable
+  only from rows a metric filter excludes — no longer cause a false
+  `unsafe_query`. Reachable duplicates still refuse, including when a
+  joined-dimension `WHERE` would hide the multiplied rows. Empty-population
+  queries are governed-safe; a grouped query whose GROUP BY produces zero rows
+  still observes its guards. Every guard reports the metrics it protects, its
+  relationship path and its key source. Bind parameters are numbered in
+  textual order, so `?`-placeholder warehouses (MySQL, Snowflake, Databricks)
+  bind correctly with the layered statement. See
+  `tests/unit/query-cardinality.test.ts` and
+  `tests/unit/cardinality-populations.test.ts`.
 
 - Join execution is now part of the governed contract, not only join keys.
   Dimension traversal uses `LEFT JOIN` so unmatched facts stay in the

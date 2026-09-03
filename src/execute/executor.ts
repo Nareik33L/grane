@@ -40,14 +40,19 @@ export function newQueryId(): string {
 /**
  * A many_to_one relationship promises that the joined key is unique in the
  * target table. The compiled statement measures that promise against the keys
- * that actually participate in this execution's analytical population.
+ * that metric-contributing facts actually reach through the relationship path
+ * (see `CardinalityGuard.keySource` / `reach`).
  *
  * Guard semantics (post-wrapper):
- *   NULL  → no relevant FK values in the population (empty pop or all NULLs)
- *           → safe; no violation is possible.
- *   1     → every participating key maps to exactly one target row → safe.
- *   > 1   → at least one participating key maps to multiple target rows;
- *           the join would multiply the matching facts → refuse.
+ *   NULL  → no contributing fact reaches the table (empty population, NULL or
+ *           unmatched FKs, branch not reached) → safe; nothing to multiply.
+ *   1     → every reachable key maps to exactly one target row → safe.
+ *   > 1   → a reachable key maps to multiple target rows; the join would
+ *           multiply contributing facts → refuse.
+ *
+ * Every guard is checked. A violated earlier hop only *adds* rows to later
+ * reachable populations, so it cannot make a later guard look safe — and its
+ * own guard refuses regardless.
  *
  * The wrapper (`__grane_card LEFT JOIN __grane_result ON TRUE`) guarantees
  * that the guard row is present even when the analytical GROUP BY produces
@@ -75,10 +80,18 @@ function assertCardinality(compiled: CompiledQuery, rows: Record<string, unknown
       throw unsafeQuery(
         `Relationship "${guard.relationship}" declares "${guard.keyColumn}" as the one side of a many_to_one join, ` +
           `but the warehouse holds up to ${observed} rows for a single "${guard.keyColumn}" value ` +
-          `among the keys that participate in this query's analytical population. ` +
-          `Joining "${guard.table}" would multiply the matching facts, so the result is refused. ` +
+          `among the keys that facts contributing to ${guard.protects.map((m) => `"${m}"`).join(", ")} reach ` +
+          `through ${guard.path.join(" -> ")}. ` +
+          `Joining "${guard.table}" would multiply those facts, so the result is refused. ` +
           `Fix the data or the relationship declaration; Grane will not deduplicate rows or pick one of them.`,
-        { relationship: guard.relationship, table: guard.table, key_column: guard.keyColumn, max_rows_per_key: observed },
+        {
+          relationship: guard.relationship,
+          table: guard.table,
+          key_column: guard.keyColumn,
+          max_rows_per_key: observed,
+          path: guard.path,
+          protects: guard.protects,
+        },
       );
     }
   }
@@ -106,16 +119,10 @@ export async function executeCompiled(
   // strip it so callers see an empty result. Applies only when the query has
   // at least one dimension (grouped query); scalar queries (no dimensions) may
   // legitimately return a single all-null metrics row (SUM of empty set).
-  if (compiled.guards.length > 0) {
-    const metricNames = new Set(Object.keys(compiled.metricVersions));
-    const dimCols = compiled.plan.columns.filter((c) => !metricNames.has(c));
-    if (dimCols.length > 0) {
-      // A wrapper-padding row has every analytical column null.
-      const analyticalCols = compiled.plan.columns;
-      rows = rows.filter((row) =>
-        analyticalCols.some((c) => row[c] !== null && row[c] !== undefined),
-      );
-    }
+  if (compiled.guards.length > 0 && compiled.plan.groupColumns.length > 0) {
+    // A wrapper-padding row has every analytical column null.
+    const analyticalCols = compiled.plan.columns;
+    rows = rows.filter((row) => analyticalCols.some((c) => row[c] !== null && row[c] !== undefined));
   }
   const provenance: Provenance = {
     query_id: newQueryId(),

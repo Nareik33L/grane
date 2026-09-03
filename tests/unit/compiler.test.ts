@@ -4,6 +4,11 @@ import { GraneError } from "../../src/errors.js";
 
 const kernel = exampleKernel();
 
+/** `$n` indices in the order they appear in the statement. */
+function placeholdersInTextualOrder(sql: string): number[] {
+  return [...sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1]));
+}
+
 describe("deterministic SQL compiler", () => {
   it("compiles revenue by country with a governed join", () => {
     const { compiled } = kernel.compile({
@@ -16,10 +21,13 @@ describe("deterministic SQL compiler", () => {
       'LEFT JOIN "public"."customers" ON "orders"."customer_id" = "customers"."id"',
     );
     expect(compiled.sql).toContain("__grane_card_customers");
-    expect(compiled.sql).toContain('SUM("orders"."net_amount") FILTER (WHERE "orders"."status" = $1)');
+    expect(compiled.sql).toContain('SUM("orders"."net_amount") FILTER (WHERE "orders"."status" = $4)');
     expect(compiled.sql).toContain('GROUP BY 1');
-    // Inclusive end date compiles to an exclusive next-day bound.
-    expect(compiled.params).toEqual(["completed", "2026-07-01", "2026-08-01"]);
+    // Placeholders are numbered in textual order: the population CTE's time
+    // bounds come first, then the contributing-population filter, then the
+    // metric FILTER. Inclusive end date compiles to an exclusive next-day bound.
+    expect(compiled.params).toEqual(["2026-07-01", "2026-08-01", "completed", "completed"]);
+    expect(placeholdersInTextualOrder(compiled.sql)).toEqual([1, 2, 3, 4]);
     expect(compiled.sql).not.toMatch(/insert|update|delete/i);
   });
 
@@ -94,9 +102,11 @@ describe("deterministic SQL compiler", () => {
         { field: "channel", operator: "in", value: ["web", "mobile"] },
       ],
     });
-    expect(compiled.sql).toContain('"customers"."customer_type" = $2');
-    expect(compiled.sql).toContain('"orders"."channel" IN ($3, $4)');
-    expect(compiled.params).toEqual(["completed", "business", "web", "mobile"]);
+    // Base-table filter → population CTE (first in text); joined filter → result WHERE (last).
+    expect(compiled.sql).toContain('"orders"."channel" IN ($1, $2)');
+    expect(compiled.sql).toContain('"customers"."customer_type" = $5');
+    expect(compiled.params).toEqual(["web", "mobile", "completed", "completed", "business"]);
+    expect(placeholdersInTextualOrder(compiled.sql)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("enforces the configured row limit cap", () => {
