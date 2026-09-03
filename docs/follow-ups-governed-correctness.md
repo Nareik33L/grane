@@ -22,14 +22,16 @@ Resolved: week-grain compilation honours `monday` / `sunday` with an
 explicit civil-week expression on every dialect. See
 `tests/unit/week-starts.test.ts`.
 
-## 2. Row-limit truncation is weakly represented in provenance
+## 2. Row-limit truncation is weakly represented in provenance — fixed
 
-- **Observed:** `LIMIT` is applied; provenance does not state that the
-  result was truncated relative to the full population.
-- **Supported/documented:** `limits.max_rows` / query `limit` are supported.
-- **Governed-contract impact:** A truncated governed table can be presented
-  as complete.
-- **Priority:** Medium. Add an explicit `truncated` / `row_limit` field.
+Resolved: successful results carry `completeness` on the result and in
+provenance (`status: complete | truncated | unknown`, plus `limit` and
+`source`). `query.limit` is semantic top-N (complete even when more
+unbounded groups exist). Omitted `limit` uses `default_rows` as an
+execution cap; `max_rows` is the hard bound. Truncation is detected
+from `COUNT(*) OVER()` (pre-LIMIT group count), not from
+`rows.length === limit`. Trust is unchanged. See
+`tests/unit/row-limit-completeness.test.ts`.
 
 ## 3. `contains` LIKE wildcards — fixed
 

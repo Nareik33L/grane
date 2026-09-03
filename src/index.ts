@@ -27,10 +27,17 @@ export {
   type TrustLevel,
 } from "./query/model.js";
 export { trustHeadline, TRUST_HEADLINES } from "./query/trust.js";
-export { resolveQuery, type ResolvedQuery } from "./query/resolve.js";
+export { resolveQuery, resolveRowLimit, type ResolvedQuery, type RowLimitSource } from "./query/resolve.js";
 export { resolveRelativeRange, todayInTimeZone, isValidCivilDate } from "./query/time.js";
 export { compileQuery, type CompiledQuery } from "./compile/compiler.js";
-export { executeCompiled, type QueryResult, type Provenance } from "./execute/executor.js";
+export {
+  executeCompiled,
+  resultCompleteness,
+  type QueryResult,
+  type Provenance,
+  type ResultCompleteness,
+  type CompletenessStatus,
+} from "./execute/executor.js";
 export { inferRelationships, type DatabaseSchema } from "./connectors/types.js";
 export { createConnector } from "./connectors/create.js";
 export { getDialect, WAREHOUSE_TYPES } from "./connectors/dialect.js";

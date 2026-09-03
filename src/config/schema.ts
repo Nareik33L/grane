@@ -258,6 +258,11 @@ export const projectConfigSchema = z.object({
 });
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
+/**
+ * Execution row caps. `query.limit` (when set) is semantic top-N of the
+ * requested result. When omitted, `default_rows` is an execution cap, not
+ * "return every group". `max_rows` is the hard safety bound.
+ */
 export const limitsConfigSchema = z.object({
   max_rows: z.number().int().positive().default(10000),
   default_rows: z.number().int().positive().default(1000),

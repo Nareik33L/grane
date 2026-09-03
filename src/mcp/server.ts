@@ -124,7 +124,9 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
       title: "Run a governed or exploratory analytical query",
       description:
         "Execute a Grane Query Model v1 request. Grane resolves names, validates safety, compiles " +
-        "deterministic SQL, executes it read-only and returns a trust headline, then rows plus provenance. " +
+        "deterministic SQL, executes it read-only and returns a trust headline, then rows, completeness, and provenance. " +
+        "completeness.status is complete, truncated, or unknown: truncated means more rows exist than the execution cap returned. " +
+        "trust is semantic correctness, not result-set completeness. " +
         "Use raw_dimensions / raw_metrics for permitted warehouse columns that are not in the semantic model. " +
         "The first sentence of your reply to the user must be the trust headline. Put it in any chart title too.",
       inputSchema: { query: semanticQuerySchema.describe(querySchemaDescription) },
@@ -139,6 +141,7 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
           warning: result.warning,
           columns: result.columns,
           rows: result.rows,
+          completeness: result.completeness,
           notes: result.notes,
           provenance: result.provenance,
         });

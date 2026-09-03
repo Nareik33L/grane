@@ -1,5 +1,5 @@
 import { vacuousSnapshotSeriesKeys, vacuousSnapshotSeriesMessage, type SemanticModel, type Metric } from "../model/model.js";
-import type { ResolvedQuery, ResolvedFilter } from "../query/resolve.js";
+import type { ResolvedQuery, ResolvedFilter, RowLimitSource } from "../query/resolve.js";
 import { timeAlias } from "../query/resolve.js";
 import type { Edge } from "../model/graph.js";
 import type { FilterOperator, Scalar, MetricFilterItem } from "../config/schema.js";
@@ -117,6 +117,8 @@ export interface CardinalityGuard {
 
 /** Prefix of hidden columns the executor strips from results. */
 export const GUARD_PREFIX = "__grane_card_";
+/** Hidden window count of grouped rows before LIMIT; stripped before return. */
+export const RESULT_TOTAL_COLUMN = "__grane_n";
 /** Analytical population: base rows after time bounds and base-table query filters. */
 export const POP_CTE = "__grane_pop";
 /** Metric-contributing population: rows of POP_CTE that can contribute to at least one metric. */
@@ -152,6 +154,9 @@ export interface CompiledQuery {
   governed: string[];
   ungoverned: string[];
   warning: string | null;
+  /** Applied result cap (SQL LIMIT). */
+  rowLimit: number;
+  rowLimitSource: RowLimitSource;
 }
 
 /**
@@ -822,6 +827,9 @@ export function compileQuery(
   selectAliases.push(...resolved.metrics.map((m) => m.name));
   selects.push(...rawMetricSelects);
   selectAliases.push(...resolved.rawMetrics.map((m) => m.alias));
+  // Pre-LIMIT group count. Window functions run after GROUP BY and before
+  // LIMIT, so this is the size of the requested result, not the returned cap.
+  selects.push(`COUNT(*) OVER() AS ${ident(RESULT_TOTAL_COLUMN)}`);
   // Guards are emitted separately (in __grane_card CTE) when joins exist.
 
   // ---- Metric-contributing population ----
@@ -1054,6 +1062,7 @@ export function compileQuery(
 
     const outerSelects = [
       ...selectAliases.map((alias) => `${ident("__grane_result")}.${ident(alias)}`),
+      `${ident("__grane_result")}.${ident(RESULT_TOTAL_COLUMN)}`,
       ...guards.map((g) => `${ident("__grane_card")}.${ident(g.column)}`),
     ];
     const allCtes = [
@@ -1093,6 +1102,8 @@ export function compileQuery(
     governed: resolved.governed,
     ungoverned: resolved.ungoverned,
     warning: resolved.warning,
+    rowLimit: resolved.limit,
+    rowLimitSource: resolved.limitSource,
   };
 }
 

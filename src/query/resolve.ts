@@ -88,7 +88,15 @@ export interface ResolvedQuery {
   filters: ResolvedFilter[];
   time: ResolvedTime | null;
   order: { field: string; direction: "asc" | "desc" }[];
+  /** Applied result cap (`min(requested | default_rows, max_rows)`). */
   limit: number;
+  /**
+   * Why `limit` was applied. `query` is the request's own `limit` (semantic
+   * top-N). `default` is `limits.default_rows` when the request omitted
+   * `limit`. `max` is `limits.max_rows` when it bound below the requested
+   * or default cap.
+   */
+  limitSource: RowLimitSource;
   /** Base entity shared by governed metrics, or null for exploratory queries. */
   entity: string | null;
   baseTable: string;
@@ -97,6 +105,26 @@ export interface ResolvedQuery {
   governed: string[];
   ungoverned: string[];
   warning: string | null;
+}
+
+/** Why the applied result cap was chosen. */
+export type RowLimitSource = "query" | "default" | "max";
+
+/**
+ * `query.limit` is semantic top-N of the requested result. Omitting it is
+ * not "all rows": `default_rows` is an execution cap. `max_rows` is the hard
+ * safety bound and wins when it is smaller.
+ */
+export function resolveRowLimit(
+  requested: number | undefined,
+  defaultRows: number,
+  maxRows: number,
+): { limit: number; source: RowLimitSource } {
+  const uncapped = requested ?? defaultRows;
+  const limit = Math.min(uncapped, maxRows);
+  const source: RowLimitSource =
+    uncapped > maxRows ? "max" : requested != null ? "query" : "default";
+  return { limit, source };
 }
 
 export interface ResolveOptions {
@@ -386,7 +414,7 @@ export function resolveQuery(
     }
   }
 
-  const limit = Math.min(query.limit ?? defaults.defaultRows, defaults.maxRows);
+  const rowLimit = resolveRowLimit(query.limit, defaults.defaultRows, defaults.maxRows);
 
   const governedNames = [
     ...metrics.map((m) => m.name),
@@ -415,7 +443,8 @@ export function resolveQuery(
     filters,
     time,
     order: query.order,
-    limit,
+    limit: rowLimit.limit,
+    limitSource: rowLimit.source,
     entity,
     baseTable,
     notes,

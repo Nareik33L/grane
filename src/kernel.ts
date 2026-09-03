@@ -107,6 +107,9 @@ export interface ExplainResult {
   generated_sql: string;
   params: unknown[];
   notes: string[];
+  /** Planned result cap. Explain does not know whether execution will truncate. */
+  row_limit: number;
+  row_limit_source: "query" | "default" | "max";
 }
 
 export interface KernelOptions {
@@ -391,6 +394,8 @@ export class GraneKernel {
         generated_sql: compiled.sql,
         params: compiled.params,
         notes: resolved.notes,
+        row_limit: resolved.limit,
+        row_limit_source: resolved.limitSource,
       };
     } catch (err) {
       this.audit({

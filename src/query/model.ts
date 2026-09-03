@@ -97,6 +97,7 @@ export const semanticQuerySchema = z.object({
   filters: z.array(queryFilterSchema).default([]),
   time: queryTimeSchema.optional(),
   order: z.array(queryOrderSchema).default([]),
+  /** Semantic top-N of this request. Omitted means the execution default cap. */
   limit: z.number().int().positive().optional(),
 });
 export type SemanticQuery = z.infer<typeof semanticQuerySchema>;

@@ -56,6 +56,8 @@ connection:
   # ClickHouse: url (http://user:pass@host:8123) or host + database
   # Databricks: host, http_path, token, catalog, schema
 
+# default_rows: execution cap when a query omits limit (not "all rows").
+# max_rows: hard safety bound. query.limit is semantic top-N.
 limits:
   max_rows: 10000
   default_rows: 1000
