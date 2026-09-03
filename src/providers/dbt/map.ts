@@ -249,6 +249,9 @@ interface SimpleOptions {
   filters: (string | undefined)[];
   aggTimeDimension?: string;
   nonAdditive?: MfNonAdditive;
+  /** Raw `fill_nulls_with`; MetricFlow accepts an integer only. */
+  fillNullsWith?: unknown;
+  joinToTimespine?: boolean;
   sourcePath: string;
 }
 
@@ -369,6 +372,15 @@ function emitSimple(
     semi = { window, group_by: groupBy, granularity: granularity.data };
   }
 
+  // fill_nulls_with is COALESCE over the aggregate in MetricFlow; anything but an integer is not its semantics.
+  let fillNullsWith: number | undefined;
+  if (opts.fillNullsWith !== undefined && opts.fillNullsWith !== null) {
+    if (typeof opts.fillNullsWith !== "number" || !Number.isInteger(opts.fillNullsWith)) {
+      return fail(`fill_nulls_with ${JSON.stringify(opts.fillNullsWith)} is not an integer; MetricFlow accepts integers only.`);
+    }
+    fillNullsWith = opts.fillNullsWith;
+  }
+
   const synonyms = opts.label && opts.label !== name ? [opts.label] : [];
   const config: MetricConfig = withSource(
     {
@@ -381,6 +393,8 @@ function emitSimple(
       filters: filters.length > 0 ? filters : undefined,
       additive: semi ? "semi" : undefined,
       semi_additive: semi,
+      fill_nulls_with: fillNullsWith,
+      join_to_timespine: opts.joinToTimespine ? true : undefined,
       status: "approved",
     },
     { provider: ctx.provider, path: opts.sourcePath },
@@ -388,11 +402,14 @@ function emitSimple(
   out.metrics[name] = config;
 }
 
-function describeInput(input: MfMetricInput): string | null {
+function describeInput(input: MfMetricInput, measureInput = false): string | null {
   const parts: string[] = [];
   if (input.offsetWindow) parts.push(`offset_window "${input.offsetWindow}"`);
   if (input.offsetToGrain) parts.push(`offset_to_grain "${input.offsetToGrain}"`);
   if (input.alias) parts.push(`alias "${input.alias}"`);
+  // Only a measure input may carry fill_nulls_with / join_to_timespine in MetricFlow.
+  if (!measureInput && input.fillNullsWith !== undefined) parts.push(`"fill_nulls_with"`);
+  if (!measureInput && input.joinToTimespine) parts.push(`"join_to_timespine"`);
   for (const key of input.extraKeys) parts.push(`"${key}"`);
   return parts.length > 0 ? parts.join(", ") : null;
 }
@@ -412,17 +429,21 @@ function addSimpleMetric(ctx: MapContext, metric: MfMetric, model: MfSemanticMod
     if (!found) {
       return fail(`measure "${metric.measure.name}" was not found on any imported semantic model.`);
     }
-    const unsupportedInput = describeInput(metric.measure);
+    const unsupportedInput = describeInput(metric.measure, true);
     if (unsupportedInput) return fail(`measure input uses ${unsupportedInput}, which Grane does not model.`);
     if (metric.nonAdditive && found.measure.nonAdditive) {
       return fail(`non_additive_dimension is declared on both the metric and measure "${found.measure.name}".`);
     }
+    // With a measure input, MetricFlow takes fill_nulls_with / join_to_timespine from the input and ignores
+    // the metric-level fields (validation warns about them).
     emitSimple(ctx, metric.name, found.model, found.measure.agg, found.measure.expr, {
       description: metric.description ?? found.measure.description,
       label: metric.label ?? found.measure.label,
       filters: [found.measure.filter, metric.measure.filter, metric.filter],
       aggTimeDimension: metric.aggTimeDimension ?? found.measure.aggTimeDimension,
       nonAdditive: metric.nonAdditive ?? found.measure.nonAdditive,
+      fillNullsWith: metric.measure.fillNullsWith,
+      joinToTimespine: metric.measure.joinToTimespine,
       sourcePath: metric.sourcePath,
     });
     return;
@@ -439,6 +460,8 @@ function addSimpleMetric(ctx: MapContext, metric: MfMetric, model: MfSemanticMod
     filters: [metric.filter],
     aggTimeDimension: metric.aggTimeDimension,
     nonAdditive: metric.nonAdditive,
+    fillNullsWith: metric.fillNullsWith,
+    joinToTimespine: metric.joinToTimespine,
     sourcePath: metric.sourcePath,
   });
 }
@@ -447,10 +470,13 @@ function addCompoundMetric(ctx: MapContext, metric: MfMetric): void {
   const { out } = ctx;
   const fail = (reason: string) => ctx.skip("metric", metric.name, reason, metric.sourcePath);
 
+  if (metric.fillNullsWith !== undefined || metric.joinToTimespine) {
+    return fail(`fill_nulls_with / join_to_timespine are only defined for simple metrics; MetricFlow rejects them on type "${metric.type}".`);
+  }
   let numerator = metric.numerator;
   let denominator = metric.denominator;
   if (metric.type === "derived") {
-    const complexInput = (metric.inputMetrics ?? []).map(describeInput).find((d) => d !== null);
+    const complexInput = (metric.inputMetrics ?? []).map((input) => describeInput(input)).find((d) => d !== null);
     if (complexInput) {
       return fail(`derived metric inputs use ${complexInput}; offsets and aliases are not compiled by Grane.`);
     }

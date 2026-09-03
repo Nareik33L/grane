@@ -178,6 +178,30 @@ models:
         type: simple
         agg: sum
         expr: paid_amount
+      # fill_nulls_with: COALESCE over the aggregate (MetricFlow semantics, no time spine involved).
+      - name: revenue_filled
+        type: simple
+        agg: sum
+        expr: paid_amount
+        fill_nulls_with: 0
+      - name: revenue_filled_minus_one
+        type: simple
+        agg: sum
+        expr: paid_amount
+        fill_nulls_with: -1
+      # join_to_timespine: a per-period breakdown would need rows Grane cannot generate.
+      - name: invoice_count_dense
+        type: simple
+        agg: count
+        expr: 1
+        join_to_timespine: true
+        fill_nulls_with: 0
+      # MetricFlow only accepts an integer here.
+      - name: revenue_bad_fill
+        type: simple
+        agg: sum
+        expr: paid_amount
+        fill_nulls_with: 0.5
       # Refusals: unsupported predicates must not degrade to another predicate.
       - name: large_invoice_amount
         type: simple

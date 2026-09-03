@@ -125,6 +125,19 @@ export const metricConfigSchema = z
      */
     additive: z.enum(["full", "semi", "none"]).optional(),
     semi_additive: semiAdditiveConfigSchema.optional(),
+    /**
+     * Value the aggregate takes when it aggregates no rows (SUM/MIN/MAX/AVG
+     * over an empty set is NULL in SQL). Compiled as COALESCE(<aggregate>, n)
+     * — what MetricFlow does with its `fill_nulls_with`.
+     */
+    fill_nulls_with: z.number().int().optional(),
+    /**
+     * Upstream declares the metric dense over time: a per-period breakdown
+     * includes periods with no rows (zero-filled). Grane does not generate
+     * empty periods, so per-period breakdowns of such a metric are refused
+     * rather than returned sparse; totals and non-time groupings are exact.
+     */
+    join_to_timespine: z.boolean().optional(),
     unit: z.string().optional(),
     status: metricStatusSchema.default("approved"),
     synonyms: z.array(z.string()).default([]),

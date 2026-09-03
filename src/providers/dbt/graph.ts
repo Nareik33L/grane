@@ -52,6 +52,9 @@ export interface MfMetricInput {
   filter?: string;
   offsetWindow?: string;
   offsetToGrain?: string;
+  /** Legacy spec: `type_params.measure.fill_nulls_with` (integer) / `join_to_timespine`. */
+  fillNullsWith?: unknown;
+  joinToTimespine?: boolean;
   /** Any other key MetricFlow accepts on an input that Grane does not model. */
   extraKeys: string[];
 }
@@ -71,6 +74,9 @@ export interface MfMetric {
   /** Derived metric inputs (`input_metrics` / legacy `type_params.metrics`). */
   inputMetrics?: MfMetricInput[];
   nonAdditive?: MfNonAdditive;
+  /** `fill_nulls_with` (integer) / `join_to_timespine` declared on the metric itself. */
+  fillNullsWith?: unknown;
+  joinToTimespine?: boolean;
   /** Semantic model this simple metric belongs to, when known. */
   semanticModel?: string;
   sourcePath: string;

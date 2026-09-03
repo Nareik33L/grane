@@ -256,6 +256,8 @@ function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: st
     denominator: metricInput(raw.denominator ?? params.denominator),
     inputMetrics: metricInputs(raw.input_metrics ?? params.metrics),
     nonAdditive: parseNonAdditive(raw.non_additive_dimension ?? params.non_additive_dimension),
+    fillNullsWith: raw.fill_nulls_with ?? params.fill_nulls_with,
+    joinToTimespine: (raw.join_to_timespine ?? params.join_to_timespine) === true,
     semanticModel,
     sourcePath,
   };
@@ -269,7 +271,15 @@ function parseTopLevelMetric(raw: unknown, sourcePath: string): MfMetric | null 
   return parsed;
 }
 
-const KNOWN_INPUT_KEYS = new Set(["name", "alias", "filter", "offset_window", "offset_to_grain"]);
+const KNOWN_INPUT_KEYS = new Set([
+  "name",
+  "alias",
+  "filter",
+  "offset_window",
+  "offset_to_grain",
+  "fill_nulls_with",
+  "join_to_timespine",
+]);
 
 /** A metric/measure input: bare name or `{ name, filter, alias, offset_window, ... }`. Nothing is dropped silently. */
 function metricInput(value: unknown): MfMetricInput | undefined {
@@ -277,15 +287,15 @@ function metricInput(value: unknown): MfMetricInput | undefined {
   if (!isRecord(value)) return undefined;
   const name = str(value.name);
   if (!name) return undefined;
-  const extraKeys = Object.keys(value).filter(
-    (key) => !KNOWN_INPUT_KEYS.has(key) && !["join_to_timespine", "fill_nulls_with"].includes(key),
-  );
+  const extraKeys = Object.keys(value).filter((key) => !KNOWN_INPUT_KEYS.has(key));
   return {
     name,
     alias: str(value.alias),
     filter: str(value.filter),
     offsetWindow: str(value.offset_window),
     offsetToGrain: str(value.offset_to_grain),
+    fillNullsWith: value.fill_nulls_with,
+    joinToTimespine: value.join_to_timespine === true,
     extraKeys,
   };
 }
