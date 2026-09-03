@@ -29,9 +29,11 @@ export interface SqlDialect {
   /** Qualify a table with the configured schema/dataset/database, if any. */
   qualifyTable(schema: string | undefined, table: string): string;
   placeholder(index: number, value: Scalar): string;
-  dateTrunc(grain: string, expr: string): string;
+  dateTrunc(grain: string, expr: string, kind?: TemporalKind): string;
   localizeTime(expr: string, timezone: string): string;
   castTimestamp(placeholder: string): string;
+  /** Bind a civil YYYY-MM-DD as a DATE, never as a timestamp. */
+  castDate(placeholder: string): string;
   castNumeric(expr: string): string;
   contains(columnExpr: string, placeholder: string): string;
   filteredAggregate(fn: "SUM" | "COUNT" | "AVG" | "MIN" | "MAX", expr: string, filterSql: string): string;
@@ -83,6 +85,9 @@ const ansiPostgresLike: Omit<SqlDialect, "type"> = {
   },
   castTimestamp(placeholder) {
     return `${placeholder}::timestamp`;
+  },
+  castDate(placeholder) {
+    return `${placeholder}::date`;
   },
   castNumeric(expr) {
     return `(${expr})::numeric`;
@@ -147,6 +152,9 @@ export const mysqlDialect: SqlDialect = {
   castTimestamp(placeholder) {
     return `CAST(${placeholder} AS DATETIME)`;
   },
+  castDate(placeholder) {
+    return `CAST(${placeholder} AS DATE)`;
+  },
   castNumeric(expr) {
     return `CAST((${expr}) AS DECIMAL(38, 12))`;
   },
@@ -176,6 +184,9 @@ export const snowflakeDialect: SqlDialect = {
   castTimestamp(placeholder) {
     return `TO_TIMESTAMP(${placeholder})`;
   },
+  castDate(placeholder) {
+    return `TO_DATE(${placeholder})`;
+  },
   castNumeric(expr) {
     return `TO_NUMBER(${expr})`;
   },
@@ -197,8 +208,9 @@ export const bigqueryDialect: SqlDialect = {
   placeholder(index) {
     return `@p${index}`;
   },
-  dateTrunc(grain, expr) {
+  dateTrunc(grain, expr, kind) {
     const g = grain.toUpperCase();
+    if (kind === "date") return `DATE_TRUNC(${expr}, ${g})`;
     return `TIMESTAMP_TRUNC(${expr}, ${g})`;
   },
   localizeTime(expr, timezone) {
@@ -207,6 +219,9 @@ export const bigqueryDialect: SqlDialect = {
   },
   castTimestamp(placeholder) {
     return `TIMESTAMP(${placeholder})`;
+  },
+  castDate(placeholder) {
+    return `DATE(${placeholder})`;
   },
   castNumeric(expr) {
     return `CAST((${expr}) AS NUMERIC)`;
@@ -238,6 +253,9 @@ export const databricksDialect: SqlDialect = {
   },
   castTimestamp(placeholder) {
     return `CAST(${placeholder} AS TIMESTAMP)`;
+  },
+  castDate(placeholder) {
+    return `CAST(${placeholder} AS DATE)`;
   },
   castNumeric(expr) {
     return `CAST((${expr}) AS DOUBLE)`;
@@ -289,6 +307,9 @@ export const clickhouseDialect: SqlDialect = {
   castTimestamp(placeholder) {
     return `parseDateTimeBestEffort(${placeholder})`;
   },
+  castDate(placeholder) {
+    return `toDate(${placeholder})`;
+  },
   castNumeric(expr) {
     return `toFloat64(${expr})`;
   },
@@ -327,4 +348,60 @@ export function isNumericType(dataType: string): boolean {
 
 export function isTemporalType(dataType: string): boolean {
   return /timestamp|timestamptz|datetime|date|time/i.test(dataType);
+}
+
+/**
+ * Warehouse temporal kinds compilation can distinguish.
+ *
+ *   date               civil calendar value (DATE / Date32). Project timezone
+ *                      must not shift it to another civil date.
+ *   timestamp_naive    timestamp without time zone / DATETIME. Treated as a
+ *                      UTC wall-clock instant once the session timezone is
+ *                      pinned to UTC, then localized to project.timezone.
+ *   timestamp_instant  timestamptz / TIMESTAMP WITH TIME ZONE / BigQuery
+ *                      TIMESTAMP. An instant; localized to project.timezone.
+ *   unknown            not a recognised date/timestamp type (or missing).
+ */
+export type TemporalKind = "date" | "timestamp_naive" | "timestamp_instant" | "unknown";
+
+/**
+ * Classify a warehouse column type. More specific forms (timestamptz,
+ * datetime) are matched before the civil DATE token so `datetime` is never
+ * treated as a date. `TIMESTAMP` without a zone qualifier is an instant on
+ * BigQuery and a naive timestamp elsewhere — that is warehouse type-system
+ * knowledge, not a column-name heuristic.
+ */
+export function classifyTemporalType(
+  dataType: string | null | undefined,
+  warehouse?: WarehouseType,
+): TemporalKind {
+  if (!dataType) return "unknown";
+  const t = dataType
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return "unknown";
+
+  if (
+    t.includes("with time zone") ||
+    t.includes("with timezone") ||
+    t.includes("timestamptz") ||
+    t.includes("timestamp tz") ||
+    t.includes("timestamp ltz")
+  ) {
+    return "timestamp_instant";
+  }
+
+  if (t.includes("timestamp") || t.includes("datetime")) {
+    return warehouse === "bigquery" && !t.includes("datetime") ? "timestamp_instant" : "timestamp_naive";
+  }
+
+  if (t === "date" || t === "date32" || /(^|\s)date(\s|$)/.test(t)) {
+    return "date";
+  }
+
+  return "unknown";
 }

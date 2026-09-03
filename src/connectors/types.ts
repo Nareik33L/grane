@@ -27,6 +27,23 @@ export interface DatabaseSchema {
   foreignKeys: ForeignKeyInfo[];
 }
 
+/** Look up a column's warehouse type from an introspected schema snapshot. */
+export function columnDataType(
+  schema: DatabaseSchema | null | undefined,
+  table: string,
+  column: string,
+): string | null {
+  if (!schema) return null;
+  const tbl =
+    schema.tables.find((item) => item.name === table) ??
+    schema.tables.find((item) => item.name.toLowerCase() === table.toLowerCase());
+  if (!tbl) return null;
+  const col =
+    tbl.columns.find((item) => item.name === column) ??
+    tbl.columns.find((item) => item.name.toLowerCase() === column.toLowerCase());
+  return col?.dataType ?? null;
+}
+
 export interface ExecutedRows {
   columns: string[];
   rows: Record<string, unknown>[];

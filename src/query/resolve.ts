@@ -307,6 +307,18 @@ export function resolveQuery(
       throw invalidQuery(`time.to "${to}" is not a valid calendar date.`);
     }
     const componentTimes = uniqueTimeColumns(model, metrics);
+    const untimedComponents = expandMetricComponents(model, metrics).filter((metric) => !metric.timeDimension);
+    if (untimedComponents.length > 0) {
+      const names = untimedComponents.map((metric) => metric.name);
+      throw ambiguousQuery(
+        `A time range was requested, but ${names.map((name) => `"${name}"`).join(", ")} ` +
+          `${names.length === 1 ? "has" : "have"} no time_dimension. ` +
+          `Grane will not borrow another metric's time column, drop the constraint, ` +
+          `or let companion metrics change the meaning. Remove the time range, or give ` +
+          `${names.length === 1 ? "this metric" : "each metric"} its own time_dimension.`,
+        { metrics: names, from, to },
+      );
+    }
     const disagreeingTimes = componentTimes.length > 1;
     if (query.time.grain && disagreeingTimes && !query.time.dimension) {
       throw ambiguousQuery(

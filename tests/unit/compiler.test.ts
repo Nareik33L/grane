@@ -175,7 +175,7 @@ describe("deterministic refusals", () => {
   });
 });
 
-import { exampleConfig } from "../fixtures.js";
+import { exampleConfig, exampleSchema } from "../fixtures.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { gauntletConfig } from "../gauntlet/model.js";
 import { GAUNTLET_NOW } from "../gauntlet/types.js";
@@ -184,11 +184,44 @@ import { SemanticModel } from "../../src/model/model.js";
 function exampleKernelWithTimezone(timezone: string): GraneKernel {
   const config = exampleConfig();
   config.project.timezone = timezone;
-  return new GraneKernel(config);
+  const kernel = new GraneKernel(config);
+  kernel.setSchema(exampleSchema());
+  return kernel;
 }
 
 function gauntletKernel(): GraneKernel {
-  return new GraneKernel(gauntletConfig(), { now: GAUNTLET_NOW });
+  const kernel = new GraneKernel(gauntletConfig(), { now: GAUNTLET_NOW });
+  kernel.setSchema(gauntletCompileSchema());
+  return kernel;
+}
+
+/** Column types the non-UTC gauntlet compile tests need; not a live warehouse. */
+function gauntletCompileSchema() {
+  const table = (name: string, columns: [string, string][]) => ({
+    schema: "main",
+    name,
+    columns: columns.map(([n, t]) => ({ name: n, dataType: t, nullable: true })),
+  });
+  return {
+    schemaName: "main",
+    tables: [
+      table("orders", [
+        ["id", "INTEGER"],
+        ["completed_at", "TIMESTAMP WITH TIME ZONE"],
+        ["created_at", "TIMESTAMP WITH TIME ZONE"],
+      ]),
+      table("daily_account_snapshots", [
+        ["account_id", "INTEGER"],
+        ["snapshot_date", "DATE"],
+        ["balance", "DECIMAL"],
+      ]),
+      table("countries", [
+        ["id", "INTEGER"],
+        ["name", "VARCHAR"],
+      ]),
+    ],
+    foreignKeys: [],
+  };
 }
 
 describe("semi-additive, per-component time, trust, and ambiguous paths", () => {

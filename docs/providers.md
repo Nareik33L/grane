@@ -166,6 +166,14 @@ key a contributing fact reached in this statement honoured that. Each guard
 records which metrics it protects, its relationship path and the population
 that emits its keys (`compiled.guards[].protects / path / keySource`).
 
+The same contract applies inside pre-aggregation. When a metric measures a
+column across `orders → order_items → products`, the `products` hop is still
+a declared many_to_one: it is a `LEFT JOIN` (unmatched / NULL foreign keys
+do not drop the child fact) and it carries a guard over the product keys
+that contributing order-items actually reach. A compiler path must not skip
+the guard merely because the hop sits in a CTE. `compiled.guards[].scope` is
+`"join"` or `"preagg"`.
+
 For semi-additive metrics the base-table query filters constrain both steps:
 the rows the snapshot date is chosen from *and* the rows kept at that date.
 `ending_mrr WHERE segment = 'Enterprise' BY customer_status` picks the last

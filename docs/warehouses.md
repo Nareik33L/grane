@@ -164,6 +164,30 @@ connection:
 npm install @clickhouse/client
 ```
 
+## Time dimensions and `project.timezone`
+
+Warehouse temporal types are not interchangeable. Compilation reads the
+column's introspected type and distinguishes:
+
+| Kind | Typical warehouse types | Filter / group |
+| --- | --- | --- |
+| Civil `DATE` | `DATE`, ClickHouse `Date` / `Date32` | Compared and truncated as that calendar date. `project.timezone` does **not** shift it. |
+| Timestamp without time zone | Postgres/DuckDB `timestamp`, MySQL `DATETIME`, Snowflake `TIMESTAMP_NTZ` | Treated as a UTC wall-clock instant (the session timezone is pinned to UTC), then localized to `project.timezone`. |
+| Instant | `timestamptz`, `TIMESTAMP WITH TIME ZONE`, BigQuery `TIMESTAMP`, Snowflake `TIMESTAMP_TZ` / `TIMESTAMP_LTZ` | Localized to `project.timezone` (existing `AT TIME ZONE` / `CONVERT_TIMEZONE` / …). |
+
+Relative periods (`last_month`, `30d`, …) still resolve to civil `from`/`to`
+in the project timezone before compilation. That is "which calendar dates
+did the user ask for?", not "reinterpret this DATE column".
+
+If the warehouse type is unknown at compile time and `project.timezone` is
+not UTC, Grane refuses (`unsafe_query`) instead of applying timezone
+semantics that might be wrong. `grane query` / `explain` introspect the
+schema when a time range is present so DATE vs timestamp can be distinguished.
+
+DuckDB execution sets `TimeZone=UTC` on the connection so identical SQL does
+not change meaning with the host timezone. Postgres already used
+`SET LOCAL TIME ZONE 'UTC'`.
+
 ## Same metrics, different SQL
 
 `grane query revenue -d country --last 30d --sql` prints the compiled SQL for
