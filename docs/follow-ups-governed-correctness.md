@@ -38,14 +38,15 @@ bound value with LIKE-metacharacter escaping and `ESCAPE '!'`. See
 `tests/unit/contains-literal.test.ts`. Do not reopen as a wildcard
 operator.
 
-## 4. Semi-additive grouping by its own primary entity can make snapshot selection vacuous
+## 4. Semi-additive grouping by its own primary entity can make snapshot selection vacuous — fixed
 
-- **Observed:** `group_by` defaulting to the entity key, then grouping the
-  query by that same entity, can keep every snapshot row.
-- **Supported/documented:** `semi_additive.group_by` is supported; this
-  edge is not called out.
-- **Governed-contract impact:** Possible over-count labelled governed.
-- **Priority:** High once reproduced against Oakwell / MetricFlow.
+Resolved: a series key equal to the metric entity's primary key is the
+snapshot row identity unless that column is a declared many_to_one /
+one_to_one from the snapshot table. The vacuous case is `unsafe_query`
+(and a validate error), not a governed additive sum. Empty `group_by`
+and explicit non-PK series columns are unchanged. MetricFlow group_by of
+a primary/unique entity is skipped at import. See
+`tests/unit/semi-additive-entity-groupby.test.ts`.
 
 ## 5. MetricFlow time-window / metric-grain alignment
 

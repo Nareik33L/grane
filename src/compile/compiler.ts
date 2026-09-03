@@ -1,4 +1,4 @@
-import type { SemanticModel, Metric } from "../model/model.js";
+import { vacuousSnapshotSeriesKeys, vacuousSnapshotSeriesMessage, type SemanticModel, type Metric } from "../model/model.js";
 import type { ResolvedQuery, ResolvedFilter } from "../query/resolve.js";
 import { timeAlias } from "../query/resolve.js";
 import type { Edge } from "../model/graph.js";
@@ -433,6 +433,10 @@ export function compileQuery(
           `Semi-additive metric "${metric.name}": semi_additive.group_by "${key.table ? `${key.table}.${key.column}` : key.column}" must be a column on "${baseTable}".`,
         );
       }
+    }
+    const vacuousKeys = vacuousSnapshotSeriesKeys(model, metric);
+    if (vacuousKeys.length > 0) {
+      throw unsafeQuery(vacuousSnapshotSeriesMessage(metric, vacuousKeys));
     }
     for (const filter of metric.filters) {
       const ref = parseColumnRef(filter.field);

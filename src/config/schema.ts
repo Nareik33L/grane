@@ -79,10 +79,13 @@ export type UnsupportedDefinition = z.infer<typeof unsupportedDefinitionSchema>;
  * series: `entity` uses the metric entity's primary key; a list of
  * `${table.column}` references keeps one snapshot per distinct key tuple; an
  * empty list keeps one snapshot date for the whole result. Grane never infers
- * this key set. `granularity` compares snapshot dates after truncating to
- * that period (MetricFlow's declared `time_granularity`): every row in the
- * last/first period is kept, not only the last/first exact value. Omit it to
- * compare raw values.
+ * this key set. The entity primary key is a valid series only when that
+ * column is a declared many_to_one / one_to_one from the snapshot table (a
+ * continuing business entity). A surrogate row identity as `group_by` is
+ * refused: first/last would keep every historical row. `granularity` compares
+ * snapshot dates after truncating to that period (MetricFlow's declared
+ * `time_granularity`): every row in the last/first period is kept, not only
+ * the last/first exact value. Omit it to compare raw values.
  */
 export const semiAdditiveGranularitySchema = z.enum(["day", "week", "month", "quarter", "year"]);
 export type SemiAdditiveGranularity = z.infer<typeof semiAdditiveGranularitySchema>;
