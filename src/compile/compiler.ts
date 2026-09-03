@@ -218,6 +218,15 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       // Guarded upstream; kept as a hard stop so a refactor cannot silently intersect two selections.
       throw unsafeQuery(`Semi-additive metric "${metric.name}" has a different snapshot selection from another metric in this query.`);
     }
+    if (
+      resolved.time &&
+      (resolved.time.column.table !== timeRef.table || resolved.time.column.column !== timeRef.column)
+    ) {
+      throw unsafeQuery(
+        `Semi-additive metric "${metric.name}" chooses its snapshot on its own time dimension ` +
+          `("${timeRef.table}.${timeRef.column}"); the requested time.dimension "${resolved.time.qualified}" cannot be applied to it.`,
+      );
+    }
     if (spec.granularity && resolved.time?.grain && GRAIN_ORDER[resolved.time.grain] < GRAIN_ORDER[spec.granularity]) {
       throw unsafeQuery(
         `Semi-additive metric "${metric.name}" chooses its snapshot at ${spec.granularity} granularity; ` +

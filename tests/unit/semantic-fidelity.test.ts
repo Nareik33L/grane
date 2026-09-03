@@ -534,6 +534,14 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
       expect(refused.message).toMatch(/month granularity/);
     });
 
+    it("refuses a time.dimension other than the metric's own instead of ignoring it", async () => {
+      const refused = await refusalAsync(() =>
+        kernel.query({ metrics: ["ending_mrr"], time: { ...JUN_AUG, dimension: "reported_at" } }),
+      );
+      expect(refused.status).toBe("unsafe_query");
+      expect(refused.message).toMatch(/own time dimension/);
+    });
+
     it("legacy window_groupings / window_choice map the same way", async () => {
       expect(contribution.metrics.account_balance?.semi_additive).toEqual({
         window: "last",
