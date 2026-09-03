@@ -90,6 +90,65 @@ describe("dbt / MetricFlow YAML (legacy + latest spec)", () => {
   });
 });
 
+describe("dbt / MetricFlow filter operators", () => {
+  it("keeps != filters as inequalities instead of inverting them", () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-dbt-neq-"));
+    writeFileSync(join(dir, "dbt_project.yml"), "name: neq\nprofile: neq\n");
+    mkdirSync(join(dir, "models"), { recursive: true });
+    writeFileSync(
+      join(dir, "models", "orders.yml"),
+      `
+semantic_models:
+  - name: orders
+    model: ref('orders')
+    entities:
+      - name: order
+        type: primary
+        expr: id
+    dimensions:
+      - name: status
+        type: categorical
+        expr: status
+      - name: channel
+        type: categorical
+        expr: channel
+    measures:
+      - name: live_revenue
+        agg: sum
+        expr: net_amount
+        create_metric: true
+        filter: "{{ Dimension('order__status') }} != 'cancelled'"
+      - name: web_revenue
+        agg: sum
+        expr: net_amount
+        create_metric: true
+        filter: "{{ Dimension('order__channel') }} = 'web' and {{ Dimension('order__status') }} != 'cancelled'"
+`,
+    );
+    const contribution = mapMetricFlowGraph(parseDbtYamlFiles(dir));
+    expect(contribution.metrics.live_revenue?.filters).toEqual([
+      { field: "orders.status", operator: "!=", value: "cancelled" },
+    ]);
+    expect(contribution.metrics.web_revenue?.filters).toEqual([
+      { field: "orders.channel", operator: "=", value: "web" },
+      { field: "orders.status", operator: "!=", value: "cancelled" },
+    ]);
+
+    const kernel = new GraneKernel(
+      graneConfigSchema.parse({
+        connection: { type: "postgres", schema: "public" },
+        entities: contribution.entities,
+        metrics: contribution.metrics,
+        dimensions: contribution.dimensions,
+        relationships: contribution.relationships,
+      }),
+    );
+    const { compiled } = kernel.compile({ metrics: ["live_revenue"] });
+    expect(compiled.sql).toMatch(/"orders"\."status"\s*(<>|!=)\s*\$1/);
+    expect(compiled.params).toEqual(["cancelled"]);
+  });
+});
+
 describe("dbt / MetricFlow non_additive_dimension", () => {
   function projectWith(yaml: string): string {
     const dir = mkdtempSync(join(tmpdir(), "grane-dbt-nonadd-"));

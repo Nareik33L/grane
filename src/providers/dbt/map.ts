@@ -1,6 +1,7 @@
 import type { DimensionConfig, MetricConfig, MetricType } from "../../config/schema.js";
 import type { SemanticContribution } from "../types.js";
 import { emptyContribution, withSource } from "../types.js";
+import { metricFilters } from "../helpers.js";
 import { translateMfFilter } from "./filters.js";
 import {
   mapAgg,
@@ -147,14 +148,14 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
     }
     const timeName = opts.aggTimeDimension ?? model.aggTimeDimension;
     const timeCol = timeColumn(model, timeName);
-    let filters = undefined;
+    let filters: MetricConfig["filters"];
     if (opts.filter) {
       const translated = translateMfFilter(opts.filter, model, models);
       if ("error" in translated) {
         out.warnings.push(`Skipping metric "${name}": ${translated.error}.`);
         return;
       }
-      filters = Object.fromEntries(translated.filters.map((f) => [f.field, f.value as string | number | boolean | null]));
+      filters = metricFilters(translated.filters);
     }
     const synonyms = opts.label && opts.label !== name ? [opts.label] : [];
     const config: MetricConfig = withSource(
@@ -165,7 +166,7 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
         sql: sqlRef(model.table, column),
         time_dimension: timeCol ? sqlRef(model.table, timeCol) : undefined,
         synonyms,
-        filters: filters && Object.keys(filters).length > 0 ? filters : undefined,
+        filters,
         status: "approved",
       },
       { provider, path: opts.sourcePath },
