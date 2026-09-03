@@ -99,6 +99,15 @@ models:
           window_agg: max
           group_by:
             - account
+      - name: mrr_primary_group
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+          group_by:
+            - customer_month
       - name: mrr_other_as_of
         type: simple
         agg: sum

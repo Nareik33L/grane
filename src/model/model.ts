@@ -292,3 +292,44 @@ export class SemanticModel {
     };
   }
 }
+
+/**
+ * Semi-additive `group_by` keys that identify one snapshot *row* rather than
+ * a continuing series. The metric entity's primary key is the grain of that
+ * entity. On a snapshot table that grain is a per-row identity unless the
+ * same column is a declared many_to_one / one_to_one from the snapshot table
+ * (a related business entity such as customer). Empty `group_by` is a global
+ * snapshot and is never vacuous. Explicit series columns that are not the
+ * metric entity's primary key are never vacuous under this rule.
+ */
+export function vacuousSnapshotSeriesKeys(model: SemanticModel, metric: Metric): ColumnRef[] {
+  const spec = metric.semiAdditive;
+  if (!spec || spec.keys.length === 0) return [];
+  const entity = model.entities.get(metric.config.entity);
+  if (!entity) return [];
+  const vacuous: ColumnRef[] = [];
+  for (const key of spec.keys) {
+    if (key.table !== entity.config.table || key.column !== entity.config.primary_key) continue;
+    const businessLink = model.graph
+      .edgesFrom(key.table)
+      .some(
+        (edge) =>
+          edge.fromColumn === key.column &&
+          (edge.cardinality === "many_to_one" || edge.cardinality === "one_to_one"),
+      );
+    if (!businessLink) vacuous.push(key);
+  }
+  return vacuous;
+}
+
+export function vacuousSnapshotSeriesMessage(metric: Metric, keys: ColumnRef[]): string {
+  const named = keys.map((key) => `${key.table}.${key.column}`).join(", ");
+  return (
+    `Semi-additive metric "${metric.name}" uses semi_additive.group_by on the snapshot ` +
+    `entity's own primary key (${named}). That key identifies one snapshot row, so ` +
+    `first/last cannot collapse history and the query would sum every matching row as ` +
+    `if it were additive. Use group_by: [] for one global snapshot, name the continuing ` +
+    `series columns, or declare a many_to_one from that key to the business entity it ` +
+    `identifies.`
+  );
+}

@@ -176,6 +176,7 @@ describe("dbt import: what is and is not imported", () => {
     );
     expect(skipped.mrr_unknown_window).toMatch(/window "avg" is not min or max/);
     expect(skipped.mrr_unknown_group).toMatch(/group_by "account" is not an entity/);
+    expect(skipped.mrr_primary_group).toMatch(/primary entity/);
     expect(skipped.mrr_other_as_of).toMatch(/differs from agg_time_dimension/);
     expect(skipped.snapshot_rows_last).toMatch(/agg "count" is not compiled/);
     expect(skipped.hourly_balance).toMatch(/time granularity "hour"/);
@@ -724,9 +725,13 @@ describe.skipIf(!available)("native semi_additive configuration", () => {
 
   it("group_by defaults to the entity primary key; explicit lists and [] behave as declared", async () => {
     const one = async (name: string) => Number((await kernel.query({ metrics: [name] })).rows[0]![name]);
-    // A surrogate row key makes "one snapshot per key" mean every row: the declared semantics, visibly.
-    expect(await one("per_row_default")).toBe(3000);
-    expect(await one("per_account_default")).toBe(2000);
+    // A surrogate row key as the series is vacuous: first/last would keep every row.
+    expect(refusal(() => kernel.compile({ metrics: ["per_row_default"] })).status).toBe("unsafe_query");
+    expect(refusal(() => kernel.compile({ metrics: ["per_row_default"] })).message).toMatch(/own primary key/);
+    // account_id is the entity PK and is not a declared business-entity relationship here,
+    // so the same rule refuses the implicit entity series. Name the column on a row-grain
+    // entity (per_account_explicit) or declare the many_to_one.
+    expect(refusal(() => kernel.compile({ metrics: ["per_account_default"] })).status).toBe("unsafe_query");
     expect(await one("per_account_explicit")).toBe(2000);
     expect(await one("latest_day_total")).toBe(1300);
   });

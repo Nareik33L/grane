@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Semi-additive `group_by` that uses the snapshot entity's own primary key
+  is refused unless that column is a declared many_to_one / one_to_one from
+  the snapshot table (a continuing business entity). A surrogate row
+  identity as the series would keep every historical row and label the
+  additive sum `trust: governed`. Empty `group_by` (one global snapshot)
+  and explicit series columns that are not the entity primary key are
+  unchanged. MetricFlow `non_additive_dimension.group_by` of a primary or
+  unique entity is not imported. See
+  `tests/unit/semi-additive-entity-groupby.test.ts`.
+
 - A query whose metric dependency closure includes an `experimental` metric
   cannot be `trust: governed`. Status is the existing approval field
   (`approved` default, `experimental` = not an approved definition,

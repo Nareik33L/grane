@@ -1,4 +1,4 @@
-import type { SemanticModel, Metric } from "../model/model.js";
+import { vacuousSnapshotSeriesKeys, vacuousSnapshotSeriesMessage, type SemanticModel, type Metric } from "../model/model.js";
 import { parseColumnRef } from "../model/refs.js";
 import {
   isNumericType,
@@ -313,6 +313,15 @@ function validateMetric(
         } else {
           issues.push(...checkColumn(subject, key.table, key.column));
         }
+      }
+      const vacuousKeys = vacuousSnapshotSeriesKeys(model, metric);
+      if (vacuousKeys.length > 0) {
+        issues.push({
+          severity: "error",
+          code: "vacuous_semi_additive_group_by",
+          subject,
+          message: vacuousSnapshotSeriesMessage(metric, vacuousKeys),
+        });
       }
     }
 

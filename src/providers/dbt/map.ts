@@ -441,6 +441,13 @@ function emitSimple(
             `Grane will not infer the snapshot key.`,
         );
       }
+      if (entity.type === "primary" || entity.type === "unique") {
+        return fail(
+          `non_additive_dimension group_by "${entityRef}" is a ${entity.type} entity of semantic model "${model.name}"; ` +
+            `that key identifies one snapshot row, so first/last would keep every historical row. ` +
+            `Group by a foreign entity (a continuing series) or omit group_by for one global snapshot.`,
+        );
+      }
       if (!entity.column) {
         return fail(
           `non_additive_dimension group_by "${entityRef}" expr "${entity.expr}" is a SQL expression; Grane keys snapshots on plain columns only.`,
