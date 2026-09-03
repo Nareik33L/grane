@@ -107,7 +107,7 @@ Imported, with the upstream semantics preserved:
 | --- | --- |
 | Primary entity backed by a column | Entity + primary key. Models without one are skipped; Grane never assumes `id`. |
 | Foreign (or natural) entity → another semantic model that declares the **same entity name** as its `primary` or `unique` entity | `many_to_one` relationship from the entity's column to the target's declared entity column — the unique column when that is how the target declares it, never its surrogate primary key. Semantic model names and table names are not join keys; an entity no model declares, one declared only as `foreign` elsewhere, a `natural` target (validity windows) or an entity whose `expr` is a SQL expression is recorded under `unsupported` with the reason. Primary/unique-to-primary/unique (one-to-one) joins are recorded as unsupported rather than imported. |
-| Categorical / time dimension with a plain column `expr` | Dimension. The description keeps the MetricFlow identity (`invoice__country`) and the column, so an agent can tell same-named dimensions apart. |
+| Categorical / time dimension with a plain column `expr` | Dimension. A short name is exposed only when every declaration of it is the same physical column. If two semantic models declare the same name with different columns, the short name is recorded under `unsupported` and each meaning is exposed as `<entity>__<dimension>` (MetricFlow's identity). Import order cannot change which identifier means what. |
 | `agg: sum / count / count_distinct / average / min / max` over a column | Same aggregation. `agg: count` with `expr: 1` (any numeric literal) is a row count, `COUNT(1)`. |
 | `filter: {{ Dimension('order__status') }} = 'completed'` — `=`, `!=`, `<>`, string / number / boolean literal, joined with `and`, on the metric's own model | Metric filter with the **same operator** |
 | `non_additive_dimension` (`window_agg` / `window_choice` `max` or `min`; `group_by` / `window_groupings` entities) | `additive: semi` with an explicit `semi_additive` block: `window`, `group_by` (the declared entities; **empty keeps one snapshot for the whole result**, MetricFlow's default) and the dimension's declared `time_granularity`. Filters and the time range apply before the snapshot is chosen. |
@@ -129,6 +129,20 @@ it. `join_to_timespine: true` is carried on the metric: totals and non-time
 groupings are exact, but a per-period breakdown is refused (`unsafe_query`)
 because Grane has no time spine to produce the empty periods MetricFlow would
 return — it is never returned sparse as if it were complete.
+
+Joins that traverse a declared `many_to_one` relationship are `LEFT JOIN`s:
+unmatched facts (missing dimension row or NULL foreign key) stay in the
+population and land in the NULL group, matching MetricFlow's metric-to-dimension
+traversal. A query filter on the joined column is applied in `WHERE` after the
+join, so `=` and `!=` both exclude unmatched facts (`NULL` compares to nothing).
+`PRIMARY` / `UNIQUE` is the upstream **semantic** contract that the target key
+is unique; MetricFlow trusts that declaration and will fan out if the warehouse
+violates it. Grane additionally **runtime-verifies** the contract in the same
+`SELECT`: a hidden `MAX(rows-per-key)` over each joined table. If any key is
+duplicated the executor refuses (`unsafe_query`) rather than returning multiplied
+facts. It does not `DISTINCT`, pick a row, or relabel the result exploratory.
+`trust=governed` therefore means: the metadata said many-to-one, and the data
+this statement read honoured that.
 
 A query that combines a semi-additive metric with a metric whose row selection
 differs (an additive one, or a semi-additive one with a different filter,

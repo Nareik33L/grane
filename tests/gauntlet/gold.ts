@@ -50,7 +50,7 @@ export const GOLD_SQL = {
   revenueByCustomerCountry: `
     SELECT customers.country AS country, SUM(orders.net_amount)::DOUBLE AS revenue
     FROM orders
-    JOIN customers ON orders.customer_id = customers.id
+    LEFT JOIN customers ON orders.customer_id = customers.id
     WHERE orders.status = 'completed'
     GROUP BY 1
   `,

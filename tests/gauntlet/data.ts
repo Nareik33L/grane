@@ -408,8 +408,7 @@ export function customerById(id: number): CustomerRow | undefined {
 export function revenueByCustomerCountry(): Map<string | null, number> {
   const out = new Map<string | null, number>();
   for (const o of completedOrders()) {
-    if (o.customer_id == null) continue;
-    const country = customerById(o.customer_id)?.country ?? null;
+    const country = o.customer_id == null ? null : (customerById(o.customer_id)?.country ?? null);
     out.set(country, (out.get(country) ?? 0) + o.net_amount);
   }
   return out;

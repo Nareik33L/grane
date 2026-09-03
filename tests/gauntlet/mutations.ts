@@ -26,10 +26,20 @@ export async function withDisabledFanout<T>(kernel: GraneKernel, fn: () => Promi
       })),
     };
   };
+  // The executor also refuses when a joined key is not unique. Disable that
+  // second layer so this mutation still tests whether the gauntlet notices a
+  // missing planner cardinality check (multiplied facts returned as governed).
+  const originalCompile = kernel.compile.bind(kernel);
+  kernel.compile = (input) => {
+    const out = originalCompile(input);
+    out.compiled.guards = [];
+    return out;
+  };
   try {
     return await fn();
   } finally {
     graph.findPath = original;
+    kernel.compile = originalCompile;
   }
 }
 

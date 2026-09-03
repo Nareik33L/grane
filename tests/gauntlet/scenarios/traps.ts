@@ -54,8 +54,8 @@ function joinTraps(): Scenario[] {
       id: "join/revenue-by-customer-country",
       category: "join",
       question: "Revenue by customer country.",
-      interpretation: "Order grain, many-to-one to customers.country. Orphan order drops out.",
-      expectedSqlBehaviour: "JOIN customers, do not join billing/shipping/countries lookup.",
+      interpretation: "Order grain, many-to-one to customers.country. Unmatched facts stay in the NULL group.",
+      expectedSqlBehaviour: "LEFT JOIN customers, do not join billing/shipping/countries lookup.",
       query: { metrics: ["revenue"], dimensions: ["customer_country"] },
       expectation: {
         kind: "execute",
@@ -66,13 +66,21 @@ function joinTraps(): Scenario[] {
         if (ctx.error) return { code: "FAIL", detail: String(ctx.error) };
         const gb = ctx.rows?.find((r) => r["customer_country"] === "GB")?.["revenue"];
         const us = ctx.rows?.find((r) => r["customer_country"] === "US")?.["revenue"];
+        const missing = ctx.rows?.find((r) => r["customer_country"] == null)?.["revenue"];
         if (Number(gb) !== GOLD.revenueGb) {
           return { code: "CRITICAL FAIL", detail: `GB revenue ${gb} !== ${GOLD.revenueGb}` };
         }
         if (Number(us) !== GOLD.revenueUs) {
           return { code: "CRITICAL FAIL", detail: `US revenue ${us} !== ${GOLD.revenueUs}` };
         }
-        return { code: "PASS", detail: "customer country matches fixture reduction" };
+        if (Number(missing) !== GOLD.revenueNullCountry) {
+          return { code: "CRITICAL FAIL", detail: `NULL-country revenue ${missing} !== ${GOLD.revenueNullCountry}` };
+        }
+        const grouped = (ctx.rows ?? []).reduce((sum, row) => sum + Number(row["revenue"] ?? 0), 0);
+        if (grouped !== GOLD.revenueTotal) {
+          return { code: "CRITICAL FAIL", detail: `grouped population ${grouped} !== ungrouped ${GOLD.revenueTotal}` };
+        }
+        return { code: "PASS", detail: "customer country matches fixture reduction; unmatched facts kept" };
       },
     }),
     sc({
