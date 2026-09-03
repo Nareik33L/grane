@@ -248,12 +248,21 @@ describe("dbt import: what is and is not imported", () => {
     expect(skipped?.path).toBe("models/customers.yml");
   });
 
-  it("preserves upstream dimension identity in descriptions", () => {
-    expect(contribution.dimensions.country?.entity).toBe("customer");
-    expect(contribution.dimensions.country?.description).toContain("customer__country");
-    expect(contribution.dimensions.customer_month_country?.description).toContain("customer_month__country");
-    expect(contribution.dimensions.customer_month_country?.description).toContain("fct_mrr_snapshot.country_code");
-    expect(contribution.dimensions.invoice_country?.description).toContain("invoice__country");
+  it("exposes a dimension name declared by several models only under its qualified identities", () => {
+    // `country` is declared by customers, the MRR snapshot and invoices with
+    // different columns: no short alias, one qualified name per meaning.
+    expect(contribution.dimensions.country).toBeUndefined();
+    expect(contribution.dimensions.customer__country?.entity).toBe("customer");
+    expect(contribution.dimensions.customer__country?.sql).toBe("${dim_customers.country_code}");
+    expect(contribution.dimensions.customer_month__country?.sql).toBe("${fct_mrr_snapshot.country_code}");
+    expect(contribution.dimensions.customer_month__country?.description).toContain("fct_mrr_snapshot.country_code");
+    expect(contribution.dimensions.invoice__country?.sql).toBe("${fct_invoices.country_code}");
+    const skipped = contribution.unsupported.find((u) => u.kind === "dimension" && u.name === "country");
+    expect(skipped?.reason).toMatch(/declared by 3 semantic models with different columns/);
+    expect(skipped?.reason).toContain('"customer__country"');
+    expect(skipped?.reason).toContain('"invoice__country"');
+    // A name declared once keeps its short form.
+    expect(contribution.dimensions.customer_status?.sql).toBe("${dim_customers.customer_status}");
   });
 });
 
@@ -449,8 +458,8 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
     });
 
     it("row counts group and pre-aggregate", async () => {
-      const grouped = await kernel.query({ metrics: ["invoice_count"], dimensions: ["invoice_country"], time: JUL });
-      expect(grouped.rows.map((r) => [r.invoice_country, Number(r.invoice_count)])).toEqual([
+      const grouped = await kernel.query({ metrics: ["invoice_count"], dimensions: ["invoice__country"], time: JUL });
+      expect(grouped.rows.map((r) => [r.invoice__country, Number(r.invoice_count)])).toEqual([
         ["DE", 3],
         ["US", 2],
       ]);
@@ -488,8 +497,12 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
     });
 
     it("grouping by a dimension does not change the snapshot date", async () => {
-      const result = await kernel.query({ metrics: ["ending_mrr"], dimensions: ["customer_segment"], time: JUN_AUG });
-      expect(result.rows.map((r) => [r.customer_segment, Number(r.ending_mrr)])).toEqual([
+      const result = await kernel.query({
+        metrics: ["ending_mrr"],
+        dimensions: ["customer_month__customer_segment"],
+        time: JUN_AUG,
+      });
+      expect(result.rows.map((r) => [r.customer_month__customer_segment, Number(r.ending_mrr)])).toEqual([
         ["Enterprise", 120],
         ["SMB", 30],
       ]);
@@ -499,7 +512,7 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
       // US rows at the latest US month (August): c2 churned to 0. c3's July 200 is not the latest.
       expect(
         await value(
-          { metrics: ["ending_mrr"], filters: [{ field: "customer_month_country", operator: "=", value: "US" }], time: JUN_AUG },
+          { metrics: ["ending_mrr"], filters: [{ field: "customer_month__country", operator: "=", value: "US" }], time: JUN_AUG },
           "ending_mrr",
         ),
       ).toBe(0);
@@ -523,7 +536,7 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
         await value(
           {
             metrics: ["ending_mrr_by_customer"],
-            filters: [{ field: "customer_month_country", operator: "=", value: "US" }],
+            filters: [{ field: "customer_month__country", operator: "=", value: "US" }],
             time: JUN_AUG,
           },
           "ending_mrr_by_customer",
@@ -633,10 +646,10 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
     it("COUNT over no rows is 0 with or without a fill; a join_to_timespine metric refuses per-period breakdowns", async () => {
       expect(await value({ metrics: ["invoice_count_dense"], time: EMPTY }, "invoice_count_dense")).toBe(0);
       expect(await value({ metrics: ["invoice_count_dense"], time: JUL }, "invoice_count_dense")).toBe(5);
-      const byCountry = await kernel.query({ metrics: ["invoice_count_dense"], dimensions: ["invoice_country"], time: JUL });
+      const byCountry = await kernel.query({ metrics: ["invoice_count_dense"], dimensions: ["invoice__country"], time: JUL });
       expect(byCountry.rows).toEqual([
-        { invoice_country: "DE", invoice_count_dense: 3n },
-        { invoice_country: "US", invoice_count_dense: 2n },
+        { invoice__country: "DE", invoice_count_dense: 3n },
+        { invoice__country: "US", invoice_count_dense: 2n },
       ]);
       const refused = await refusalAsync(() =>
         kernel.query({ metrics: ["invoice_count_dense"], time: { ...JUN_AUG, grain: "month" } }),

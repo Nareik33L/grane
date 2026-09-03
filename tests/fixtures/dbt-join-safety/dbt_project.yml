@@ -1,0 +1,4 @@
+name: join_safety
+version: "1.0.0"
+profile: join_safety
+model-paths: ["models"]

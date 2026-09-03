@@ -10,7 +10,7 @@ import type {
 } from "../config/schema.js";
 import { RelationshipGraph } from "./graph.js";
 import { parseColumnRef, type ColumnRef } from "./refs.js";
-import { undefinedDimension, undefinedMetric, unsupportedMetric } from "../errors.js";
+import { undefinedDimension, undefinedMetric, unsupportedDimension, unsupportedMetric } from "../errors.js";
 
 /** Normalised metric filter (the map form is converted to equality items). */
 export function normaliseMetricFilters(config: MetricConfig): MetricFilterItem[] {
@@ -151,6 +151,7 @@ export class SemanticModel {
   readonly dimensions = new Map<string, Dimension>();
   /** Upstream definitions providers saw but did not import, by lower-cased name. */
   readonly unsupported = new Map<string, UnsupportedDefinition>();
+  readonly unsupportedDimensions = new Map<string, UnsupportedDefinition>();
   private readonly metricSynonyms = new Map<string, string>();
 
   constructor(config: GraneConfig) {
@@ -162,6 +163,7 @@ export class SemanticModel {
     }
     for (const item of config.unsupported) {
       if (item.kind === "metric") this.unsupported.set(item.name.toLowerCase(), item);
+      if (item.kind === "dimension") this.unsupportedDimensions.set(item.name.toLowerCase(), item);
     }
 
     for (const [name, metric] of Object.entries(config.metrics)) {
@@ -243,6 +245,12 @@ export class SemanticModel {
     const lower = requested.toLowerCase();
     for (const [name, dimension] of this.dimensions) {
       if (name.toLowerCase() === lower) return dimension;
+    }
+    const skipped = this.unsupportedDimensions.get(lower);
+    if (skipped) {
+      // An ambiguous short name: point at the qualified names that carry each meaning.
+      const qualified = [...this.dimensions.keys()].filter((name) => name.toLowerCase().endsWith(`__${lower}`));
+      throw unsupportedDimension(requested, skipped, qualified.length > 0 ? qualified : similarNames(requested, [...this.dimensions.keys()]));
     }
     throw undefinedDimension(requested, similarNames(requested, [...this.dimensions.keys()]));
   }

@@ -7,7 +7,6 @@ import {
   explorationDisabled,
   invalidQuery,
   undefinedColumn,
-  undefinedDimension,
 } from "../errors.js";
 import {
   explorationPolicy,
@@ -193,7 +192,7 @@ export function hintUngovernedDimension(
   similarDims: string[],
   model: SemanticModel,
   schema: DatabaseSchema | null | undefined,
-): never {
+): void {
   const policy = explorationPolicy(model.config);
   const rawMatches = schema ? suggestRawColumnsForName(schema, requested, policy) : [];
   if (policy.enabled && rawMatches.length > 0) {
@@ -203,5 +202,4 @@ export function hintUngovernedDimension(
       { similar: [...similarDims, ...rawMatches] },
     );
   }
-  throw undefinedDimension(requested, similarDims);
 }

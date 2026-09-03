@@ -13,8 +13,9 @@ describe("deterministic SQL compiler", () => {
     });
     expect(compiled.sql).toContain('FROM "public"."orders"');
     expect(compiled.sql).toContain(
-      'JOIN "public"."customers" ON "orders"."customer_id" = "customers"."id"',
+      'LEFT JOIN "public"."customers" ON "orders"."customer_id" = "customers"."id"',
     );
+    expect(compiled.sql).toContain("__grane_card_customers");
     expect(compiled.sql).toContain('SUM("orders"."net_amount") FILTER (WHERE "orders"."status" = $1)');
     expect(compiled.sql).toContain('GROUP BY 1');
     // Inclusive end date compiles to an exclusive next-day bound.

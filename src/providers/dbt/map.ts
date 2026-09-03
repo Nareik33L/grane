@@ -38,6 +38,7 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
 
   // ---- Entities: a primary entity backed by a plain column is required ----
   const models: MfSemanticModel[] = [];
+  const dimensionCandidates: DimensionCandidate[] = [];
   for (const model of graph.models) {
     const primary = model.entities.find((e) => e.type === "primary");
     if (!primary?.column) {
@@ -83,24 +84,95 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
         );
         continue;
       }
-      let dimName = dim.name;
-      const clash = out.dimensions[dimName];
-      if (clash && clash.sql !== sqlRef(model.table, dim.column)) {
-        dimName = `${entityName}_${dim.name}`;
-      }
-      const config: DimensionConfig = withSource(
-        {
-          description: `MetricFlow dimension ${model.primaryEntity ?? model.name}__${dim.name} on semantic model "${model.name}" (${model.table}.${dim.column}).`,
-          entity: entityName,
-          sql: sqlRef(model.table, dim.column),
-          type: dim.type === "time" ? "timestamp" : "string",
-        },
-        source,
-      );
-      if (!(dimName in out.dimensions)) {
-        out.dimensions[dimName] = config;
-      }
+      dimensionCandidates.push({ model, entityName, dim, column: dim.column });
     }
+  }
+
+  // ---- Dimensions: one deterministic meaning per public name ----
+  // MetricFlow's identity for a dimension is `<entity>__<dimension>`; the
+  // bare dimension name is a convenience that MetricFlow itself refuses when
+  // more than one semantic model declares it ("ambiguous"). Grane does the
+  // same: a short name is exposed only when every declaration of it resolves
+  // to the same physical column; otherwise every declaration is exposed under
+  // its qualified name and the short name is recorded as unsupported with the
+  // qualified alternatives. Nothing here depends on the order the models were
+  // read in.
+  const byShortName = new Map<string, DimensionCandidate[]>();
+  for (const candidate of dimensionCandidates) {
+    const list = byShortName.get(candidate.dim.name) ?? [];
+    list.push(candidate);
+    byShortName.set(candidate.dim.name, list);
+  }
+  // MetricFlow's public identity is `<primary entity>__<dimension>`, not the
+  // Grane entity-map key (which can be remapped when two models share a name).
+  const qualifiedName = (candidate: DimensionCandidate) =>
+    `${candidate.model.primaryEntity ?? candidate.model.name}__${candidate.dim.name}`;
+  const describe = (candidate: DimensionCandidate) =>
+    `${candidate.model.primaryEntity ?? candidate.model.name}__${candidate.dim.name} on semantic model "${candidate.model.name}" (${candidate.model.table}.${candidate.column})`;
+  const dimensionConfig = (candidate: DimensionCandidate): DimensionConfig =>
+    withSource(
+      {
+        description: `MetricFlow dimension ${describe(candidate)}.`,
+        entity: candidate.entityName,
+        sql: sqlRef(candidate.model.table, candidate.column),
+        type: candidate.dim.type === "time" ? "timestamp" : "string",
+      },
+      { provider, path: candidate.model.sourcePath },
+    );
+  const planned = new Map<string, { candidate: DimensionCandidate }>();
+  const ambiguousShortNames: { name: string; candidates: DimensionCandidate[] }[] = [];
+  for (const [shortName, candidates] of byShortName) {
+    const sqls = new Set(candidates.map((c) => sqlRef(c.model.table, c.column)));
+    if (sqls.size === 1) {
+      // Same physical column everywhere it is declared: one meaning, keep the short name.
+      const [first] = [...candidates].sort((a, b) => a.entityName.localeCompare(b.entityName));
+      planned.set(shortName, { candidate: first! });
+      continue;
+    }
+    ambiguousShortNames.push({ name: shortName, candidates });
+    for (const candidate of candidates) {
+      const qualified = qualifiedName(candidate);
+      // A qualified name that another declaration uses as its short name would be two meanings again.
+      if (byShortName.has(qualified) && qualified !== shortName) {
+        skip(
+          "dimension",
+          qualified,
+          `qualified name "${qualified}" collides with a dimension of that name declared by another semantic model.`,
+          candidate.model.sourcePath,
+        );
+        continue;
+      }
+      const existing = planned.get(qualified);
+      if (existing) {
+        const existingSql = sqlRef(existing.candidate.model.table, existing.candidate.column);
+        const nextSql = sqlRef(candidate.model.table, candidate.column);
+        if (existingSql !== nextSql) {
+          planned.delete(qualified);
+          skip(
+            "dimension",
+            qualified,
+            `"${qualified}" is declared by semantic models "${existing.candidate.model.name}" (${existingSql}) and "${candidate.model.name}" (${nextSql}); the name has no single meaning.`,
+            candidate.model.sourcePath,
+          );
+        }
+        continue;
+      }
+      planned.set(qualified, { candidate });
+    }
+  }
+  for (const { name, candidates } of ambiguousShortNames) {
+    const sorted = [...candidates].sort((a, b) => a.entityName.localeCompare(b.entityName));
+    skip(
+      "dimension",
+      name,
+      `"${name}" is declared by ${sorted.length} semantic models with different columns (${sorted
+        .map((c) => `${c.model.name}: ${c.model.table}.${c.column}`)
+        .join("; ")}), so the short name has no single meaning. Use ${sorted.map((c) => `"${qualifiedName(c)}"`).join(" or ")}.`,
+      sorted[0]!.model.sourcePath,
+    );
+  }
+  for (const [name, { candidate }] of [...planned].sort(([a], [b]) => a.localeCompare(b))) {
+    out.dimensions[name] = dimensionConfig(candidate);
   }
 
   // ---- Relationships ----
@@ -257,6 +329,13 @@ interface SimpleOptions {
 
 function sqlRef(table: string, column: string): string {
   return `\${${table}.${column}}`;
+}
+
+interface DimensionCandidate {
+  model: MfSemanticModel;
+  entityName: string;
+  dim: MfSemanticModel["dimensions"][number];
+  column: string;
 }
 
 function entityNameFor(model: MfSemanticModel, out: SemanticContribution): string {

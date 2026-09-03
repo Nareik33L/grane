@@ -458,6 +458,7 @@ function resolveFilterField(
       return { column: raw.ref, field: raw.qualified, governed: false };
     }
     hintUngovernedDimension(field, err.refusal.similar ?? [], model, schema);
+    throw err;
   }
 }
 

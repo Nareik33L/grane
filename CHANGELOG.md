@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Join execution is now part of the governed contract, not only join keys.
+  Dimension traversal uses `LEFT JOIN` so unmatched facts stay in the
+  population (NULL group), matching MetricFlow. Each joined table carries an
+  in-statement cardinality guard; if a declared one-side key is duplicated in
+  the warehouse the executor refuses rather than returning multiplied facts.
+  A short dimension name that several semantic models declare with different
+  columns is no longer first-writer-wins: the short alias is unsupported and
+  each meaning is addressed as `<entity>__<dimension>`. Import order cannot
+  change a governed identifier. See `tests/unit/join-safety.test.ts`.
 - dbt/MetricFlow relationships are resolved from declared entities only. An
   adversarial review found Grane joining `orders.customer_id` to the surrogate
   primary key of a semantic model merely *named* `customer` — a wrong row with

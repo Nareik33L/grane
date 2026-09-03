@@ -64,6 +64,22 @@ export function unsupportedMetric(
   });
 }
 
+export function unsupportedDimension(
+  requested: string,
+  skipped: { provider: string; path?: string; reason: string },
+  similar: string[],
+): GraneError {
+  return new GraneError({
+    status: "undefined_dimension",
+    message:
+      `"${requested}" is declared in the ${skipped.provider} project but Grane did not import it under that name: ${skipped.reason} ` +
+      `It is listed under catalog.unsupported. Do not guess which meaning was intended.`,
+    requested,
+    similar,
+    details: { unsupported: { provider: skipped.provider, path: skipped.path, reason: skipped.reason } },
+  });
+}
+
 export function undefinedDimension(requested: string, similar: string[]): GraneError {
   return new GraneError({
     status: "undefined_dimension",

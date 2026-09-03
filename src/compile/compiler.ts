@@ -16,6 +16,21 @@ import { compilerNamespace } from "../connectors/create.js";
  * and generates the SQL. Measures that live across a one_to_many relationship
  * are pre-aggregated at the metric grain inside CTEs so fan-out can never
  * multiply rows and corrupt results.
+ *
+ * Joins from the base table to related tables (dimensions, filters, time)
+ * follow declared many_to_one relationships and are LEFT OUTER joins: a fact
+ * whose related row is missing (or whose foreign key is NULL) stays in the
+ * population and lands in the NULL group, which is what MetricFlow does for
+ * metric -> dimension traversal. Query filters on a joined column are applied
+ * in WHERE after the join (also as MetricFlow does), so `= X` and `!= X` both
+ * exclude unmatched facts: NULL compares to nothing.
+ *
+ * A many_to_one relationship is a declared contract that the right-hand key is
+ * unique. Grane does not take that on faith at execution time: every joined
+ * table carries a cardinality guard — a scalar sub-select in the same
+ * statement that reports the largest number of rows sharing one key value —
+ * and the executor refuses the result if any joined key is duplicated, rather
+ * than returning multiplied facts.
  */
 
 export interface JoinStep {
@@ -23,7 +38,27 @@ export interface JoinStep {
   on: string;
   relationship: string;
   cardinality: string;
+  /** Join type used in the generated SQL. */
+  join: "LEFT JOIN";
+  /** Hidden result column that verifies, in the same statement, that `keyColumn` is unique. */
+  cardinalityGuard: string;
 }
+
+/**
+ * A hidden select item that measures the largest number of rows per key in a
+ * joined table. Any value above 1 means the declared many_to_one contract is
+ * violated by the warehouse data, and the executor refuses the result.
+ */
+export interface CardinalityGuard {
+  column: string;
+  table: string;
+  key: string;
+  keyColumn: string;
+  relationship: string;
+}
+
+/** Prefix of hidden columns the executor strips from results. */
+export const GUARD_PREFIX = "__grane_card_";
 
 export interface PreAggregation {
   metric: string;
@@ -43,6 +78,7 @@ export interface CompiledQuery {
   sql: string;
   params: Scalar[];
   plan: QueryPlan;
+  guards: CardinalityGuard[];
   metricVersions: Record<string, string>;
   metricSources: Record<string, { provider: string; path?: string }>;
   trust: ResolvedQuery["trust"];
@@ -104,15 +140,44 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     }
   };
 
+  const guards: CardinalityGuard[] = [];
+
   const addJoinEdge = (edge: Edge): void => {
     if (joinedTables.has(edge.toTable)) return;
     joinedTables.add(edge.toTable);
+    const guard = `${GUARD_PREFIX}${edge.toTable}`;
     joins.push({
       table: edge.toTable,
       on: `${ident(edge.fromTable)}.${ident(edge.fromColumn)} = ${ident(edge.toTable)}.${ident(edge.toColumn)}`,
       relationship: edge.relationship,
       cardinality: edge.cardinality,
+      join: "LEFT JOIN",
+      cardinalityGuard: guard,
     });
+    guards.push({
+      column: guard,
+      table: edge.toTable,
+      key: edge.toColumn,
+      keyColumn: `${edge.toTable}.${edge.toColumn}`,
+      relationship: edge.relationship,
+    });
+  };
+
+  const renderJoin = (join: JoinStep): string => `${join.join} ${qualify(join.table)} ON ${join.on}`;
+
+  /**
+   * MAX(rows per key) over the joined table, NULL keys excluded (they never
+   * match a join). Uncorrelated, so it is evaluated once per statement and
+   * sees the same data as the join it protects.
+   */
+  const renderGuard = (guard: CardinalityGuard): string => {
+    const key = ident(guard.key);
+    const n = ident("_n");
+    // MAX(...) so the guard is an aggregate and does not have to be in GROUP BY.
+    const inner =
+      `(SELECT MAX(${n}) FROM (SELECT COUNT(*) AS ${n} FROM ${qualify(guard.table)} ` +
+      `WHERE ${key} IS NOT NULL GROUP BY ${key}) AS ${ident("_keys")})`;
+    return `MAX(${inner}) AS ${ident(guard.column)}`;
   };
 
   // ---- Metric aggregation expressions (and pre-aggregation CTEs) ----
@@ -261,7 +326,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
         `${ident(cteName)} AS (`,
         `  SELECT ${selects.join(", ")}`,
         `  FROM ${qualify(baseTable)}`,
-        ...(needsJoins ? joins.map((join) => `  JOIN ${qualify(join.table)} ON ${join.on}`) : []),
+        ...(needsJoins ? joins.map((join) => `  ${renderJoin(join)}`) : []),
         ...(whereParts.length > 0 ? [`  WHERE ${whereParts.join(" AND ")}`] : []),
         ...(groupBy.length > 0 ? [`  GROUP BY ${groupBy.join(", ")}`] : []),
         `)`,
@@ -490,6 +555,18 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   for (const filter of resolved.filters) {
     joinPathTo(filter.column.table, `filter on "${filter.field}"`);
   }
+  for (const metric of components) {
+    for (const filter of metric.filters) {
+      const ref = parseColumnRef(filter.field);
+      if (!ref || ref.table === baseTable) continue;
+      const path = model.graph.findPath(baseTable, ref.table);
+      // Filters on a one_to_many path belong inside the pre-aggregation CTE,
+      // not as an outer join that would fan out the grain.
+      if (path && !path.fansOut && !path.ambiguous) {
+        joinPathTo(ref.table, `metric filter "${filter.field}" of "${metric.name}"`);
+      }
+    }
+  }
   if (resolved.time) {
     joinPathTo(resolved.time.column.table, "time range");
   }
@@ -526,6 +603,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   }
   selects.push(...metricSelects);
   selects.push(...rawMetricSelects);
+  selects.push(...guards.map(renderGuard));
 
   // ---- WHERE ----
   const where: string[] = [];
@@ -565,7 +643,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   lines.push(`SELECT ${selects.join(",\n       ")}`);
   lines.push(`FROM ${qualify(baseTable)}`);
   for (const join of joins) {
-    lines.push(`JOIN ${qualify(join.table)} ON ${join.on}`);
+    lines.push(renderJoin(join));
   }
   lines.push(...cteJoins);
   if (where.length > 0) {
@@ -594,6 +672,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
         ...resolved.rawMetrics.map((m) => m.alias),
       ],
     },
+    guards,
     metricVersions,
     metricSources,
     trust: resolved.trust,
