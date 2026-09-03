@@ -16,6 +16,32 @@ deterministic compiler
 
 Point Grane at the folder. You should not have to redefine Revenue.
 
+## Already have dbt / MetricFlow?
+
+Keep your definitions where they are. Five steps:
+
+1. **Keep existing definitions.** Nothing is copied into Grane YAML.
+2. **Point Grane at the project.** `grane init --provider ../your_dbt_project`
+   writes `providers:` live in `grane.yml`. A `target/semantic_manifest.json`
+   is used when present (run `dbt parse`); otherwise the YAML is read directly.
+3. **Configure the warehouse.** `connection:` in `grane.yml` — the same
+   database dbt builds into. Use a read-only role.
+4. **Validate.** `grane validate` imports metrics, dimensions, entities and
+   joins, checks every column against the live schema, and prints one line per
+   upstream definition Grane deliberately did not import, with the reason.
+5. **Connect the agent.** `grane mcp doctor`, then `grane mcp connect <client>`.
+
+Native YAML stays available as a peer provider for anything the dbt project
+does not govern.
+
+```bash
+mkdir analytics && cd analytics
+grane init --provider ../your_dbt_project
+export DATABASE_URL='postgres://grane_readonly:...@db.internal:5432/analytics'
+grane validate
+grane query revenue --last 30d
+```
+
 ## Auto-detect
 
 Omit `type`. Grane sniffs the path:
@@ -63,14 +89,42 @@ All readers contribute the same four maps. Grane does **not** call dbt, Cube,
 Looker, or MetricFlow at query time. Import happens at load; Grane compiles SQL.
 
 Unsupported constructs (derived metrics, subqueries, untranslatable filters)
-are **skipped with a warning**, not guessed.
+are **skipped, never guessed**. Every skip is recorded: `grane validate` prints
+it with the reason, and the MCP `catalog` tool lists it under `unsupported`
+(kind, name, reason, source). Asking for a skipped metric by name returns
+`undefined_metric` with that reason, so an agent can tell "not imported" from
+"does not exist" and will not approximate it with other metrics.
 
 ### dbt / MetricFlow
 
-See the original MetricFlow notes: simple metrics, ratios, entity joins,
-`{{ Dimension('order__status') }} = 'completed'` filters. Derived metrics that
-are a simple `metric / metric` ratio are imported; cumulative and conversion
-metrics are skipped with a warning.
+Reads `semantic_models:` (legacy spec), model-embedded `semantic_model:` (latest
+spec), and `target/semantic_manifest.json`. `target/manifest.json` supplies
+relation names when present.
+
+Imported, with the upstream semantics preserved:
+
+| MetricFlow | Grane |
+| --- | --- |
+| Primary entity backed by a column | Entity + primary key. Models without one are skipped; Grane never assumes `id`. |
+| Foreign entity → a model whose primary entity has that name | `many_to_one` relationship on the declared columns only |
+| Categorical / time dimension with a plain column `expr` | Dimension. The description keeps the MetricFlow identity (`invoice__country`) and the column, so an agent can tell same-named dimensions apart. |
+| `agg: sum / count / count_distinct / average / min / max` over a column | Same aggregation. `agg: count` with `expr: 1` (any numeric literal) is a row count, `COUNT(1)`. |
+| `filter: {{ Dimension('order__status') }} = 'completed'` — `=`, `!=`, `<>`, string / number / boolean literal, joined with `and`, on the metric's own model | Metric filter with the **same operator** |
+| `non_additive_dimension` (`window_agg` / `window_choice` `max` or `min`; `group_by` / `window_groupings` entities) | `additive: semi` with an explicit `semi_additive` block: `window`, `group_by` (the declared entities; **empty keeps one snapshot for the whole result**, MetricFlow's default) and the dimension's declared `time_granularity`. Filters and the time range apply before the snapshot is chosen. |
+| `ratio`, or `derived` whose expr is exactly `metric / metric` | Ratio, when both components are imported and share one entity |
+
+Skipped with a reason: cumulative, conversion, other derived expressions
+(`× 12`, `a - b`, offsets, aliases), `median` / `percentile`, ratios whose
+numerator and denominator sit at different grains, ratios with their own
+filter or filtered inputs, filters using `or`, `in`, `>`/`<`, `null`,
+`TimeDimension`, `Entity`, SQL wrappers or another model's dimension,
+SQL-expression dimensions, and snapshot dimensions at sub-day granularity.
+`fill_nulls_with` / `join_to_timespine` are not applied: Grane returns no row
+rather than 0 for an empty period.
+
+A query that combines a semi-additive metric with a metric whose row selection
+differs (an additive one, or a semi-additive one with a different filter,
+window, key set or granularity) is refused; query them separately.
 
 ### Cube
 

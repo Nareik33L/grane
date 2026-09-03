@@ -1,5 +1,36 @@
 /** File templates written by `grane init`. */
 
+/**
+ * `grane.yml` for a new project. With `provider`, the `providers:` block is
+ * written live (not commented) so an existing dbt/MetricFlow, Cube, LookML, …
+ * project is imported without recreating its metrics in Grane YAML.
+ */
+export function graneYml(provider?: string): string {
+  if (!provider) return GRANE_YML;
+  const live =
+    `# Governed definitions imported from the analytics project you already have.\n` +
+    `# Grane reads them at load time and compiles the SQL itself; the tool is not\n` +
+    `# called at query time. Omit type to auto-detect (dbt, Cube, LookML, Ossie, …).\n` +
+    `providers:\n` +
+    `  - path: ${yamlString(provider)}\n` +
+    `\n` +
+    `# Native definitions are a peer provider: add here only what the upstream\n` +
+    `# project does not govern. The same name from two sources is an error.\n`;
+  return GRANE_YML.replace(PROVIDERS_COMMENT, live);
+}
+
+function yamlString(value: string): string {
+  return /^[A-Za-z0-9_./-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
+const PROVIDERS_COMMENT = `# Extra governed definitions you already maintain. Omit type to auto-detect.
+# providers:
+#   - path: ../jaffle_shop          # dbt, Cube, LookML, Ossie, …
+#   - type: dbt
+#     project: ../jaffle_shop
+
+`;
+
 export const GRANE_YML = `# Grane project configuration.
 # First week: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md
 # Production: https://github.com/Nareik33L/grane/blob/main/docs/production.md

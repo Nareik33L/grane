@@ -15,7 +15,7 @@ import { listExplorableColumns } from "../explore/raw.js";
 import { explorationPolicy } from "../explore/policy.js";
 import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
-import { GRANE_YML, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
+import { graneYml, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
 
@@ -56,11 +56,15 @@ program
   .command("init")
   .description("Create a new Grane project in the current directory")
   .option("--dir <dir>", "directory to create the project in", ".")
-  .action((options: { dir: string }) => {
+  .option(
+    "--provider <path>",
+    "existing dbt/MetricFlow, Cube, LookML, … project to import (relative to the new project); written live under providers:",
+  )
+  .action((options: { dir: string; provider?: string }) => {
     const dir = resolve(options.dir);
     mkdirSync(dir, { recursive: true });
     const files: [string, string][] = [
-      ["grane.yml", GRANE_YML],
+      ["grane.yml", graneYml(options.provider)],
       ["metrics.yml", METRICS_YML],
       ["dimensions.yml", DIMENSIONS_YML],
       ["relationships.yml", RELATIONSHIPS_YML],
@@ -76,11 +80,10 @@ program
       written.push(name);
       console.log(`write ${name}`);
     }
-    console.log(
-      written.length > 0
-        ? `\nGrane project created. First week on your own Postgres:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane discover --write-relationships" to inspect schema and merge FKs\n  3. Define entities and about five metrics (see metrics.yml comments)\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md`
-        : "\nNothing to do.",
-    );
+    const nextSteps = options.provider
+      ? `\nGrane project created. Your existing definitions stay where they are:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane validate" — metrics, dimensions and joins are imported from ${options.provider}\n     Skipped upstream definitions are listed with the reason (also under catalog.unsupported)\n  3. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/providers.md`
+      : `\nGrane project created. First week on your own Postgres:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane discover --write-relationships" to inspect schema and merge FKs\n  3. Define entities and about five metrics (see metrics.yml comments)\n     Already have dbt/MetricFlow, Cube or LookML? Re-run with --provider <path> instead\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md`;
+    console.log(written.length > 0 ? nextSteps : "\nNothing to do.");
   });
 
 // ---------------------------------------------------------------- demo
