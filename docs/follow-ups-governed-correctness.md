@@ -1,21 +1,15 @@
 # Follow-ups from the post-GAUNTLET governed-correctness review
 
 Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
-(`contains` LIKE wildcards) was later fixed when an independent gauntlet
-produced a governed-wrong counterexample. The rest stay deferred. Do not
-fold them into timezone, cardinality, month-arithmetic, or contains work
-unless a later review proves they are inseparable.
+(`contains` LIKE wildcards) and item 1 (`project.week.starts`) were later
+fixed when independent reviews produced governed-wrong counterexamples.
+The rest stay deferred.
 
-## 1. `project.week.starts` accepted but ignored
+## 1. `project.week.starts` accepted but ignored — fixed
 
-- **Observed:** The config field parses and is stored; generated week
-  truncation does not consult it.
-- **Supported/documented:** Accepted in YAML; week grain is documented as
-  `date_trunc('week', …)` (warehouse default).
-- **Governed-contract impact:** A Monday-start project can label a Sunday
-  week-start as governed if the warehouse week differs.
-- **Priority:** Medium. Document the warehouse default as the v0 contract,
-  or honour the setting in every dialect.
+Resolved: week-grain compilation honours `monday` / `sunday` with an
+explicit civil-week expression on every dialect. See
+`tests/unit/week-starts.test.ts`.
 
 ## 2. Row-limit truncation is weakly represented in provenance
 

@@ -186,6 +186,12 @@ the day after that through today. JavaScript `Date` overflow is not used.
 already was). `%` and `_` in the user value do not become SQL LIKE
 wildcards.
 
+`project.week.starts` is `monday` (default) or `sunday`. A week grain is
+the civil interval `[start, next start)` in that calendar. DATE columns
+use the warehouse DATE; timestamps use the project-local civil date
+after the existing timezone contract. Warehouse-native week defaults
+and session `WEEK_START` settings are not used.
+
 If the warehouse type is unknown at compile time and `project.timezone` is
 not UTC, Grane refuses (`unsafe_query`) instead of applying timezone
 semantics that might be wrong. `grane query` / `explain` introspect the

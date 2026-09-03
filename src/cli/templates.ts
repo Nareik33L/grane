@@ -39,7 +39,8 @@ project:
   name: my-analytics
   timezone: UTC
   # week:
-  #   starts: monday
+  #   starts: monday   # or sunday; week grain honours this
+
   # fiscal_year:
   #   starts_month: april
 

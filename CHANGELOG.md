@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `project.week.starts` (`monday` | `sunday`, default `monday`) now determines
+  week-grain bucket boundaries. Compilation emits an explicit civil-week
+  expression per dialect instead of the warehouse `date_trunc('week')`
+  default. DATE columns stay civil; timestamps use the existing localized
+  civil date, then the configured week start. See
+  `tests/unit/week-starts.test.ts`.
+
 - Relative `<N>m` / `last_<N>m` periods clamp the shifted civil day to the
   last valid day of the target month. JavaScript `Date` overflow no longer
   turns `2026-03-31` minus one month into `2026-03-03` (and a `1m` window
