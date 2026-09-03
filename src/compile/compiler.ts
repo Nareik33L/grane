@@ -1205,8 +1205,13 @@ function compileOperator(
       const placeholders = values.map((v) => params.add(v)).join(", ");
       return `${columnExpr} ${operator === "in" ? "IN" : "NOT IN"} (${placeholders})`;
     }
-    case "contains":
-      return params.dialect.contains(columnExpr, params.add(value as Scalar));
+    case "contains": {
+      if (typeof value !== "string") {
+        throw invalidQuery(`Operator "contains" requires a string value.`);
+      }
+      // Dialect SQL escapes LIKE metacharacters around this bound value.
+      return params.dialect.contains(columnExpr, params.add(value));
+    }
     case "=":
     case "!=":
     case ">":
