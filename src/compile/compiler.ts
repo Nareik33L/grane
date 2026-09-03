@@ -46,8 +46,10 @@ export interface JoinStep {
 
 /**
  * A hidden select item that measures the largest number of rows per key in a
- * joined table. Any value above 1 means the declared many_to_one contract is
- * violated by the warehouse data, and the executor refuses the result.
+ * joined table, scoped to the keys that actually appear in this query's
+ * analytical population. Any value above 1 means the declared many_to_one
+ * contract is violated for facts in this execution, and the executor refuses
+ * the result.
  */
 export interface CardinalityGuard {
   column: string;
@@ -55,6 +57,10 @@ export interface CardinalityGuard {
   key: string;
   keyColumn: string;
   relationship: string;
+  /** Table that holds the FK (base table, or an intermediate hop table). */
+  fromTable: string;
+  /** Column in fromTable that references `key` in `table`. */
+  fromColumn: string;
 }
 
 /** Prefix of hidden columns the executor strips from results. */
@@ -160,24 +166,49 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       key: edge.toColumn,
       keyColumn: `${edge.toTable}.${edge.toColumn}`,
       relationship: edge.relationship,
+      fromTable: edge.fromTable,
+      fromColumn: edge.fromColumn,
     });
   };
 
   const renderJoin = (join: JoinStep): string => `${join.join} ${qualify(join.table)} ON ${join.on}`;
 
   /**
-   * MAX(rows per key) over the joined table, NULL keys excluded (they never
-   * match a join). Uncorrelated, so it is evaluated once per statement and
-   * sees the same data as the join it protects.
+   * MAX(rows per key) over the joined table, scoped to the FK values that
+   * actually appear in this query's analytical population (`__grane_pop`).
+   *
+   * NULL guard value means no relevant keys exist (empty population or all
+   * NULLs) — that is safe, not a violation. A value > 1 means the declared
+   * many_to_one contract is violated for facts in this execution.
+   *
+   * The `fromTable` is either the base table (for direct hops) or an
+   * intermediate joined table (for multi-hop). For direct hops from the base
+   * table we pull the FK set from the population CTE directly. For later hops
+   * the relevant keys are the non-null FKs from intermediate rows whose own
+   * PK was a relevant key from the previous hop — expressed as a correlated
+   * IN on the joined tables already in the outer FROM. Since the guard
+   * subquery is not correlated with outer GROUP BY (it is a scalar subquery in
+   * the SELECT), using the outer joined table directly for multi-hop is
+   * correct: the joined tables are the same relational snapshot as the guards
+   * we are verifying.
    */
+  const POP_CTE = "__grane_pop";
   const renderGuard = (guard: CardinalityGuard): string => {
     const key = ident(guard.key);
+    const fk = ident(guard.fromColumn);
     const n = ident("_n");
-    // MAX(...) so the guard is an aggregate and does not have to be in GROUP BY.
+    // Relevant FK set: non-null FKs from the population (direct hop from base)
+    // or from an intermediate joined table (multi-hop).
+    const relevantKeys =
+      guard.fromTable === baseTable
+        ? `SELECT ${fk} FROM ${ident(POP_CTE)} WHERE ${fk} IS NOT NULL`
+        : `SELECT ${ident(guard.fromTable)}.${fk} FROM ${ident(guard.fromTable)} WHERE ${ident(guard.fromTable)}.${fk} IS NOT NULL`;
+    // NULL when the IN-set is empty (no relevant keys → safe).
     const inner =
-      `(SELECT MAX(${n}) FROM (SELECT COUNT(*) AS ${n} FROM ${qualify(guard.table)} ` +
-      `WHERE ${key} IS NOT NULL GROUP BY ${key}) AS ${ident("_keys")})`;
-    return `MAX(${inner}) AS ${ident(guard.column)}`;
+      `(SELECT MAX(${n}) FROM ` +
+      `(SELECT COUNT(*) AS ${n} FROM ${qualify(guard.table)} ` +
+      `WHERE ${key} IN (${relevantKeys}) GROUP BY ${key}) AS ${ident("_keys")})`;
+    return inner;
   };
 
   // ---- Metric aggregation expressions (and pre-aggregation CTEs) ----
@@ -603,19 +634,29 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   }
   selects.push(...metricSelects);
   selects.push(...rawMetricSelects);
-  selects.push(...guards.map(renderGuard));
+  // Guards are emitted separately (in __grane_card CTE) when joins exist.
 
   // ---- WHERE ----
-  const where: string[] = [];
+  // Fact-side filters: time bounds (when not already inside a snapshot CTE) +
+  // filters on the base table itself. These define the analytical population.
+  // Joined-dimension filters go only in the analytical result query, not in
+  // the population used for cardinality scoping.
+  const factSideWhere: string[] = [];
   if (resolved.time && !skipOuterTime) {
     const expr = localTime(resolved.time.column);
     const from = resolved.time.from;
     const toExclusive = exclusiveEnd(resolved.time.to);
-    where.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
-    where.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
+    factSideWhere.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
+    factSideWhere.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
   }
+  const joinedDimFilters: string[] = [];
   for (const filter of resolved.filters) {
-    where.push(compileQueryFilter(filter, params, col));
+    const clause = compileQueryFilter(filter, params, col);
+    if (filter.column.table === baseTable) {
+      factSideWhere.push(clause);
+    } else {
+      joinedDimFilters.push(clause);
+    }
   }
 
   // ---- ORDER BY ----
@@ -636,26 +677,132 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   }
 
   // ---- Assemble ----
+  // When there are no joins, emit the plain query unchanged.
+  // When there are joins, we need scoped cardinality: build __grane_pop
+  // (the fact-side analytical population), __grane_card (one scalar guard per
+  // relationship), and __grane_result (the analytical SELECT), then wrap them
+  // so the guard is always observable even when the analytical GROUP BY
+  // produces zero rows (which would skip the guard in the old design).
   const lines: string[] = [];
-  if (ctes.length > 0) {
-    lines.push(`WITH ${ctes.join(",\n")}`);
+
+  if (guards.length === 0) {
+    // No joins → no guards → plain query, no wrapping overhead.
+    if (ctes.length > 0) {
+      lines.push(`WITH ${ctes.join(",\n")}`);
+    }
+    lines.push(`SELECT ${selects.join(",\n       ")}`);
+    lines.push(`FROM ${qualify(baseTable)}`);
+    for (const join of joins) {
+      lines.push(renderJoin(join));
+    }
+    lines.push(...cteJoins);
+    const allWhere = [...factSideWhere, ...joinedDimFilters];
+    if (allWhere.length > 0) {
+      lines.push(`WHERE ${allWhere.join("\n  AND ")}`);
+    }
+    if (groupBy.length > 0) {
+      lines.push(`GROUP BY ${groupBy.join(", ")}`);
+    }
+    if (orderClauses.length > 0) {
+      lines.push(`ORDER BY ${orderClauses.join(", ")}`);
+    }
+    lines.push(`LIMIT ${resolved.limit}`);
+  } else {
+    // --- Population CTE ---
+    // For semi-additive queries the snapshot CTE (last_*) already applied time
+    // bounds and fact-side filters. The population is the rows that survived
+    // the snapshot join — so we reconstruct it by joining the snapshot CTE.
+    // For ordinary queries the population is the base table filtered by
+    // fact-side time bounds and base-table query filters.
+    const popCteLines: string[] = [];
+    if (anySemiAdditive && sharedSnapshotCte) {
+      // Semi-additive population = base rows that appear in the snapshot CTE.
+      // The snapshot ON conditions mirror cteJoins but we rebuild them here
+      // for the pop CTE; the snapshot CTE is already in `ctes` above.
+      const snapName = sharedSnapshotCte.name;
+      // We reuse the snapshot CTE that has already been emitted; find its join
+      // conditions from cteJoins. Rather than re-parsing, we just join the
+      // snapshot CTE to base and select base.*.
+      // cteJoins contains e.g. `JOIN "last_ending_mrr" ON ...`; we need those
+      // conditions to reconstruct the population.
+      popCteLines.push(`${ident(POP_CTE)} AS (`);
+      popCteLines.push(`  SELECT ${ident(baseTable)}.*`);
+      popCteLines.push(`  FROM ${qualify(baseTable)}`);
+      popCteLines.push(`  ${cteJoins.join("\n  ")}`);
+      popCteLines.push(`)`);
+      // fact-side WHERE still applies inside the snapshot CTE; no need to
+      // repeat it here (the snapshot CTE already filtered; the JOIN acts as
+      // the filter for the population).
+    } else {
+      popCteLines.push(`${ident(POP_CTE)} AS (`);
+      popCteLines.push(`  SELECT *`);
+      popCteLines.push(`  FROM ${qualify(baseTable)}`);
+      if (factSideWhere.length > 0) {
+        popCteLines.push(`  WHERE ${factSideWhere.join("\n    AND ")}`);
+      }
+      popCteLines.push(`)`);
+    }
+
+    // --- Card CTE ---
+    const cardSelects = guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`);
+    const cardCteLines = [
+      `${ident("__grane_card")} AS (`,
+      `  SELECT ${cardSelects.join(",\n         ")}`,
+      `)`,
+    ];
+
+    // --- Analytical result CTE ---
+    const resultCteLines: string[] = [];
+    resultCteLines.push(`${ident("__grane_result")} AS (`);
+    resultCteLines.push(`  SELECT ${selects.join(",\n         ")}`);
+    resultCteLines.push(`  FROM ${ident(POP_CTE)} AS ${ident(baseTable)}`);
+    for (const join of joins) {
+      resultCteLines.push(`  ${renderJoin(join)}`);
+    }
+    // For semi-additive queries, cteJoins are the snapshot join — already in
+    // the pop CTE above, so the result FROM "inherits" the population; skip
+    // cteJoins here (they reference the snapshot CTE by name). Non-snapshot
+    // cteJoins (pre-aggregated metrics) still need to be included.
+    const nonSnapshotCteJoins = anySemiAdditive && sharedSnapshotCte
+      ? cteJoins.filter((j) => !j.includes(`"${sharedSnapshotCte!.name}"`))
+      : cteJoins;
+    for (const j of nonSnapshotCteJoins) {
+      resultCteLines.push(`  ${j}`);
+    }
+    const allWhere = [...joinedDimFilters];
+    if (allWhere.length > 0) {
+      resultCteLines.push(`  WHERE ${allWhere.join("\n    AND ")}`);
+    }
+    if (groupBy.length > 0) {
+      resultCteLines.push(`  GROUP BY ${groupBy.join(", ")}`);
+    }
+    if (orderClauses.length > 0) {
+      resultCteLines.push(`  ORDER BY ${orderClauses.join(", ")}`);
+    }
+    resultCteLines.push(`  LIMIT ${resolved.limit}`);
+    resultCteLines.push(`)`);
+
+    // --- Outer SELECT ---
+    // LEFT JOIN guarantees at least one row so the guard is always observable.
+    const resultCols = selects.map((s) => {
+      // Extract the alias from `expr AS "alias"` → `"result"."alias"`
+      const m = s.match(/AS\s+"([^"]+)"\s*$/);
+      return m ? `${ident("__grane_result")}.${ident(m[1]!)}` : s;
+    });
+    const cardCols = guards.map((g) => `${ident("__grane_card")}.${ident(g.column)}`);
+    const outerSelects = [...resultCols, ...cardCols];
+
+    const allCtes = [
+      ...ctes,
+      popCteLines.join("\n"),
+      cardCteLines.join("\n"),
+      resultCteLines.join("\n"),
+    ];
+    lines.push(`WITH ${allCtes.join(",\n")}`);
+    lines.push(`SELECT ${outerSelects.join(",\n       ")}`);
+    lines.push(`FROM ${ident("__grane_card")}`);
+    lines.push(`LEFT JOIN ${ident("__grane_result")} ON TRUE`);
   }
-  lines.push(`SELECT ${selects.join(",\n       ")}`);
-  lines.push(`FROM ${qualify(baseTable)}`);
-  for (const join of joins) {
-    lines.push(renderJoin(join));
-  }
-  lines.push(...cteJoins);
-  if (where.length > 0) {
-    lines.push(`WHERE ${where.join("\n  AND ")}`);
-  }
-  if (groupBy.length > 0) {
-    lines.push(`GROUP BY ${groupBy.join(", ")}`);
-  }
-  if (orderClauses.length > 0) {
-    lines.push(`ORDER BY ${orderClauses.join(", ")}`);
-  }
-  lines.push(`LIMIT ${resolved.limit}`);
 
   return {
     sql: lines.join("\n"),

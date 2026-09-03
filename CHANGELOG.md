@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Runtime cardinality checks are now scoped to the query's **analytical
+  population** — the fact-side rows after query-level time bounds and base-table
+  filters (and after snapshot selection for semi-additive metrics). Duplicates
+  in dimension rows that are never reached by any participating FK no longer
+  cause a false `unsafe_query` refusal. Empty-population queries (no relevant
+  FK values) are governed-safe; a grouped query whose analytical GROUP BY
+  produces zero rows still observes the guard through a wrapper CTE so an
+  empty result cannot bypass a genuine violation. See
+  `tests/unit/query-cardinality.test.ts` for the adversarial matrix.
+
 - Join execution is now part of the governed contract, not only join keys.
   Dimension traversal uses `LEFT JOIN` so unmatched facts stay in the
   population (NULL group), matching MetricFlow. Each joined table carries an

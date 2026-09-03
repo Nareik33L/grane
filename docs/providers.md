@@ -137,12 +137,17 @@ traversal. A query filter on the joined column is applied in `WHERE` after the
 join, so `=` and `!=` both exclude unmatched facts (`NULL` compares to nothing).
 `PRIMARY` / `UNIQUE` is the upstream **semantic** contract that the target key
 is unique; MetricFlow trusts that declaration and will fan out if the warehouse
-violates it. Grane additionally **runtime-verifies** the contract in the same
-`SELECT`: a hidden `MAX(rows-per-key)` over each joined table. If any key is
-duplicated the executor refuses (`unsafe_query`) rather than returning multiplied
-facts. It does not `DISTINCT`, pick a row, or relabel the result exploratory.
-`trust=governed` therefore means: the metadata said many-to-one, and the data
-this statement read honoured that.
+violates it. Grane additionally **runtime-verifies** the contract scoped to the query's
+analytical population: the set of base-table rows after query-level filters
+and time bounds (and after snapshot selection for semi-additive metrics).
+For each joined table a scalar sub-select counts the maximum number of rows
+per key *only among FK values that appear in that population*. Duplicates in
+unrelated or time-excluded rows do not cause a false refusal. If any
+participating key maps to more than one row, the executor refuses
+(`unsafe_query`) rather than returning multiplied facts. It does not
+`DISTINCT`, pick a row, or relabel the result exploratory. `trust=governed`
+therefore means: the metadata said many-to-one, and the data this statement
+read honoured that for the facts in this execution.
 
 A query that combines a semi-additive metric with a metric whose row selection
 differs (an additive one, or a semi-additive one with a different filter,
