@@ -166,6 +166,13 @@ key a contributing fact reached in this statement honoured that. Each guard
 records which metrics it protects, its relationship path and the population
 that emits its keys (`compiled.guards[].protects / path / keySource`).
 
+For semi-additive metrics the base-table query filters constrain both steps:
+the rows the snapshot date is chosen from *and* the rows kept at that date.
+`ending_mrr WHERE segment = 'Enterprise' BY customer_status` picks the last
+Enterprise snapshot and sums only the Enterprise rows at it — never the other
+segments that happen to share the date — whether or not the query traverses a
+relationship, and per key when `group_by` selects a snapshot per customer.
+
 A query that combines a semi-additive metric with a metric whose row selection
 differs (an additive one, or a semi-additive one with a different filter,
 window, key set or granularity) is refused; query them separately.

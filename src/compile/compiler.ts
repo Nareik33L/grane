@@ -588,6 +588,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
    * metric declared `join_to_timespine` expects a row per period even when the
    * period has no data, and Grane has no time spine to draw those rows from, so
    * a per-period breakdown is refused instead of returned sparse.
+   *
+   * TODO(follow-up, product decision): metric-definition filters are FILTER
+   * clauses over the analytical population, so a group with no contributing
+   * rows still appears (NULL, or the fill value). MetricFlow filters the rows
+   * first and omits such groups. Aggregates agree; row sets (and therefore
+   * ORDER BY/LIMIT over them) can differ. Not to be changed casually.
    */
   const fillNulls = (metric: Metric, expr: string): string => {
     if (metric.config.join_to_timespine && resolved.time?.grain) {
@@ -815,17 +821,22 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       : undefined;
 
     // --- Analytical population ---
-    // Semi-additive: the snapshot CTE already applied time bounds, the metric
-    // filters and the query filters (before the snapshot is chosen, as
-    // MetricFlow does); the population is the base rows it selected.
+    // Semi-additive: the snapshot CTE applies time bounds, the metric filters
+    // and the query filters before the snapshot is chosen (as MetricFlow
+    // does). The chosen date only identifies the snapshot; base-table query
+    // filters must be reapplied to the rows AT that date, otherwise a row that
+    // fails the filter but shares the date would be aggregated (and could
+    // reach a duplicate key it has no business reaching). Joined-dimension
+    // filters stay in __grane_result by policy; metric filters stay in P0 and
+    // the FILTER clause. Time bounds are implied by the snapshot date.
     const popCteLines = [`${ident(POP_CTE)} AS (`];
     if (snapshotJoin) {
       popCteLines.push(`  SELECT ${ident(baseTable)}.*`, `  FROM ${qualify(baseTable)}`, `  ${snapshotJoin}`);
     } else {
       popCteLines.push(`  SELECT *`, `  FROM ${qualify(baseTable)}`);
-      if (factSideWhere.length > 0) {
-        popCteLines.push(`  WHERE ${factSideWhere.join("\n    AND ")}`);
-      }
+    }
+    if (factSideWhere.length > 0) {
+      popCteLines.push(`  WHERE ${factSideWhere.join("\n    AND ")}`);
     }
     popCteLines.push(`)`);
 
@@ -866,6 +877,10 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       resultCteLines.push(`  GROUP BY ${groupBy.join(", ")}`);
     }
     if (orderClauses.length > 0) {
+      // TODO(follow-up): ORDER BY + LIMIT live inside this CTE (LIMIT needs
+      // the ORDER BY here); the outer wrapper has no ORDER BY, and SQL does
+      // not guarantee a CTE's order survives the outer join. Repeat the
+      // ordering on the outer SELECT, with dialect NULL-placement parity.
       resultCteLines.push(`  ORDER BY ${orderClauses.join(", ")}`);
     }
     resultCteLines.push(`  LIMIT ${resolved.limit}`, `)`);

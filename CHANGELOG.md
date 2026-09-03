@@ -22,6 +22,16 @@
   bind correctly with the layered statement. See
   `tests/unit/query-cardinality.test.ts` and
   `tests/unit/cardinality-populations.test.ts`.
+  Semi-additive metrics keep their base-table query filters through snapshot
+  selection: the filter chooses the snapshot date *and* constrains the rows
+  kept at that date (global and per-`group_by` snapshots alike). An
+  intermediate revision of this change applied the filter only to date
+  selection when the query traversed a relationship, so
+  `ending_mrr WHERE segment = 'Enterprise' BY customer_status` summed every
+  segment at the Enterprise snapshot date with `trust=governed`; that is fixed
+  and pinned by `tests/unit/snapshot-population.test.ts` and the Oakwell
+  interop test (`tests/integration/oakwell.test.ts`, runs when the fixture and
+  its built warehouse are present).
 
 - Join execution is now part of the governed contract, not only join keys.
   Dimension traversal uses `LEFT JOIN` so unmatched facts stay in the
