@@ -3,7 +3,18 @@
 Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
 (`contains` LIKE wildcards) and item 1 (`project.week.starts`) were later
 fixed when independent reviews produced governed-wrong counterexamples.
-The rest stay deferred.
+Experimental metrics executing as `trust: governed` was a later
+BREAK-GOVERNED finding and is also fixed. The rest stay deferred.
+
+## 0. Experimental status vs `trust: governed` — fixed
+
+Resolved: `status: experimental` means the metric is not an approved
+definition. Trust walks the metric dependency closure; any experimental
+metric in that graph yields `mixed` (not `governed`) and the existing
+"not an approved definition" note. `deprecated` stays governed.
+Provider imports without a native lifecycle field remain `approved`.
+See `tests/unit/experimental-trust.test.ts`. Do not reopen as a new
+catalog-governance subsystem.
 
 ## 1. `project.week.starts` accepted but ignored — fixed
 

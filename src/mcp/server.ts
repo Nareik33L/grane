@@ -46,8 +46,9 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
   const explorationHint = kernel.config.exploration.enabled
     ? " Exploration is enabled: catalog() also lists permitted raw warehouse columns. " +
       "You may pass raw_dimensions (table.column) or raw_metrics to investigate fields that are not governed. " +
-      "trust: governed means every field is an approved definition; trust: mixed combines approved metrics with raw fields " +
-      "and must be presented as a lead, not approved business truth; trust: exploratory is raw warehouse data only."
+      "trust: governed means every field is an approved definition; trust: mixed means not every field is an approved definition " +
+      "(raw warehouse fields and/or experimental metrics) and must be presented as a lead, not approved business truth; " +
+      "trust: exploratory is raw warehouse data only."
     : " Exploration is disabled: only governed metrics and dimensions may be queried.";
 
   const server = new McpServer(

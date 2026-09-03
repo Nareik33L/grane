@@ -18,7 +18,9 @@ describe("trust headlines", () => {
 
   it("covers all three trust levels", () => {
     expect(trustHeadline("governed")).toContain("approved definition");
+    expect(trustHeadline("mixed")).toContain("not every field is an approved definition");
     expect(trustHeadline("mixed")).toContain("not approved truth");
+    expect(trustHeadline("mixed")).not.toContain("approved metrics plus raw fields");
     expect(trustHeadline("exploratory")).toContain("not governed");
     expect(payloadWithTrustFirst({ trust: "governed", x: 1 }).headline).toBe(trustHeadline("governed"));
   });
