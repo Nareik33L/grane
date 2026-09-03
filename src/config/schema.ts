@@ -75,17 +75,18 @@ export type UnsupportedDefinition = z.infer<typeof unsupportedDefinitionSchema>;
 /**
  * How a semi-additive metric picks its snapshot rows. `window` is which
  * snapshot to keep within the query's time range (and each time bucket when a
- * grain is requested). `group_by` is the explicit key set that identifies one
- * series: `entity` uses the metric entity's primary key; a list of
- * `${table.column}` references keeps one snapshot per distinct key tuple; an
- * empty list keeps one snapshot date for the whole result. Grane never infers
- * this key set. The entity primary key is a valid series only when that
- * column is a declared many_to_one / one_to_one from the snapshot table (a
- * continuing business entity). A surrogate row identity as `group_by` is
- * refused: first/last would keep every historical row. `granularity` compares
- * snapshot dates after truncating to that period (MetricFlow's declared
- * `time_granularity`): every row in the last/first period is kept, not only
- * the last/first exact value. Omit it to compare raw values.
+ * grain is requested). `group_by` is the series key set: `entity` (the
+ * default) uses the metric entity's primary key and is refused — that column
+ * is the declared grain, so first/last cannot collapse history. A list of
+ * `${table.column}` references is the native YAML declaration of a continuing
+ * series and is executed as declared, provided no entry is the entity
+ * primary key (a vacuous companion cannot be rescued). An empty list keeps
+ * one snapshot date for the whole result. Grane never infers a series from a
+ * relationship: many_to_one / one_to_one prove join cardinality, not
+ * temporal stability. `granularity` compares snapshot dates after truncating
+ * to that period (MetricFlow's declared `time_granularity`): every row in
+ * the last/first period is kept, not only the last/first exact value. Omit
+ * it to compare raw values.
  */
 export const semiAdditiveGranularitySchema = z.enum(["day", "week", "month", "quarter", "year"]);
 export type SemiAdditiveGranularity = z.infer<typeof semiAdditiveGranularitySchema>;

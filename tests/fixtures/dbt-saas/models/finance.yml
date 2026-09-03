@@ -12,6 +12,10 @@ models:
         entity:
           type: primary
           name: customer_month
+      - name: snapshot_row_id
+        entity:
+          type: unique
+          name: snapshot_row
       - name: customer_id
         entity:
           type: foreign
@@ -108,6 +112,15 @@ models:
           window_agg: max
           group_by:
             - customer_month
+      - name: mrr_unique_group
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+          group_by:
+            - snapshot_row
       - name: mrr_other_as_of
         type: simple
         agg: sum

@@ -137,7 +137,7 @@ const DDL: string[] = [
   `CREATE TABLE invoices (id INTEGER, account_id INTEGER, total DECIMAL(18,4), issued_at TIMESTAMPTZ)`,
   `CREATE TABLE invoice_lines (id INTEGER, invoice_id INTEGER, amount DECIMAL(18,4))`,
   `CREATE TABLE exchange_rates (date DATE, from_currency VARCHAR, to_currency VARCHAR, rate DECIMAL(18,6))`,
-  `CREATE TABLE daily_account_snapshots (account_id INTEGER, snapshot_date DATE, balance DECIMAL(18,4))`,
+  `CREATE TABLE daily_account_snapshots (id INTEGER, account_id INTEGER, snapshot_date DATE, balance DECIMAL(18,4))`,
   `CREATE TABLE sales_regions (country VARCHAR, region VARCHAR)`,
   `CREATE TABLE chain_a (id INTEGER, label VARCHAR)`,
   `CREATE TABLE chain_b (id INTEGER, a_id INTEGER, label VARCHAR)`,

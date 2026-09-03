@@ -352,10 +352,10 @@ export const EXCHANGE_RATES = [
 ];
 
 export const DAILY_ACCOUNT_SNAPSHOTS = [
-  { account_id: 1, snapshot_date: "2024-03-01", balance: 1000 },
-  { account_id: 1, snapshot_date: "2024-03-02", balance: 1100 },
-  { account_id: 1, snapshot_date: "2024-03-15", balance: 900 },
-  { account_id: 2, snapshot_date: "2024-03-15", balance: 400 },
+  { id: 1, account_id: 1, snapshot_date: "2024-03-01", balance: 1000 },
+  { id: 2, account_id: 1, snapshot_date: "2024-03-02", balance: 1100 },
+  { id: 3, account_id: 1, snapshot_date: "2024-03-15", balance: 900 },
+  { id: 4, account_id: 2, snapshot_date: "2024-03-15", balance: 400 },
 ];
 
 export const SALES_REGIONS = [
