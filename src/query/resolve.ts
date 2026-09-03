@@ -156,11 +156,17 @@ export function resolveQuery(
     if (metric.name !== name) notes.push(`"${name}" resolved to metric "${metric.name}".`);
     if (metric.config.status === "deprecated") {
       notes.push(`Metric "${metric.name}" is deprecated.`);
-    } else if (metric.config.status === "experimental") {
-      notes.push(`Metric "${metric.name}" is experimental (not an approved definition).`);
     }
     return metric;
   });
+
+  // Experimental is "not an approved definition". Notes and trust both walk
+  // the metric dependency closure (requested metrics + ratio components),
+  // so an approved ratio over an experimental denominator cannot stay governed.
+  const unapproved = experimentalMetricNames(model, metrics);
+  for (const name of unapproved) {
+    notes.push(`Metric "${name}" is experimental (not an approved definition).`);
+  }
 
   let entity: string | null = null;
   let baseTable: string;
@@ -397,7 +403,7 @@ export function resolveQuery(
   const unique = (values: string[]) => [...new Set(values)];
   const governed = unique(governedNames);
   const ungoverned = unique(ungovernedNames);
-  const trust = computeTrust(governed, ungoverned);
+  const trust = computeTrust(governed, ungoverned, unapproved);
   const warning = warningFor(ungoverned);
 
   return {
@@ -424,8 +430,12 @@ export function timeAlias(grain: TimeGrain): string {
   return `period_${grain}`;
 }
 
-export function computeTrust(governed: string[], ungoverned: string[]): TrustLevel {
-  if (ungoverned.length === 0) return "governed";
+export function computeTrust(
+  governed: string[],
+  ungoverned: string[],
+  unapproved: string[] = [],
+): TrustLevel {
+  if (ungoverned.length === 0 && unapproved.length === 0) return "governed";
   if (governed.length === 0) return "exploratory";
   return "mixed";
 }
@@ -524,6 +534,24 @@ function expandMetricComponents(model: SemanticModel, metrics: Metric[]): Metric
     }
   }
   return out;
+}
+
+/** Canonical names of experimental metrics in the requested metrics' ratio closure. */
+export function experimentalMetricNames(model: SemanticModel, metrics: Metric[]): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const walk = (metric: Metric): void => {
+    if (seen.has(metric.name)) return;
+    seen.add(metric.name);
+    if (metric.config.status === "experimental") names.push(metric.name);
+    if (metric.config.type !== "ratio") return;
+    const numerator = model.metrics.get(metric.config.numerator!);
+    const denominator = model.metrics.get(metric.config.denominator!);
+    if (numerator) walk(numerator);
+    if (denominator) walk(denominator);
+  };
+  for (const metric of metrics) walk(metric);
+  return names;
 }
 
 function resolveTimeColumn(

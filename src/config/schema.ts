@@ -139,6 +139,13 @@ export const metricConfigSchema = z
      */
     join_to_timespine: z.boolean().optional(),
     unit: z.string().optional(),
+    /**
+     * Approval of this metric definition. `approved` (default, including
+     * omitted) may participate in `trust: governed`. `experimental` is not
+     * an approved definition: a query whose metric dependency closure
+     * includes it cannot be `trust: governed`. `deprecated` is still an
+     * approved definition that is phasing out.
+     */
     status: metricStatusSchema.default("approved"),
     synonyms: z.array(z.string()).default([]),
     source: definitionSourceSchema.optional(),

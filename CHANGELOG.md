@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- A query whose metric dependency closure includes an `experimental` metric
+  cannot be `trust: governed`. Status is the existing approval field
+  (`approved` default, `experimental` = not an approved definition,
+  `deprecated` = still approved). Trust walks requested metrics and ratio
+  numerator/denominator recursively. Provider imports that set
+  `status: approved` (dbt/MetricFlow, Cube, LookML, Ossie, Malloy) are
+  unchanged. The mixed headline now says "not every field is an approved
+  definition" so it covers experimental metrics as well as raw fields.
+  See `tests/unit/experimental-trust.test.ts`.
+
 - `project.week.starts` (`monday` | `sunday`, default `monday`) now determines
   week-grain bucket boundaries. Compilation emits an explicit civil-week
   expression per dialect instead of the warehouse `date_trunc('week')`

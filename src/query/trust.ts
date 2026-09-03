@@ -3,7 +3,7 @@ import type { TrustLevel } from "./model.js";
 /** One-line lead shown first on every query/explain/validate result. */
 export const TRUST_HEADLINES: Record<TrustLevel, string> = {
   governed: "trust: governed — every field is an approved definition.",
-  mixed: "trust: mixed — approved metrics plus raw fields; a lead, not approved truth.",
+  mixed: "trust: mixed — not every field is an approved definition; a lead, not approved truth.",
   exploratory: "trust: exploratory — warehouse data only; not governed analytics.",
 };
 
