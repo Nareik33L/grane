@@ -710,6 +710,7 @@ describe("guard provenance", () => {
     const plain = k.compile({ metrics: ["revenue"] }).compiled;
     expect(plain.guards).toEqual([]);
     expect(plain.plan.population).toEqual({ analytical: null, contributing: null });
-    expect(plain.sql).not.toContain("__grane");
+    expect(plain.sql).not.toMatch(/__grane_(card|pop|result|contrib|reach)/);
+    expect(plain.sql).toContain('COUNT(*) OVER() AS "__grane_n"');
   });
 });

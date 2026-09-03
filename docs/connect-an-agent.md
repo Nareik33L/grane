@@ -386,9 +386,17 @@ Example provenance in the response:
   "trust": "governed",
   "query_id": "q_abc123",
   "metrics": { "revenue": { "definition_version": "a82cf1d3" } },
-  "generated_sql": "SELECT ..."
+  "generated_sql": "SELECT ...",
+  "row_count": 12,
+  "completeness": { "status": "complete", "limit": 1000, "source": "default" }
 }
 ```
+
+`completeness.status` is also on the query result next to `rows`.
+`complete` means Grane returned the full requested result set.
+`truncated` means an execution cap (`default_rows` or `max_rows`) hid
+more rows. A request `limit` is semantic top-N and is `complete` even
+if more unbounded groups exist. Trust is a separate axis.
 
 ---
 

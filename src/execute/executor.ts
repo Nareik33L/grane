@@ -1,9 +1,27 @@
 import { randomBytes } from "node:crypto";
 import type { Scalar, LimitsConfig } from "../config/schema.js";
-import { GUARD_PREFIX, type CompiledQuery } from "../compile/compiler.js";
+import { GUARD_PREFIX, RESULT_TOTAL_COLUMN, type CompiledQuery } from "../compile/compiler.js";
 import type { WarehouseConnector } from "../connectors/types.js";
 import { unsafeQuery } from "../errors.js";
 import type { TrustLevel } from "../query/model.js";
+import type { RowLimitSource } from "../query/resolve.js";
+
+/**
+ * Whether the returned rows are the complete requested result set.
+ *
+ * `query` source means the request asked for this many rows (semantic top-N);
+ * that result is complete even if more unbounded groups exist. `default` /
+ * `max` are execution caps: `truncated` only when the pre-LIMIT group count
+ * exceeds the returned set.
+ */
+export type CompletenessStatus = "complete" | "truncated" | "unknown";
+
+export interface ResultCompleteness {
+  status: CompletenessStatus;
+  /** Applied result cap. Returned `rows.length` never exceeds this. */
+  limit: number;
+  source: RowLimitSource;
+}
 
 export interface Provenance {
   query_id: string;
@@ -17,6 +35,7 @@ export interface Provenance {
   params: Scalar[];
   executed_at: string;
   row_count: number;
+  completeness: ResultCompleteness;
   duration_ms: number;
 }
 
@@ -27,6 +46,7 @@ export interface QueryResult {
   governed: string[];
   ungoverned: string[];
   warning: string | null;
+  completeness: ResultCompleteness;
   provenance: Provenance;
 }
 
@@ -109,8 +129,13 @@ export async function executeCompiled(
   const result = await connector.query(compiled.sql, compiled.params, limits);
   let rows = result.rows.slice(0, limits.max_rows);
   assertCardinality(compiled, rows);
-  const hidden = result.columns.filter((name) => name.startsWith(GUARD_PREFIX));
-  const columns = result.columns.filter((name) => !name.startsWith(GUARD_PREFIX));
+  const hidden = result.columns.filter(
+    (name) => name.startsWith(GUARD_PREFIX) || name === RESULT_TOTAL_COLUMN,
+  );
+  const columns = result.columns.filter(
+    (name) => !name.startsWith(GUARD_PREFIX) && name !== RESULT_TOTAL_COLUMN,
+  );
+  const preLimitTotal = readPreLimitTotal(rows);
   for (const row of rows) {
     for (const name of hidden) delete row[name];
   }
@@ -124,6 +149,7 @@ export async function executeCompiled(
     const analyticalCols = compiled.plan.columns;
     rows = rows.filter((row) => analyticalCols.some((c) => row[c] !== null && row[c] !== undefined));
   }
+  const completeness = resultCompleteness(compiled, rows.length, preLimitTotal);
   const provenance: Provenance = {
     query_id: newQueryId(),
     trust: compiled.trust,
@@ -144,6 +170,7 @@ export async function executeCompiled(
     params: compiled.params,
     executed_at: new Date(startedAt).toISOString(),
     row_count: rows.length,
+    completeness,
     duration_ms: Date.now() - startedAt,
   };
   return {
@@ -153,6 +180,42 @@ export async function executeCompiled(
     governed: compiled.governed,
     ungoverned: compiled.ungoverned,
     warning: compiled.warning,
+    completeness,
     provenance,
+  };
+}
+
+function readPreLimitTotal(rows: Record<string, unknown>[]): number | null {
+  for (const row of rows) {
+    const raw = row[RESULT_TOTAL_COLUMN];
+    if (raw === null || raw === undefined) continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+export function resultCompleteness(
+  compiled: Pick<CompiledQuery, "rowLimit" | "rowLimitSource">,
+  returnedRows: number,
+  preLimitTotal: number | null,
+): ResultCompleteness {
+  const limit = compiled.rowLimit;
+  const source = compiled.rowLimitSource;
+  // Semantic top-N is the requested result. More unbounded groups do not
+  // make that execution incomplete.
+  if (source === "query") {
+    return { status: "complete", limit, source };
+  }
+  if (returnedRows === 0) {
+    return { status: "complete", limit, source };
+  }
+  if (preLimitTotal === null) {
+    return { status: "unknown", limit, source };
+  }
+  return {
+    status: preLimitTotal > returnedRows ? "truncated" : "complete",
+    limit,
+    source,
   };
 }

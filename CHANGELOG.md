@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Successful query results carry machine-readable `completeness`
+  (`status`, `limit`, `source`) on the result and in provenance. A
+  request `limit` is semantic top-N and is complete. Omitted `limit`
+  uses `limits.default_rows` as an execution cap; `max_rows` is the
+  hard bound. Truncation is detected from the pre-LIMIT group count
+  (`COUNT(*) OVER()`), so an exact-cap result is not labelled
+  truncated. Trust is unchanged. MCP and CLI expose the same field.
+  See `tests/unit/row-limit-completeness.test.ts`.
+
 - Semi-additive series keys: the metric entity's primary key is the
   declared grain and is always refused as a first/last partition (default
   `group_by: entity` or an explicit list that includes it). A relationship

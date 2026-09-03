@@ -333,8 +333,13 @@ program
         for (const note of result.notes) console.error(`note: ${note}`);
         if (result.warning) console.error(`warning: ${result.warning}`);
         printTable(result.columns, result.rows);
+        if (result.completeness.status === "truncated") {
+          console.error(
+            `Showing ${result.provenance.row_count} rows; result truncated by execution limit ${result.completeness.limit}.`,
+          );
+        }
         console.error(
-          `\n${result.provenance.row_count} rows | trust: ${result.trust} | query ${result.provenance.query_id} | ${result.provenance.duration_ms}ms`,
+          `\n${result.provenance.row_count} rows | trust: ${result.trust} | completeness: ${result.completeness.status} | query ${result.provenance.query_id} | ${result.provenance.duration_ms}ms`,
         );
       } catch (err) {
         fail(err);
