@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Scalar, LimitsConfig } from "../config/schema.js";
-import { GUARD_PREFIX, RESULT_TOTAL_COLUMN, type CompiledQuery } from "../compile/compiler.js";
+import { RESULT_ROW_COLUMN, RESULT_TOTAL_COLUMN, isHiddenResultColumn, type CompiledQuery } from "../compile/compiler.js";
 import type { WarehouseConnector } from "../connectors/types.js";
 import { unsafeQuery } from "../errors.js";
 import type { TrustLevel } from "../query/model.js";
@@ -129,25 +129,25 @@ export async function executeCompiled(
   const result = await connector.query(compiled.sql, compiled.params, limits);
   let rows = result.rows.slice(0, limits.max_rows);
   assertCardinality(compiled, rows);
-  const hidden = result.columns.filter(
-    (name) => name.startsWith(GUARD_PREFIX) || name === RESULT_TOTAL_COLUMN,
-  );
-  const columns = result.columns.filter(
-    (name) => !name.startsWith(GUARD_PREFIX) && name !== RESULT_TOTAL_COLUMN,
-  );
+  const hidden = result.columns.filter((name) => isHiddenResultColumn(name));
+  const columns = result.columns.filter((name) => !isHiddenResultColumn(name));
   const preLimitTotal = readPreLimitTotal(rows);
+  // When the wrapper (`__grane_card LEFT JOIN __grane_result ON TRUE`) produced
+  // a single padding row because the analytical GROUP BY has zero rows, strip
+  // it so callers see an empty result. Identification is structural: a real
+  // `__grane_result` row carries `__grane_row = 1`; a LEFT JOIN miss is NULL.
+  // Visible business NULLs are not consulted. Applies only to grouped queries
+  // with guards; scalar queries may legitimately return one all-null aggregate.
+  if (compiled.guards.length > 0 && compiled.plan.groupColumns.length > 0) {
+    const hasMarker = result.columns.includes(RESULT_ROW_COLUMN);
+    if (hasMarker) {
+      rows = rows.filter((row) => row[RESULT_ROW_COLUMN] !== null && row[RESULT_ROW_COLUMN] !== undefined);
+    }
+    // Marker absent → ambiguous provenance: keep the row rather than delete
+    // a potentially real NULL group.
+  }
   for (const row of rows) {
     for (const name of hidden) delete row[name];
-  }
-  // When the wrapper (`__grane_card LEFT JOIN __grane_result ON TRUE`) produced
-  // a single null-padding row because the analytical GROUP BY has zero rows,
-  // strip it so callers see an empty result. Applies only when the query has
-  // at least one dimension (grouped query); scalar queries (no dimensions) may
-  // legitimately return a single all-null metrics row (SUM of empty set).
-  if (compiled.guards.length > 0 && compiled.plan.groupColumns.length > 0) {
-    // A wrapper-padding row has every analytical column null.
-    const analyticalCols = compiled.plan.columns;
-    rows = rows.filter((row) => analyticalCols.some((c) => row[c] !== null && row[c] !== undefined));
   }
   const completeness = resultCompleteness(compiled, rows.length, preLimitTotal);
   const provenance: Provenance = {

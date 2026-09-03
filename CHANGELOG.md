@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Cardinality-wrapper padding is identified by a structural marker
+  (`__grane_row`), not by “every visible column is NULL”. A real GROUP
+  BY row whose dimension and metric values are NULL is preserved. A
+  LEFT JOIN miss from `__grane_card` is still stripped so an empty
+  grouped query stays empty. Completeness from PR #26 is unchanged.
+  See `tests/unit/null-group-padding.test.ts`.
+
 - Successful query results carry machine-readable `completeness`
   (`status`, `limit`, `source`) on the result and in provenance. A
   request `limit` is semantic top-N and is complete. Omitted `limit`

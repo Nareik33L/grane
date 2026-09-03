@@ -119,6 +119,17 @@ export interface CardinalityGuard {
 export const GUARD_PREFIX = "__grane_card_";
 /** Hidden window count of grouped rows before LIMIT; stripped before return. */
 export const RESULT_TOTAL_COLUMN = "__grane_n";
+/**
+ * Structural “this row came from the analytical SELECT” marker.
+ * Always `1` on a real `__grane_result` row. NULL on the cardinality
+ * wrapper's LEFT JOIN miss (synthetic padding). Never inspect business
+ * NULLs to decide padding. Stripped before return.
+ */
+export const RESULT_ROW_COLUMN = "__grane_row";
+
+export function isHiddenResultColumn(name: string): boolean {
+  return name.startsWith(GUARD_PREFIX) || name === RESULT_TOTAL_COLUMN || name === RESULT_ROW_COLUMN;
+}
 /** Analytical population: base rows after time bounds and base-table query filters. */
 export const POP_CTE = "__grane_pop";
 /** Metric-contributing population: rows of POP_CTE that can contribute to at least one metric. */
@@ -830,6 +841,8 @@ export function compileQuery(
   // Pre-LIMIT group count. Window functions run after GROUP BY and before
   // LIMIT, so this is the size of the requested result, not the returned cap.
   selects.push(`COUNT(*) OVER() AS ${ident(RESULT_TOTAL_COLUMN)}`);
+  // Provenance: real analytical row vs wrapper padding (LEFT JOIN miss).
+  selects.push(`1 AS ${ident(RESULT_ROW_COLUMN)}`);
   // Guards are emitted separately (in __grane_card CTE) when joins exist.
 
   // ---- Metric-contributing population ----
@@ -1063,6 +1076,7 @@ export function compileQuery(
     const outerSelects = [
       ...selectAliases.map((alias) => `${ident("__grane_result")}.${ident(alias)}`),
       `${ident("__grane_result")}.${ident(RESULT_TOTAL_COLUMN)}`,
+      `${ident("__grane_result")}.${ident(RESULT_ROW_COLUMN)}`,
       ...guards.map((g) => `${ident("__grane_card")}.${ident(g.column)}`),
     ];
     const allCtes = [
