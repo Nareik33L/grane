@@ -254,6 +254,68 @@ dimensions:
     expect(loaded.warnings.some((w) => w.includes("trailing_revenue"))).toBe(true);
   });
 
+  it("separates provider warnings from auth config lint", () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-warn-"));
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `
+connection: { type: postgres, schema: public }
+providers:
+  - type: dbt
+    project: ${JSON.stringify(fixtureShop)}
+auth:
+  agents:
+    - id: finance
+      token: finance-secret-token
+      metrics: [revenue, not_a_metric]
+`,
+    );
+    const loaded = loadConfig(dir);
+    expect(loaded.warnings.some((w) => w.includes("trailing_revenue"))).toBe(true);
+    expect(loaded.warnings.some((w) => w.includes('auth agent "finance"'))).toBe(true);
+    expect(loaded.providerWarnings.some((w) => w.includes("trailing_revenue"))).toBe(true);
+    expect(loaded.providerWarnings.some((w) => w.includes("auth agent"))).toBe(false);
+  });
+
+  it("surfaces skipped upstream definitions to agents through catalog warnings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-catalog-warn-"));
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `
+connection: { type: postgres, schema: public }
+providers:
+  - type: dbt
+    project: ${JSON.stringify(fixtureShop)}
+auth:
+  agents:
+    - id: finance
+      token: finance-secret-token
+      metrics: [revenue]
+    - id: analyst
+      token: analyst-secret-token
+`,
+    );
+    const loaded = loadConfig(dir);
+    const kernel = new GraneKernel(loaded.config, {
+      projectDir: loaded.projectDir,
+      providerWarnings: loaded.providerWarnings,
+    });
+
+    const full = kernel.governedCatalog();
+    expect(full.metrics.map((m) => m.name)).not.toContain("trailing_revenue");
+    expect(full.warnings.some((w) => w.includes("trailing_revenue") && w.includes("cumulative"))).toBe(true);
+    expect(full.warnings.some((w) => w.includes("auth agent"))).toBe(false);
+
+    expect(kernel.governedCatalog("trailing").warnings).toHaveLength(1);
+    expect(kernel.governedCatalog("country").warnings).toEqual([]);
+
+    const analyst = kernel.bindAgent(loaded.config.auth.agents.find((a) => a.id === "analyst")!);
+    expect(analyst.governedCatalog().warnings.length).toBeGreaterThan(0);
+
+    const finance = kernel.bindAgent(loaded.config.auth.agents.find((a) => a.id === "finance")!);
+    expect(finance.governedCatalog().warnings).toEqual([]);
+  });
+
   it("refuses the same metric name from two providers", () => {
     const dir = mkdtempSync(join(tmpdir(), "grane-dup-"));
     writeFileSync(
