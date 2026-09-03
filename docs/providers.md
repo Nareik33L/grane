@@ -74,7 +74,7 @@ same for all of them:
   `count_distinct`, `avg`, `min`, `max`. SQL expressions (`CASE WHEN …`,
   arithmetic, `percentile`, `median`) are skipped.
 - Ratios of two imported metrics are imported. Other derived metrics are not.
-- Filters must be equality / inequality on a dimension joined with `and`.
+- Filters must be `=` / `!=` between a column and a literal, joined with `and`.
 - Table references resolve into `connection.schema`; schema prefixes in
   upstream definitions are dropped. Multi-schema projects need one schema (or a
   search path) that can see every table.

@@ -152,7 +152,7 @@ Methodology: [`tests/benchmark/README.md`](tests/benchmark/README.md).
 
 ## Warehouses and semantic providers
 
-Postgres is bundled. Other engines are optional installs. dbt, Cube, LookML, Ossie, and Malloy can be connected instead of copying YAML. Grane imports the subset it can compile deterministically (simple aggregates, ratios, equality filters, `${table.column}` references); anything else is skipped with a warning shown in `grane validate` and in the agent's `catalog()`. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
+Postgres is bundled. Other engines are optional installs. dbt, Cube, LookML, Ossie, and Malloy can be connected instead of copying YAML. Grane imports the subset it can compile deterministically (simple column aggregates, ratios, `=`/`!=` filters, `${table.column}` references); anything else is skipped with a warning shown in `grane validate` and in the agent's `catalog()`. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
 
 Production HTTP (Docker, TLS, agent tokens, audit log): [docs/production.md](docs/production.md).
 
