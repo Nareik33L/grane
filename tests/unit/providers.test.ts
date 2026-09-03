@@ -24,7 +24,9 @@ describe("dbt / MetricFlow YAML (legacy + latest spec)", () => {
     expect(contribution.metrics.revenue?.sql).toBe("${orders.net_amount}");
     expect(contribution.metrics.revenue?.entity).toBe("order");
     expect(contribution.metrics.revenue?.time_dimension).toBe("${orders.completed_at}");
-    expect(contribution.metrics.revenue?.filters).toEqual({ "orders.status": "completed" });
+    expect(contribution.metrics.revenue?.filters).toEqual([
+      { field: "orders.status", operator: "=", value: "completed" },
+    ]);
     expect(contribution.metrics.revenue?.source?.provider).toBe("dbt");
     expect(contribution.metrics.orders?.type).toBe("count");
   });

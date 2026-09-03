@@ -1,0 +1,81 @@
+version: 2
+
+# Legacy standalone spec: window_choice / window_groupings and an integer expr.
+semantic_models:
+  - name: balances
+    model: ref('fct_balances')
+    defaults:
+      agg_time_dimension: snapshot_date
+    entities:
+      - name: balance
+        type: primary
+        expr: balance_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: snapshot_date
+        type: time
+        expr: snapshot_date
+        type_params:
+          time_granularity: day
+    measures:
+      - name: account_balance
+        agg: sum
+        expr: balance
+        create_metric: true
+        non_additive_dimension:
+          name: snapshot_date
+          window_choice: max
+          window_groupings:
+            - account
+      - name: total_balance_first_day
+        agg: sum
+        expr: balance
+        create_metric: true
+        non_additive_dimension:
+          name: snapshot_date
+          window_choice: min
+      - name: balance_rows
+        agg: count
+        expr: 1
+        create_metric: true
+
+  # Daily rows whose snapshot dimension is declared at month granularity:
+  # MetricFlow keeps every row in the last month, not the last day.
+  - name: monthly_balances
+    model: ref('fct_monthly_balances')
+    defaults:
+      agg_time_dimension: snapshot_date
+    entities:
+      - name: monthly_balance
+        type: primary
+        expr: row_id
+    dimensions:
+      - name: snapshot_date
+        type: time
+        expr: snapshot_date
+        type_params:
+          time_granularity: month
+      - name: recorded_at
+        type: time
+        expr: recorded_at
+        type_params:
+          time_granularity: hour
+    measures:
+      - name: monthly_balance
+        agg: sum
+        expr: balance
+        create_metric: true
+        non_additive_dimension:
+          name: snapshot_date
+          window_choice: max
+      # Sub-day granularity: Grane cannot compile the truncation, so it skips.
+      - name: hourly_balance
+        agg: sum
+        expr: balance
+        create_metric: true
+        agg_time_dimension: recorded_at
+        non_additive_dimension:
+          name: recorded_at
+          window_choice: max

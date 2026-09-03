@@ -1,0 +1,70 @@
+version: 2
+
+models:
+  - name: dim_customers
+    semantic_model:
+      enabled: true
+      name: customers
+    agg_time_dimension: signup_date
+    columns:
+      - name: customer_id
+        entity:
+          type: primary
+          name: customer
+      - name: segment
+        dimension:
+          type: categorical
+          name: customer_segment
+      - name: country_code
+        dimension:
+          type: categorical
+          name: country
+      - name: customer_status
+        dimension:
+          type: categorical
+          name: customer_status
+      # SQL-expression dimension: Grane must record it as unsupported, not
+      # compile the expression or drop it silently.
+      - name: is_large
+        dimension:
+          type: categorical
+          name: is_large
+          expr: case when segment = 'Enterprise' then 'yes' else 'no' end
+      - name: signup_date
+        granularity: day
+        dimension:
+          type: time
+          name: signup_date
+    metrics:
+      - name: signups
+        type: simple
+        agg: count
+        expr: 1
+      - name: paying_signups
+        type: simple
+        agg: count
+        expr: 1
+        filter: |
+          {{ Dimension('customer__customer_status') }} != 'trial'
+
+  # No primary entity backed by a column: Grane must not assume "id".
+  - name: fct_events
+    semantic_model:
+      enabled: true
+      name: events
+    agg_time_dimension: event_at
+    columns:
+      - name: customer_id
+        entity:
+          type: foreign
+          name: customer
+      - name: event_at
+        granularity: day
+        dimension:
+          type: time
+          name: event_at
+    metrics:
+      - name: events
+        type: simple
+        agg: count
+        expr: 1

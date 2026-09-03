@@ -58,6 +58,42 @@ export const definitionSourceSchema = z.object({
 });
 export type DefinitionSource = z.infer<typeof definitionSourceSchema>;
 
+/**
+ * An upstream definition a provider saw but deliberately did not import.
+ * Populated by providers only; agents discover these through the catalog so
+ * "not imported" is distinguishable from "does not exist".
+ */
+export const unsupportedDefinitionSchema = z.object({
+  kind: z.enum(["metric", "dimension", "entity", "relationship"]),
+  name: z.string(),
+  provider: z.string(),
+  path: z.string().optional(),
+  reason: z.string(),
+});
+export type UnsupportedDefinition = z.infer<typeof unsupportedDefinitionSchema>;
+
+/**
+ * How a semi-additive metric picks its snapshot rows. `window` is which
+ * snapshot to keep within the query's time range (and each time bucket when a
+ * grain is requested). `group_by` is the explicit key set that identifies one
+ * series: `entity` uses the metric entity's primary key; a list of
+ * `${table.column}` references keeps one snapshot per distinct key tuple; an
+ * empty list keeps one snapshot date for the whole result. Grane never infers
+ * this key set. `granularity` compares snapshot dates after truncating to
+ * that period (MetricFlow's declared `time_granularity`): every row in the
+ * last/first period is kept, not only the last/first exact value. Omit it to
+ * compare raw values.
+ */
+export const semiAdditiveGranularitySchema = z.enum(["day", "week", "month", "quarter", "year"]);
+export type SemiAdditiveGranularity = z.infer<typeof semiAdditiveGranularitySchema>;
+
+export const semiAdditiveConfigSchema = z.object({
+  window: z.enum(["last", "first"]).default("last"),
+  group_by: z.union([z.literal("entity"), z.array(z.string())]).default("entity"),
+  granularity: semiAdditiveGranularitySchema.optional(),
+});
+export type SemiAdditiveConfig = z.infer<typeof semiAdditiveConfigSchema>;
+
 export const entityConfigSchema = z.object({
   table: z.string(),
   primary_key: z.string().default("id"),
@@ -72,6 +108,10 @@ export const metricConfigSchema = z
     owner: z.string().optional(),
     entity: z.string(),
     type: metricTypeSchema,
+    /**
+     * `${table.column}` to aggregate. Optional only for `count`, where
+     * omitting it counts rows of the entity table (`COUNT(1)`).
+     */
     sql: z.string().optional(),
     numerator: z.string().optional(),
     denominator: z.string().optional(),
@@ -79,19 +119,27 @@ export const metricConfigSchema = z
     time_dimension: z.string().optional(),
     /**
      * How the measure combines across the time dimension.
-     * `full` (default) may be summed across dates. `semi` is last-as-of
-     * (last snapshot per entity key, then summed across keys). `none` is
-     * reserved for non-additive measures.
+     * `full` (default) may be summed across dates. `semi` keeps one snapshot
+     * per key within the requested time range (see `semi_additive`), then
+     * aggregates across keys. `none` is reserved for non-additive measures.
      */
     additive: z.enum(["full", "semi", "none"]).optional(),
+    semi_additive: semiAdditiveConfigSchema.optional(),
     unit: z.string().optional(),
     status: metricStatusSchema.default("approved"),
     synonyms: z.array(z.string()).default([]),
     source: definitionSourceSchema.optional(),
   })
-  .refine((m) => (m.type === "ratio" ? Boolean(m.numerator && m.denominator) : Boolean(m.sql)), {
-    message:
-      "metrics of type 'ratio' require 'numerator' and 'denominator' (metric names); all other types require 'sql' (a ${table.column} reference)",
+  .refine(
+    (m) =>
+      m.type === "ratio" ? Boolean(m.numerator && m.denominator) : m.type === "count" ? true : Boolean(m.sql),
+    {
+      message:
+        "metrics of type 'ratio' require 'numerator' and 'denominator' (metric names); other types require 'sql' (a ${table.column} reference), except 'count' which may omit it to count rows",
+    },
+  )
+  .refine((m) => !m.semi_additive || m.additive === "semi", {
+    message: "'semi_additive' is only meaningful with additive: semi",
   });
 export type MetricConfig = z.infer<typeof metricConfigSchema>;
 
@@ -277,5 +325,7 @@ export const graneConfigSchema = z.object({
   metrics: z.record(z.string(), metricConfigSchema).default({}),
   dimensions: z.record(z.string(), dimensionConfigSchema).default({}),
   relationships: z.record(z.string(), relationshipConfigSchema).default({}),
+  /** Filled in by semantic providers at load time; not a user-facing key. */
+  unsupported: z.array(unsupportedDefinitionSchema).default([]),
 });
 export type GraneConfig = z.infer<typeof graneConfigSchema>;

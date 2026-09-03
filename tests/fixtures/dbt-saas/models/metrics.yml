@@ -1,0 +1,82 @@
+version: 2
+
+metrics:
+  # Same entity, same snapshot selection: imports.
+  - name: arpu
+    type: ratio
+    label: ARPU
+    numerator: ending_mrr
+    denominator: active_customers
+
+  - name: revenue_per_invoice
+    type: ratio
+    numerator: revenue
+    denominator: invoice_count
+
+  # Cross-grain: tickets are at ticket grain, active customers at snapshot grain.
+  - name: tickets_per_active_customer
+    type: ratio
+    numerator: support_tickets
+    denominator: active_customers
+
+  # Components choose different snapshot rows.
+  - name: enterprise_mrr_share
+    type: ratio
+    numerator: enterprise_ending_mrr
+    denominator: ending_mrr
+
+  # Semi-additive over additive.
+  - name: mrr_per_new_mrr
+    type: ratio
+    numerator: ending_mrr
+    denominator: new_mrr
+
+  # Filter on a ratio is not applied by Grane.
+  - name: enterprise_arpu
+    type: ratio
+    numerator: ending_mrr
+    denominator: active_customers
+    filter: |
+      {{ Dimension('customer_month__customer_segment') }} = 'Enterprise'
+
+  # Filtered ratio input.
+  - name: paid_share
+    type: ratio
+    numerator:
+      name: invoice_count
+      filter: "{{ Dimension('invoice__invoice_status') }} = 'paid'"
+    denominator: invoice_count
+
+  - name: arr
+    type: derived
+    expr: ending_mrr * 12
+    input_metrics:
+      - name: ending_mrr
+
+  - name: mrr_mom_change
+    type: derived
+    expr: ending_mrr - prior_ending_mrr
+    input_metrics:
+      - name: ending_mrr
+      - name: ending_mrr
+        alias: prior_ending_mrr
+        offset_window: 1 month
+
+  - name: simple_derived_ratio
+    type: derived
+    expr: "{{ Metric('revenue') }} / {{ Metric('invoice_count') }}"
+    input_metrics:
+      - name: revenue
+      - name: invoice_count
+
+  - name: trailing_tickets
+    type: cumulative
+    input_metric: support_tickets
+    window: 30 days
+
+  - name: trial_conversion
+    type: conversion
+    entity: customer
+    calculation: conversion_rate
+    base_metric: signups
+    conversion_metric: paying_signups

@@ -26,6 +26,12 @@ export interface LoadedConfig {
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
+const UNSUPPORTED_MAP = {
+  entity: "entities",
+  metric: "metrics",
+  dimension: "dimensions",
+  relationship: "relationships",
+} as const;
 const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "auth", "audit", "providers"] as const;
 
 /** Resolve the project directory: the given dir, or ./analytics under it if grane.yml lives there. */
@@ -183,6 +189,8 @@ export function loadConfig(projectDir: string): LoadedConfig {
     metrics: combined.metrics,
     dimensions: combined.dimensions,
     relationships: combined.relationships,
+    // A name defined natively or by another provider is not "unsupported".
+    unsupported: combined.unsupported.filter((item) => !(item.name in combined[UNSUPPORTED_MAP[item.kind]])),
   };
   const finalParsed = graneConfigSchema.safeParse(withMaps);
   if (!finalParsed.success) {

@@ -5,6 +5,7 @@ import type {
   MetricConfig,
   RelationshipConfig,
   SemanticProviderConfig,
+  UnsupportedDefinition,
 } from "../config/schema.js";
 
 /**
@@ -17,6 +18,12 @@ export interface SemanticContribution {
   metrics: Record<string, MetricConfig>;
   dimensions: Record<string, DimensionConfig>;
   relationships: Record<string, RelationshipConfig>;
+  /**
+   * Upstream definitions the provider saw and deliberately did not import,
+   * with the reason. Surfaced through the catalog and in refusals so an
+   * agent can tell "not imported" from "does not exist".
+   */
+  unsupported: UnsupportedDefinition[];
   warnings: string[];
 }
 
@@ -36,8 +43,18 @@ export function emptyContribution(): SemanticContribution {
     metrics: {},
     dimensions: {},
     relationships: {},
+    unsupported: [],
     warnings: [],
   };
+}
+
+/** Record a deliberate skip once: structured for the catalog, human-readable for `grane validate`. */
+export function skipDefinition(
+  out: SemanticContribution,
+  item: UnsupportedDefinition,
+): void {
+  out.unsupported.push(item);
+  out.warnings.push(`Skipping ${item.kind} "${item.name}": ${item.reason}`);
 }
 
 export function withSource<T extends object>(

@@ -1,0 +1,219 @@
+version: 2
+
+models:
+  - name: fct_mrr_snapshot
+    description: One row per customer per month. Ending MRR is a month-end snapshot.
+    semantic_model:
+      enabled: true
+      name: mrr_snapshot
+    agg_time_dimension: month_start
+    columns:
+      - name: customer_month_id
+        entity:
+          type: primary
+          name: customer_month
+      - name: customer_id
+        entity:
+          type: foreign
+          name: customer
+      - name: month_start
+        granularity: month
+        dimension:
+          type: time
+          name: month_start
+      - name: reported_at
+        granularity: day
+        dimension:
+          type: time
+          name: reported_at
+      - name: segment
+        dimension:
+          type: categorical
+          name: customer_segment
+      - name: country_code
+        dimension:
+          type: categorical
+          name: country
+    metrics:
+      # One snapshot date for the whole set: MetricFlow default when group_by is omitted.
+      - name: ending_mrr
+        type: simple
+        label: Ending MRR
+        agg: sum
+        expr: ending_mrr
+        fill_nulls_with: 0
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+      # One snapshot per customer: explicit group_by.
+      - name: ending_mrr_by_customer
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+          group_by:
+            - customer
+      - name: enterprise_ending_mrr
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        filter: |
+          {{ Dimension('customer_month__customer_segment') }} = 'Enterprise'
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+      - name: active_customers
+        type: simple
+        agg: sum
+        expr: is_active
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+      - name: opening_mrr
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: month_start
+          window_agg: min
+      - name: new_mrr
+        type: simple
+        agg: sum
+        expr: new_mrr
+      # Refusals: nothing below may import.
+      - name: mrr_unknown_window
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: month_start
+          window_agg: avg
+      - name: mrr_unknown_group
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+          group_by:
+            - account
+      - name: mrr_other_as_of
+        type: simple
+        agg: sum
+        expr: ending_mrr
+        non_additive_dimension:
+          name: reported_at
+          window_agg: max
+      - name: snapshot_rows_last
+        type: simple
+        agg: count
+        expr: 1
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+
+  - name: fct_invoices
+    semantic_model:
+      enabled: true
+      name: invoices
+    agg_time_dimension: invoice_date
+    columns:
+      - name: invoice_id
+        entity:
+          type: primary
+          name: invoice
+      - name: customer_id
+        entity:
+          type: foreign
+          name: customer
+      - name: invoice_date
+        granularity: day
+        dimension:
+          type: time
+          name: invoice_date
+      - name: invoice_status
+        dimension:
+          type: categorical
+          name: invoice_status
+      - name: country_code
+        dimension:
+          type: categorical
+          name: country
+    metrics:
+      - name: invoice_count
+        type: simple
+        agg: count
+        expr: 1
+      - name: status_count
+        type: simple
+        agg: count
+        expr: invoice_status
+      - name: paid_invoices
+        type: simple
+        agg: count
+        expr: 1
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} = 'paid'
+      - name: billed_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} != 'void'
+      - name: billed_amount_ne
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} <> 'void'
+      - name: void_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} = 'void'
+      - name: revenue
+        type: simple
+        agg: sum
+        expr: paid_amount
+      # Refusals: unsupported predicates must not degrade to another predicate.
+      - name: large_invoice_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} > 'open'
+      - name: paid_or_open_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} = 'paid' or {{ Dimension('invoice__invoice_status') }} = 'open'
+      - name: enterprise_billed_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('customer__customer_segment') }} = 'Enterprise'
+      - name: null_status_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ Dimension('invoice__invoice_status') }} = null
+      - name: recent_amount
+        type: simple
+        agg: sum
+        expr: total_amount
+        filter: |
+          {{ TimeDimension('invoice__invoice_date', 'day') }} = '2026-07-05'
+      - name: literal_sum
+        type: simple
+        agg: sum
+        expr: 1
+      - name: median_invoice
+        type: simple
+        agg: median
+        expr: total_amount
