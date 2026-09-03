@@ -40,10 +40,12 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
   const models: MfSemanticModel[] = [];
   for (const model of graph.models) {
     const primary = model.entities.find((e) => e.type === "primary");
-    if (!primary) {
-      const reason =
-        `semantic model "${model.name}" has no primary entity backed by a column; ` +
-        `Grane needs an explicit primary key and will not assume one.`;
+    if (!primary?.column) {
+      const reason = primary
+        ? `semantic model "${model.name}" primary entity "${primary.name}" is a SQL expression ("${primary.expr}"); ` +
+          `Grane joins and counts on plain columns only.`
+        : `semantic model "${model.name}" has no primary entity backed by a column; ` +
+          `Grane needs an explicit primary key and will not assume one.`;
       skip("entity", model.primaryEntity ?? model.name, reason, model.sourcePath);
       for (const measure of model.measures) {
         if (measure.createMetric) skip("metric", measure.name, reason, model.sourcePath);
@@ -65,7 +67,7 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
     out.entities[entityName] = withSource(
       {
         table: model.table,
-        primary_key: primary.expr,
+        primary_key: primary.column!,
         description: model.description,
       },
       source,
@@ -101,26 +103,85 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
     }
   }
 
-  // ---- Relationships: foreign entity → a model whose primary entity is that column ----
+  // ---- Relationships ----
+  // MetricFlow joins two semantic models on an entity that BOTH declare by
+  // name: the left side's entity expr equals the right side's entity expr,
+  // and the right side must declare it as primary or unique (a natural key
+  // needs validity windows, which Grane does not model). Semantic model names
+  // and table names play no part — see metricflow_semantics/model/semantics/
+  // semantic_model_join_evaluator.py (_VALID_ENTITY_JOINS).
+  //
+  // Grane imports the many-to-one shape (foreign or natural on the left).
+  // Primary/unique-to-primary/unique joins are one-to-one upstream; Grane's
+  // path resolver would treat such an edge as a second route to tables a fact
+  // already reaches directly and refuse as ambiguous, so they are recorded as
+  // unsupported rather than imported.
+  const seenPairs = new Set<string>();
   for (const model of models) {
     const source = { provider, path: model.sourcePath };
     for (const entity of model.entities) {
       if (entity.type === "primary") continue;
-      // Every model whose declared primary entity is this name is a valid join target.
-      const targets = models.filter(
-        (m) => m.table !== model.table && (m.primaryEntity === entity.name || m.name === entity.name),
-      );
-      for (const target of targets) {
-        const targetPrimary = target.entities.find((e) => e.type === "primary")!;
-        const key = `${model.table}_to_${target.table}`;
-        if (key in out.relationships) continue;
-        out.relationships[key] = withSource(
-          {
-            from: `${model.table}.${entity.expr}`,
-            to: `${target.table}.${targetPrimary.expr}`,
-            type: "many_to_one",
-          },
+      const subject = `${model.name}.${entity.name}`;
+      const candidates = models.filter((m) => m.table !== model.table && m.entities.some((e) => e.name === entity.name));
+      if (candidates.length === 0) {
+        const namesake = graph.models.find((m) => m !== model && (m.name === entity.name || m.table === entity.name));
+        skip(
+          "relationship",
+          subject,
+          `no other semantic model declares entity "${entity.name}"` +
+            (namesake ? `; semantic model "${namesake.name}" is only named like it, which is not a join key` : "") +
+            `.`,
+          model.sourcePath,
+        );
+        continue;
+      }
+      if (!entity.column) {
+        skip(
+          "relationship",
+          subject,
+          `entity "${entity.name}" expr "${entity.expr}" is a SQL expression; Grane joins on plain columns only.`,
+          model.sourcePath,
+        );
+        continue;
+      }
+      let imported = 0;
+      const blocked: string[] = [];
+      for (const target of candidates) {
+        const right = target.entities.find((e) => e.name === entity.name)!;
+        if (right.type === "foreign") continue; // foreign -> foreign never joins (fan-out); not a declared target
+        if (right.type === "natural") {
+          blocked.push(`"${target.name}" declares it as a natural key and Grane does not model validity windows`);
+          continue;
+        }
+        if (!right.column) {
+          blocked.push(`"${target.name}" declares it with a SQL expression ("${right.expr}") and Grane joins on plain columns only`);
+          continue;
+        }
+        if (entity.type === "unique") {
+          blocked.push(`"${target.name}" declares it as ${right.type} and one-to-one joins between primary/unique entities are not imported`);
+          continue;
+        }
+        const from = `${model.table}.${entity.column}`;
+        const to = `${target.table}.${right.column}`;
+        // One relationship per column pair; the graph adds the inverse edge itself.
+        const pairKey = [from, to].sort().join("|");
+        imported++;
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+        const base = `${model.table}_to_${target.table}`;
+        out.relationships[base in out.relationships ? `${base}_via_${entity.name}` : base] = withSource(
+          { from, to, type: "many_to_one" },
           source,
+        );
+      }
+      if (imported === 0) {
+        skip(
+          "relationship",
+          subject,
+          blocked.length > 0
+            ? `entity "${entity.name}" has no joinable target: ${blocked.join("; ")}.`
+            : `entity "${entity.name}" is only a foreign key on every semantic model that declares it; no primary or unique declaration to join to.`,
+          model.sourcePath,
         );
       }
     }
@@ -298,7 +359,12 @@ function emitSimple(
             `Grane will not infer the snapshot key.`,
         );
       }
-      groupBy.push(sqlRef(model.table, entity.expr));
+      if (!entity.column) {
+        return fail(
+          `non_additive_dimension group_by "${entityRef}" expr "${entity.expr}" is a SQL expression; Grane keys snapshots on plain columns only.`,
+        );
+      }
+      groupBy.push(sqlRef(model.table, entity.column));
     }
     semi = { window, group_by: groupBy, granularity: granularity.data };
   }

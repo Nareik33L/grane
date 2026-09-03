@@ -4,7 +4,10 @@ import type { MetricType } from "../../config/schema.js";
 export interface MfEntity {
   name: string;
   type: "primary" | "foreign" | "unique" | "natural";
+  /** Raw `expr` (defaults to the name). */
   expr: string;
+  /** The bare column when `expr` is one; null for SQL-expression entities, which Grane cannot join on. */
+  column: string | null;
 }
 
 export interface MfDimension {

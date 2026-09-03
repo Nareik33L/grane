@@ -190,9 +190,9 @@ function parseEntity(raw: unknown): MfEntity | null {
   const type = (str(raw.type) ?? "foreign").toLowerCase();
   if (type !== "primary" && type !== "foreign" && type !== "unique" && type !== "natural") return null;
   const name = str(raw.name);
-  const expr = simpleColumn(str(raw.expr), name ?? undefined);
-  if (!name || !expr) return null;
-  return { name, type, expr };
+  if (!name) return null;
+  const expr = str(raw.expr) ?? name;
+  return { name, type, expr, column: simpleColumn(expr) };
 }
 
 function parseLegacyDimension(raw: unknown): MfDimension | null {
