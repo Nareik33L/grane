@@ -40,13 +40,17 @@ operator.
 
 ## 4. Semi-additive grouping by its own primary entity can make snapshot selection vacuous — fixed
 
-Resolved: a series key equal to the metric entity's primary key is the
-snapshot row identity unless that column is a declared many_to_one /
-one_to_one from the snapshot table. The vacuous case is `unsafe_query`
-(and a validate error), not a governed additive sum. Empty `group_by`
-and explicit non-PK series columns are unchanged. MetricFlow group_by of
-a primary/unique entity is skipped at import. See
-`tests/unit/semi-additive-entity-groupby.test.ts`.
+Resolved: the metric entity's primary key is the declared grain. Using it
+as a first/last series (default `group_by: entity` or an explicit list
+that includes it) is `unsafe_query` / `vacuous_semi_additive_group_by`.
+A relationship on that key does not prove temporal stability — a
+per-observation 1:1 dimension can be declared many_to_one. Empty
+`group_by` remains a global snapshot. Explicit columns that are not the
+entity primary key are the native YAML series declaration and are
+executed as declared; Grane has no uniqueness metadata on those columns.
+MetricFlow group_by of a primary/unique entity is skipped at import;
+foreign-entity group_by is that provider's series declaration. See
+`tests/unit/semi-additive-series-key.test.ts`.
 
 ## 5. MetricFlow time-window / metric-grain alignment
 

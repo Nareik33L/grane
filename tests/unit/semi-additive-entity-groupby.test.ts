@@ -163,14 +163,16 @@ describe("vacuous snapshot series keys (static)", () => {
     expect(vacuousSnapshotSeriesKeys(k.model, k.model.metrics.get("last_region")!)).toEqual([]);
   });
 
-  it("allows the entity PK as a series when it is a declared many_to_one", () => {
+  it("treats the entity PK as vacuous even when a many_to_one is declared on it", () => {
     const bare = new GraneKernel(config({ type: "postgres", schema: "public" }, false));
     const related = new GraneKernel(config({ type: "postgres", schema: "public" }, true));
     const primary = "last_customer_primary";
     expect(vacuousSnapshotSeriesKeys(bare.model, bare.model.metrics.get(primary)!).map((c) => c.column)).toEqual([
       "customer_id",
     ]);
-    expect(vacuousSnapshotSeriesKeys(related.model, related.model.metrics.get(primary)!)).toEqual([]);
+    expect(vacuousSnapshotSeriesKeys(related.model, related.model.metrics.get(primary)!).map((c) => c.column)).toEqual([
+      "customer_id",
+    ]);
   });
 });
 
@@ -256,12 +258,13 @@ describe.skipIf(!duckdbOk)("semi-additive entity group_by (DuckDB execute)", () 
     }
   });
 
-  it("customer-as-primary is refused without a business relationship and allowed with one", async () => {
+  it("customer-as-primary is refused with or without a business relationship", async () => {
     const bare = kernel(false);
     const related = kernel(true);
     expect(refusal(() => bare.compile({ metrics: ["last_customer_primary"], time: Q1 })).status).toBe("unsafe_query");
-    expect(await value(related, "last_customer_primary", { time: Q1 })).toBe(250);
-    expect(await value(related, "first_customer_primary", { time: Q1 })).toBe(170);
+    expect(refusal(() => related.compile({ metrics: ["last_customer_primary"], time: Q1 })).status).toBe("unsafe_query");
+    expect(refusal(() => related.compile({ metrics: ["first_customer_primary"], time: Q1 })).status).toBe("unsafe_query");
+    expect(related.validate().issues.some((i) => i.code === "vacuous_semi_additive_group_by")).toBe(true);
   });
 
   it("query dimensions do not change snapshot selection", async () => {
@@ -415,7 +418,7 @@ describe.skipIf(!pgOk)("semi-additive entity group_by (PostgreSQL execute)", () 
     return k;
   }
 
-  it("global last 230, per-customer last 250, row PK refused, related customer-primary 250", async () => {
+  it("global last 230, per-customer last 250, row PK and related customer-primary refused", async () => {
     const bare = kernel(false);
     const related = kernel(true);
     const g = await bare.query({ metrics: ["last_global"], time: Q1 });
@@ -424,19 +427,20 @@ describe.skipIf(!pgOk)("semi-additive entity group_by (PostgreSQL execute)", () 
     const c = await bare.query({ metrics: ["last_customer"], time: Q1 });
     expect(Number(c.rows[0]!.last_customer)).toBe(250);
     expect(refusal(() => bare.compile({ metrics: ["last_row_default"] })).status).toBe("unsafe_query");
-    const p = await related.query({ metrics: ["last_customer_primary"], time: Q1 });
-    expect(p.trust).toBe("governed");
-    expect(Number(p.rows[0]!.last_customer_primary)).toBe(250);
+    expect(refusal(() => related.compile({ metrics: ["last_customer_primary"] })).status).toBe("unsafe_query");
   });
 });
 
 describe("MetricFlow primary-entity group_by is not imported", () => {
-  it("skips a snapshot grouped by the model's primary entity", () => {
+  it("skips a snapshot grouped by the model's primary or unique entity", () => {
     const fixture = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/dbt-saas");
     const contribution = mapMetricFlowGraph(parseDbtYamlFiles(fixture));
-    const reason = contribution.unsupported.find((u) => u.name === "mrr_primary_group")?.reason;
-    expect(reason).toMatch(/primary entity/);
+    const primary = contribution.unsupported.find((u) => u.name === "mrr_primary_group")?.reason;
+    expect(primary).toMatch(/primary entity/);
     expect(contribution.metrics.mrr_primary_group).toBeUndefined();
+    const unique = contribution.unsupported.find((u) => u.name === "mrr_unique_group")?.reason;
+    expect(unique).toMatch(/unique entity/);
+    expect(contribution.metrics.mrr_unique_group).toBeUndefined();
     expect(contribution.metrics.ending_mrr_by_customer?.semi_additive?.group_by).toEqual([
       "${fct_mrr_snapshot.customer_id}",
     ]);

@@ -50,7 +50,7 @@ export function gauntletConfig(overrides: Record<string, unknown> = {}): GraneCo
       product: { table: "products", primary_key: "id" },
       account: { table: "accounts", primary_key: "id" },
       ticket: { table: "support_tickets", primary_key: "id" },
-      snapshot: { table: "daily_account_snapshots", primary_key: "account_id" },
+      snapshot: { table: "daily_account_snapshots", primary_key: "id" },
       employee: { table: "employees", primary_key: "id" },
       chain_f: { table: "chain_f", primary_key: "id" },
     },
@@ -148,6 +148,7 @@ export function gauntletConfig(overrides: Record<string, unknown> = {}): GraneCo
         sql: "${daily_account_snapshots.balance}",
         time_dimension: "${daily_account_snapshots.snapshot_date}",
         additive: "semi",
+        semi_additive: { window: "last", group_by: ["${daily_account_snapshots.account_id}"] },
       },
       inventory: {
         description: "Non-additive inventory level at product grain.",

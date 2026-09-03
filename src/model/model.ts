@@ -294,42 +294,46 @@ export class SemanticModel {
 }
 
 /**
- * Semi-additive `group_by` keys that identify one snapshot *row* rather than
- * a continuing series. The metric entity's primary key is the grain of that
- * entity. On a snapshot table that grain is a per-row identity unless the
- * same column is a declared many_to_one / one_to_one from the snapshot table
- * (a related business entity such as customer). Empty `group_by` is a global
- * snapshot and is never vacuous. Explicit series columns that are not the
- * metric entity's primary key are never vacuous under this rule.
+ * Semi-additive series-key proof.
+ *
+ * What Grane can prove from current metadata:
+ *   - An entity `primary_key` is the declared grain of that entity. Using it
+ *     as a first/last partition makes the snapshot operation vacuous: at most
+ *     one row per key already exists by that declaration, so MIN/MAX(time)
+ *     cannot collapse history.
+ *   - Empty `group_by` is a global snapshot (time-only). It is never vacuous.
+ *   - Native `group_by: [columns]` that do not include the metric entity's
+ *     primary key is the YAML contract for naming a continuing series. Grane
+ *     has no uniqueness or temporal-stability field on those columns, so the
+ *     declaration is authoritative: first/last is executed per those columns.
+ *   - A relationship (many_to_one / one_to_one / unique) proves joinability
+ *     and cardinality for fan-out guards. It does not prove the source key
+ *     is temporally stable across snapshot observations. A per-observation
+ *     1:1 dimension can be declared many_to_one.
+ *
+ * Therefore a series key is refused only when it is the metric entity's
+ * primary key (default `group_by: entity` or an explicit list that includes
+ * it). A relationship on that key does not save it. A vacuous companion in a
+ * multi-key list cannot be rescued; order does not matter.
  */
 export function vacuousSnapshotSeriesKeys(model: SemanticModel, metric: Metric): ColumnRef[] {
   const spec = metric.semiAdditive;
   if (!spec || spec.keys.length === 0) return [];
   const entity = model.entities.get(metric.config.entity);
   if (!entity) return [];
-  const vacuous: ColumnRef[] = [];
-  for (const key of spec.keys) {
-    if (key.table !== entity.config.table || key.column !== entity.config.primary_key) continue;
-    const businessLink = model.graph
-      .edgesFrom(key.table)
-      .some(
-        (edge) =>
-          edge.fromColumn === key.column &&
-          (edge.cardinality === "many_to_one" || edge.cardinality === "one_to_one"),
-      );
-    if (!businessLink) vacuous.push(key);
-  }
-  return vacuous;
+  return spec.keys.filter(
+    (key) => key.table === entity.config.table && key.column === entity.config.primary_key,
+  );
 }
 
 export function vacuousSnapshotSeriesMessage(metric: Metric, keys: ColumnRef[]): string {
   const named = keys.map((key) => `${key.table}.${key.column}`).join(", ");
   return (
     `Semi-additive metric "${metric.name}" uses semi_additive.group_by on the snapshot ` +
-    `entity's own primary key (${named}). That key identifies one snapshot row, so ` +
-    `first/last cannot collapse history and the query would sum every matching row as ` +
-    `if it were additive. Use group_by: [] for one global snapshot, name the continuing ` +
-    `series columns, or declare a many_to_one from that key to the business entity it ` +
-    `identifies.`
+    `entity's own primary key (${named}). That key is the declared grain of the entity, ` +
+    `so first/last cannot collapse history and the query would sum every matching row as ` +
+    `if it were additive. A relationship on that key does not prove it is a continuing ` +
+    `series. Use group_by: [] for one global snapshot, or name series columns that are ` +
+    `not the entity primary key.`
   );
 }
