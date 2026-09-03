@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,128 @@ describe("dbt / MetricFlow YAML (legacy + latest spec)", () => {
     expect(compiled.sql).toMatch(/"customers"\."country"/i);
     expect(compiled.sql).toMatch(/"orders"\."status"/i);
     expect(kernel.governedCatalog().metrics.find((m) => m.name === "revenue")?.source.provider).toBe("dbt");
+  });
+});
+
+describe("dbt / MetricFlow non_additive_dimension", () => {
+  function projectWith(yaml: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "grane-dbt-nonadd-"));
+    writeFileSync(join(dir, "dbt_project.yml"), "name: nonadd\nprofile: nonadd\n");
+    mkdirSync(join(dir, "models"), { recursive: true });
+    writeFileSync(join(dir, "models", "subscriptions.yml"), yaml);
+    return dir;
+  }
+
+  const subscriptionsYaml = `
+semantic_models:
+  - name: subscriptions
+    model: ref('subscriptions')
+    defaults:
+      agg_time_dimension: subscription_date
+    entities:
+      - name: subscription
+        type: primary
+        expr: id
+      - name: user_id
+        type: foreign
+    dimensions:
+      - name: subscription_date
+        type: time
+        expr: date_transaction
+    measures:
+      - name: mrr
+        description: Sum of active subscription values at the end of the period.
+        expr: subscription_value
+        agg: sum
+        create_metric: true
+        non_additive_dimension:
+          name: subscription_date
+          window_choice: max
+      - name: user_mrr
+        expr: subscription_value
+        agg: sum
+        create_metric: true
+        non_additive_dimension:
+          name: subscription_date
+          window_choice: max
+          window_groupings:
+            - user_id
+      - name: subscription_events
+        expr: id
+        agg: count
+        create_metric: true
+metrics:
+  - name: mrr_metric
+    type: simple
+    type_params:
+      measure: mrr
+`;
+
+  it("never imports a non-additive measure as a plain aggregate", () => {
+    const contribution = mapMetricFlowGraph(parseDbtYamlFiles(projectWith(subscriptionsYaml)));
+    expect(contribution.metrics.mrr).toBeUndefined();
+    expect(contribution.metrics.user_mrr).toBeUndefined();
+    expect(contribution.metrics.mrr_metric).toBeUndefined();
+    expect(contribution.metrics.subscription_events?.type).toBe("count");
+    const mrrWarning = contribution.warnings.find((w) => w.startsWith('Skipping metric "mrr"'));
+    expect(mrrWarning).toContain("non_additive_dimension");
+    expect(mrrWarning).toContain("subscription_date");
+    expect(mrrWarning).toContain("window_choice: max");
+    expect(mrrWarning).toContain("additive: semi");
+    expect(contribution.warnings.find((w) => w.startsWith('Skipping metric "user_mrr"'))).toContain(
+      "window_groupings: user_id",
+    );
+    expect(contribution.warnings.some((w) => w.startsWith('Skipping metric "mrr_metric"'))).toBe(true);
+  });
+
+  it("applies the same rule to semantic_manifest.json measures", () => {
+    const manifest = {
+      semantic_models: [
+        {
+          name: "balances",
+          node_relation: { alias: "account_balances" },
+          defaults: { agg_time_dimension: "snapshot_date" },
+          entities: [{ name: "account", type: "primary", expr: "account_id" }],
+          dimensions: [{ name: "snapshot_date", type: "time", expr: "snapshot_date" }],
+          measures: [
+            {
+              name: "balance",
+              agg: "sum",
+              expr: "balance",
+              non_additive_dimension: { name: "snapshot_date", window_choice: "max", window_groupings: ["account"] },
+            },
+            { name: "accounts", agg: "count_distinct", expr: "account_id" },
+          ],
+        },
+      ],
+      metrics: [
+        { name: "total_balance", type: "simple", type_params: { measure: "balance" } },
+        { name: "account_count", type: "simple", type_params: { measure: "accounts" } },
+      ],
+    };
+    const contribution = mapMetricFlowGraph(parseSemanticManifest("manifest.json", JSON.stringify(manifest)));
+    expect(contribution.metrics.total_balance).toBeUndefined();
+    expect(contribution.metrics.account_count?.type).toBe("count_distinct");
+    expect(contribution.warnings.some((w) => w.startsWith('Skipping metric "total_balance"'))).toBe(true);
+  });
+
+  it("does not sum snapshots through the kernel for a skipped non-additive metric", () => {
+    const contribution = mapMetricFlowGraph(parseDbtYamlFiles(projectWith(subscriptionsYaml)));
+    const kernel = new GraneKernel(
+      graneConfigSchema.parse({
+        connection: { type: "postgres", schema: "public" },
+        entities: contribution.entities,
+        metrics: contribution.metrics,
+        dimensions: contribution.dimensions,
+        relationships: contribution.relationships,
+      }),
+    );
+    expect(() => kernel.compile({ metrics: ["mrr"] })).toThrow(GraneError);
+    try {
+      kernel.compile({ metrics: ["mrr"] });
+    } catch (err) {
+      expect((err as GraneError).refusal.status).toBe("undefined_metric");
+    }
   });
 });
 

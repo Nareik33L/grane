@@ -2,10 +2,34 @@ import type { DimensionConfig, MetricConfig, MetricType } from "../../config/sch
 import type { SemanticContribution } from "../types.js";
 import { emptyContribution, withSource } from "../types.js";
 import { translateMfFilter } from "./filters.js";
-import { mapAgg, simpleColumn, type MetricFlowGraph, type MfMetric, type MfSemanticModel } from "./graph.js";
+import {
+  mapAgg,
+  simpleColumn,
+  type MetricFlowGraph,
+  type MfMetric,
+  type MfNonAdditive,
+  type MfSemanticModel,
+} from "./graph.js";
 
 function sqlRef(table: string, column: string): string {
   return `\${${table}.${column}}`;
+}
+
+/**
+ * Importing a non-additive measure as a plain aggregate would sum snapshot
+ * rows across the window and return a confident wrong number. Grane's
+ * `additive: semi` is last-as-of per entity key, which only matches
+ * MetricFlow when `window_choice: max` is grouped by that same key — a
+ * mapping we cannot verify from YAML alone, so the definition is skipped.
+ */
+function nonAdditiveWarning(name: string, nonAdditive: MfNonAdditive): string {
+  const groupings = nonAdditive.windowGroupings.length > 0 ? nonAdditive.windowGroupings.join(", ") : "none";
+  return (
+    `Skipping metric "${name}": MetricFlow non_additive_dimension "${nonAdditive.name}" ` +
+    `(window_choice: ${nonAdditive.windowChoice}, window_groupings: ${groupings}) would be summed across ` +
+    `snapshots if imported as a plain aggregate. Define it natively in Grane with "additive: semi" if last-as-of ` +
+    `per entity key is the intended semantics.`
+  );
 }
 
 function timeColumn(model: MfSemanticModel, name: string | undefined): string | undefined {
@@ -97,9 +121,14 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
       label?: string;
       filter?: string;
       aggTimeDimension?: string;
+      nonAdditive?: MfNonAdditive;
       sourcePath: string;
     },
   ): void => {
+    if (opts.nonAdditive) {
+      out.warnings.push(nonAdditiveWarning(name, opts.nonAdditive));
+      return;
+    }
     const mapped = mapAgg(agg);
     if (!mapped) {
       out.warnings.push(`Skipping metric "${name}": aggregation "${agg}" is not supported by Grane.`);
@@ -152,6 +181,7 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
         label: measure.label,
         filter: measure.filter,
         aggTimeDimension: measure.aggTimeDimension,
+        nonAdditive: measure.nonAdditive,
         sourcePath: model.sourcePath,
       });
     }
@@ -191,6 +221,7 @@ function addMetric(
       label?: string;
       filter?: string;
       aggTimeDimension?: string;
+      nonAdditive?: MfNonAdditive;
       sourcePath: string;
     },
   ) => void,
@@ -263,6 +294,7 @@ function addMetric(
       label: metric.label ?? found.measure.label,
       filter: metric.filter ?? found.measure.filter,
       aggTimeDimension: metric.aggTimeDimension ?? found.measure.aggTimeDimension,
+      nonAdditive: metric.nonAdditive ?? found.measure.nonAdditive,
       sourcePath: metric.sourcePath,
     });
     return;
@@ -280,6 +312,7 @@ function addMetric(
     label: metric.label,
     filter: metric.filter,
     aggTimeDimension: metric.aggTimeDimension,
+    nonAdditive: metric.nonAdditive,
     sourcePath: metric.sourcePath,
   });
 }
