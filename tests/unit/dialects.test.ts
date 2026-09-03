@@ -43,7 +43,25 @@ describe("warehouse SQL dialects", () => {
     expect(compiled.sql).not.toContain("FILTER (WHERE");
     expect(compiled.sql).toContain("?");
     expect(compiled.sql).not.toContain("$1");
-    expect(compiled.params[0]).toBe("completed");
+    expectPositionalBinds(compiled.sql, compiled.params);
+  });
+
+  it("binds ? placeholders in textual order when a join reorders the clauses", () => {
+    const kernel = exampleKernel();
+    kernel.config.connection.type = "mysql";
+    kernel.config.connection.schema = "shop";
+    const { compiled } = kernel.compile({
+      metrics: ["revenue"],
+      dimensions: ["country"],
+      time: { from: "2026-07-01", to: "2026-07-31" },
+      filters: [{ field: "customer_type", operator: "=", value: "business" }],
+    });
+    expectPositionalBinds(compiled.sql, compiled.params);
+    // Population CTE (time) → contributing population (metric filter) → result (metric filter, joined filter).
+    expect(compiled.params).toEqual(["2026-07-01", "2026-08-01", "completed", "completed", "business"]);
+    // The outer wrapper references result aliases, never re-renders aggregates.
+    expect(compiled.sql).toMatch(/LEFT JOIN `__grane_result` ON TRUE$/);
+    expect(compiled.sql.split("\n").filter((line) => line.includes("SUM(CASE WHEN"))).toHaveLength(1);
   });
 
   it("emits snowflake DATE_TRUNC and ? binds", () => {
@@ -91,6 +109,24 @@ describe("warehouse SQL dialects", () => {
     expect(compiled.sql).toContain("FILTER (WHERE");
     expect(compiled.sql).toContain("?");
     expect(compiled.sql).not.toContain("$1");
-    expect(compiled.params[0]).toBe("completed");
+    expectPositionalBinds(compiled.sql, compiled.params);
   });
 });
+
+/**
+ * `?` dialects bind by position: the k-th `?` in the text receives params[k-1].
+ * The example revenue metric is filtered on `status = 'completed'` and the
+ * query is time-bounded, so the text must read time bounds before the filter.
+ */
+function expectPositionalBinds(sql: string, params: unknown[]): void {
+  expect((sql.match(/\?/g) ?? []).length).toBe(params.length);
+  // The first `?` in the text is the population CTE's lower time bound; the
+  // metric filter's `?` comes later, inside the aggregate.
+  const firstMark = sql.indexOf("?");
+  const aggregate = sql.search(/CASE WHEN|FILTER \(WHERE/);
+  expect(firstMark).toBeGreaterThanOrEqual(0);
+  expect(firstMark).toBeLessThan(aggregate);
+  expect(params[0]).toBe("2026-07-01");
+  expect(params[1]).toBe("2026-08-01");
+  expect(params.slice(2)).toContain("completed");
+}

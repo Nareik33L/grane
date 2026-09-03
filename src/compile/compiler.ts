@@ -27,10 +27,27 @@ import { compilerNamespace } from "../connectors/create.js";
  *
  * A many_to_one relationship is a declared contract that the right-hand key is
  * unique. Grane does not take that on faith at execution time: every joined
- * table carries a cardinality guard — a scalar sub-select in the same
- * statement that reports the largest number of rows sharing one key value —
- * and the executor refuses the result if any joined key is duplicated, rather
- * than returning multiplied facts.
+ * table carries a cardinality guard — a scalar in the same statement that
+ * reports the largest number of rows sharing one key value — and the executor
+ * refuses the result if a key is duplicated, rather than returning multiplied
+ * facts.
+ *
+ * The guard is scoped, not global. Cardinality safety is metric-contribution-
+ * specific and relationship-specific:
+ *
+ *   P0    = metric-contributing population: base rows inside the query's time
+ *           bounds and base-table filters that can contribute to at least one
+ *           requested metric (its own base-table filters / time window).
+ *   P(n)  = rows of the n-th joined table referenced by a non-NULL FK of a row
+ *           in P(n-1) — the same rule for every hop.
+ *   guard = MAX(rows per key) over P(n).
+ *
+ * A duplicated key that no contributing fact reaches (unused, filtered out,
+ * outside the time range, not snapshot-selected, behind a different branch of
+ * an earlier hop) cannot multiply anything and does not refuse. A duplicated
+ * key that a contributing fact reaches refuses, even if a joined-dimension
+ * WHERE would later hide the multiplied rows: that predicate is evaluated
+ * through the very join whose contract is broken.
  */
 
 export interface JoinStep {
@@ -45,9 +62,16 @@ export interface JoinStep {
 }
 
 /**
- * A hidden select item that measures the largest number of rows per key in a
- * joined table. Any value above 1 means the declared many_to_one contract is
- * violated by the warehouse data, and the executor refuses the result.
+ * A hidden scalar that measures the largest number of rows per key in the
+ * *reachable* population of a joined table: the rows whose key is referenced
+ * by the relevant population one hop earlier (see `keySource`). Any value
+ * above 1 means the declared many_to_one contract is violated for a key that
+ * a metric-contributing fact actually reaches, and the executor refuses the
+ * result. NULL means no fact reaches the table at all (nothing to multiply).
+ *
+ * Every guard can answer: which metrics it protects (`protects`), which
+ * relationship (`relationship`), through which path (`path`), and which
+ * population emits the keys it checks (`keySource`).
  */
 export interface CardinalityGuard {
   column: string;
@@ -55,10 +79,27 @@ export interface CardinalityGuard {
   key: string;
   keyColumn: string;
   relationship: string;
+  /** Table that holds the FK (base table, or an intermediate hop table). */
+  fromTable: string;
+  /** Column in fromTable that references `key` in `table`. */
+  fromColumn: string;
+  /** Relationship names from the base table to `table`, in traversal order. */
+  path: string[];
+  /** CTE whose rows emit the FK values this guard checks (P(n-1)). */
+  keySource: string;
+  /** CTE holding the reachable rows of `table` (P(n)); the guard aggregates over it. */
+  reach: string;
+  /** Metrics (and raw metric aliases) whose results this guard protects. */
+  protects: string[];
 }
 
 /** Prefix of hidden columns the executor strips from results. */
 export const GUARD_PREFIX = "__grane_card_";
+/** Analytical population: base rows after time bounds and base-table query filters. */
+export const POP_CTE = "__grane_pop";
+/** Metric-contributing population: rows of POP_CTE that can contribute to at least one metric. */
+export const CONTRIB_CTE = "__grane_contrib";
+const REACH_PREFIX = "__grane_reach_";
 
 export interface PreAggregation {
   metric: string;
@@ -72,6 +113,10 @@ export interface QueryPlan {
   joins: JoinStep[];
   preAggregations: PreAggregation[];
   columns: string[];
+  /** Time bucket, dimension and raw dimension aliases (the GROUP BY keys). */
+  groupColumns: string[];
+  /** CTE names of the populations behind the guards; null when the query has no joins. */
+  population: { analytical: string | null; contributing: string | null };
 }
 
 export interface CompiledQuery {
@@ -87,14 +132,33 @@ export interface CompiledQuery {
   warning: string | null;
 }
 
+/**
+ * Bind parameters are collected during compilation and numbered in *textual*
+ * order once the statement is assembled. Compilation order is not textual
+ * order (metric FILTER clauses are compiled before the population CTE they end
+ * up after), and `?`-style dialects bind strictly by position.
+ */
 class Params {
   readonly values: Scalar[] = [];
   constructor(readonly dialect: SqlDialect) {}
   add(value: Scalar): string {
     this.values.push(value);
-    return this.dialect.placeholder(this.values.length, value);
+    return `${PARAM_SENTINEL}${this.values.length - 1}${PARAM_SENTINEL}`;
+  }
+  /** Replace sentinels with dialect placeholders numbered by textual position. */
+  finalize(sql: string): { sql: string; values: Scalar[] } {
+    const ordered: Scalar[] = [];
+    const out = sql.replace(PARAM_PATTERN, (_match, index: string) => {
+      const value = this.values[Number(index)]!;
+      ordered.push(value);
+      return this.dialect.placeholder(ordered.length, value);
+    });
+    return { sql: out, values: ordered };
   }
 }
+
+const PARAM_SENTINEL = "\u0001";
+const PARAM_PATTERN = /\u0001(\d+)\u0001/g;
 
 export function quoteIdent(name: string): string {
   return postgresDialect.ident(name);
@@ -154,30 +218,56 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       join: "LEFT JOIN",
       cardinalityGuard: guard,
     });
+    const previous = edge.fromTable === baseTable ? null : guards.find((g) => g.table === edge.fromTable);
     guards.push({
       column: guard,
       table: edge.toTable,
       key: edge.toColumn,
       keyColumn: `${edge.toTable}.${edge.toColumn}`,
       relationship: edge.relationship,
+      fromTable: edge.fromTable,
+      fromColumn: edge.fromColumn,
+      path: [...(previous?.path ?? []), edge.relationship],
+      // P0 is decided after metrics are compiled (contributing vs analytical
+      // population); patched in `finalizeGuardSources` below.
+      keySource: previous ? previous.reach : POP_CTE,
+      reach: `${REACH_PREFIX}${edge.toTable}`,
+      protects: [],
     });
   };
 
   const renderJoin = (join: JoinStep): string => `${join.join} ${qualify(join.table)} ON ${join.on}`;
 
   /**
-   * MAX(rows per key) over the joined table, NULL keys excluded (they never
-   * match a join). Uncorrelated, so it is evaluated once per statement and
-   * sees the same data as the join it protects.
+   * P(n): the rows of the joined table whose key is referenced by a non-NULL
+   * FK in P(n-1). Every hop is defined the same way; P0 is the
+   * metric-contributing base population. A violated hop can only *add* rows
+   * to P(n) (both duplicates are reachable), so a corrupted earlier hop makes
+   * later guards stricter, never laxer — and its own guard refuses anyway.
+   */
+  const renderReach = (guard: CardinalityGuard): string => {
+    const fk = `${ident(guard.fromTable)}.${ident(guard.fromColumn)}`;
+    return [
+      `${ident(guard.reach)} AS (`,
+      `  SELECT *`,
+      `  FROM ${qualify(guard.table)}`,
+      `  WHERE ${ident(guard.table)}.${ident(guard.key)} IN (`,
+      `    SELECT ${fk} FROM ${ident(guard.keySource)} AS ${ident(guard.fromTable)} WHERE ${fk} IS NOT NULL)`,
+      `)`,
+    ].join("\n");
+  };
+
+  /**
+   * MAX(rows per key) over P(n). NULL when P(n) is empty: no contributing
+   * fact reaches the table, so nothing can be multiplied — safe, not a
+   * violation. Above 1: a reachable key is duplicated → refuse.
    */
   const renderGuard = (guard: CardinalityGuard): string => {
-    const key = ident(guard.key);
     const n = ident("_n");
-    // MAX(...) so the guard is an aggregate and does not have to be in GROUP BY.
-    const inner =
-      `(SELECT MAX(${n}) FROM (SELECT COUNT(*) AS ${n} FROM ${qualify(guard.table)} ` +
-      `WHERE ${key} IS NOT NULL GROUP BY ${key}) AS ${ident("_keys")})`;
-    return `MAX(${inner}) AS ${ident(guard.column)}`;
+    return (
+      `(SELECT MAX(${n}) FROM ` +
+      `(SELECT COUNT(*) AS ${n} FROM ${ident(guard.reach)} GROUP BY ${ident(guard.key)}) AS ${ident("_keys")})`
+    );
   };
 
   // ---- Metric aggregation expressions (and pre-aggregation CTEs) ----
@@ -498,6 +588,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
    * metric declared `join_to_timespine` expects a row per period even when the
    * period has no data, and Grane has no time spine to draw those rows from, so
    * a per-period breakdown is refused instead of returned sparse.
+   *
+   * TODO(follow-up, product decision): metric-definition filters are FILTER
+   * clauses over the analytical population, so a group with no contributing
+   * rows still appears (NULL, or the fill value). MetricFlow filters the rows
+   * first and omits such groups. Aggregates agree; row sets (and therefore
+   * ORDER BY/LIMIT over them) can differ. Not to be changed casually.
    */
   const fillNulls = (metric: Metric, expr: string): string => {
     if (metric.config.join_to_timespine && resolved.time?.grain) {
@@ -585,37 +681,83 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
   // ---- SELECT list and GROUP BY ----
   const selects: string[] = [];
+  const selectAliases: string[] = [];
+  const groupColumns: string[] = [];
   const groupBy: string[] = [];
 
   if (resolved.time?.grain) {
     const alias = timeAlias(resolved.time.grain);
     const expr = dialect.dateTrunc(resolved.time.grain, localTime(resolved.time.column));
     selects.push(`${expr} AS ${ident(alias)}`);
+    selectAliases.push(alias);
+    groupColumns.push(alias);
     groupBy.push(String(selects.length));
   }
   for (const dimension of resolved.dimensions) {
     selects.push(`${col(dimension.column)} AS ${ident(dimension.name)}`);
+    selectAliases.push(dimension.name);
+    groupColumns.push(dimension.name);
     groupBy.push(String(selects.length));
   }
   for (const raw of resolved.rawDimensions) {
     selects.push(`${col(raw.ref)} AS ${ident(raw.alias)}`);
+    selectAliases.push(raw.alias);
+    groupColumns.push(raw.alias);
     groupBy.push(String(selects.length));
   }
   selects.push(...metricSelects);
+  selectAliases.push(...resolved.metrics.map((m) => m.name));
   selects.push(...rawMetricSelects);
-  selects.push(...guards.map(renderGuard));
+  selectAliases.push(...resolved.rawMetrics.map((m) => m.alias));
+  // Guards are emitted separately (in __grane_card CTE) when joins exist.
+
+  // ---- Metric-contributing population ----
+  // A base row can contribute to metric M only if it passes M's own
+  // base-table filters (and M's own time window when the query's time range is
+  // applied per metric). Filters on joined tables are relationship
+  // traversals, not contribution predicates: they are evaluated *through* the
+  // join and must not hide a violation of that join (see C1/C2/C3 in
+  // tests/unit/query-cardinality.test.ts). Every join in this statement sits in
+  // the one shared FROM, so a duplicated key multiplies the facts feeding
+  // *every* metric that row contributes to; the population a guard protects is
+  // therefore the union over all requested metrics. null = unfiltered = TRUE.
+  const contributionPredicate = (metric: Metric): string | null => {
+    const baseFilters = metric.filters.filter((filter) => parseColumnRef(filter.field)?.table === baseTable);
+    return andFilters(compileMetricFilters(baseFilters, params, col), perMetricTimeFilter(metric));
+  };
+  const contributions = components.map(contributionPredicate);
+  const everyRowContributes = resolved.rawMetrics.length > 0 || contributions.some((predicate) => predicate === null);
+  const contributionWhere = everyRowContributes
+    ? null
+    : contributions.map((predicate) => `(${predicate})`).join("\n     OR ");
+  const p0 = contributionWhere ? CONTRIB_CTE : POP_CTE;
+  const protectedMetrics = [...resolved.metrics.map((m) => m.name), ...resolved.rawMetrics.map((m) => m.alias)];
+  for (const guard of guards) {
+    if (guard.fromTable === baseTable) guard.keySource = p0;
+    guard.protects = protectedMetrics;
+  }
 
   // ---- WHERE ----
-  const where: string[] = [];
+  // Fact-side filters: time bounds (when not already inside a snapshot CTE) +
+  // filters on the base table itself. These define the analytical population.
+  // Joined-dimension filters go only in the analytical result query, not in
+  // the population used for cardinality scoping.
+  const factSideWhere: string[] = [];
   if (resolved.time && !skipOuterTime) {
     const expr = localTime(resolved.time.column);
     const from = resolved.time.from;
     const toExclusive = exclusiveEnd(resolved.time.to);
-    where.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
-    where.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
+    factSideWhere.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
+    factSideWhere.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
   }
+  const joinedDimFilters: string[] = [];
   for (const filter of resolved.filters) {
-    where.push(compileQueryFilter(filter, params, col));
+    const clause = compileQueryFilter(filter, params, col);
+    if (filter.column.table === baseTable) {
+      factSideWhere.push(clause);
+    } else {
+      joinedDimFilters.push(clause);
+    }
   }
 
   // ---- ORDER BY ----
@@ -636,41 +778,146 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   }
 
   // ---- Assemble ----
+  // No joins → no guards → the plain statement. With joins, the statement is
+  // layered so validation and execution read one snapshot:
+  //
+  //   __grane_pop       analytical population (base rows after time bounds and
+  //                     base-table query filters; snapshot rows for
+  //                     semi-additive metrics)
+  //   __grane_contrib   P0: rows of __grane_pop that can contribute to at least
+  //                     one requested metric (omitted when every row can)
+  //   __grane_reach_T   P(n): rows of T referenced by a non-NULL FK in P(n-1),
+  //                     one per joined table, in traversal order
+  //   __grane_card      one scalar per guard: MAX(rows per key) over P(n)
+  //   __grane_result    the analytical SELECT over __grane_pop + joins
+  //   outer SELECT      __grane_card LEFT JOIN __grane_result ON TRUE, so the
+  //                     guard row exists even when GROUP BY yields no rows
   const lines: string[] = [];
-  if (ctes.length > 0) {
-    lines.push(`WITH ${ctes.join(",\n")}`);
+
+  if (guards.length === 0) {
+    if (ctes.length > 0) {
+      lines.push(`WITH ${ctes.join(",\n")}`);
+    }
+    lines.push(`SELECT ${selects.join(",\n       ")}`);
+    lines.push(`FROM ${qualify(baseTable)}`);
+    for (const join of joins) {
+      lines.push(renderJoin(join));
+    }
+    lines.push(...cteJoins);
+    const allWhere = [...factSideWhere, ...joinedDimFilters];
+    if (allWhere.length > 0) {
+      lines.push(`WHERE ${allWhere.join("\n  AND ")}`);
+    }
+    if (groupBy.length > 0) {
+      lines.push(`GROUP BY ${groupBy.join(", ")}`);
+    }
+    if (orderClauses.length > 0) {
+      lines.push(`ORDER BY ${orderClauses.join(", ")}`);
+    }
+    lines.push(`LIMIT ${resolved.limit}`);
+  } else {
+    const snapshotJoin = sharedSnapshotCte
+      ? cteJoins.find((j) => j.startsWith(`JOIN ${ident(sharedSnapshotCte!.name)} `))
+      : undefined;
+
+    // --- Analytical population ---
+    // Semi-additive: the snapshot CTE applies time bounds, the metric filters
+    // and the query filters before the snapshot is chosen (as MetricFlow
+    // does). The chosen date only identifies the snapshot; base-table query
+    // filters must be reapplied to the rows AT that date, otherwise a row that
+    // fails the filter but shares the date would be aggregated (and could
+    // reach a duplicate key it has no business reaching). Joined-dimension
+    // filters stay in __grane_result by policy; metric filters stay in P0 and
+    // the FILTER clause. Time bounds are implied by the snapshot date.
+    const popCteLines = [`${ident(POP_CTE)} AS (`];
+    if (snapshotJoin) {
+      popCteLines.push(`  SELECT ${ident(baseTable)}.*`, `  FROM ${qualify(baseTable)}`, `  ${snapshotJoin}`);
+    } else {
+      popCteLines.push(`  SELECT *`, `  FROM ${qualify(baseTable)}`);
+    }
+    if (factSideWhere.length > 0) {
+      popCteLines.push(`  WHERE ${factSideWhere.join("\n    AND ")}`);
+    }
+    popCteLines.push(`)`);
+
+    // --- Metric-contributing population (P0) ---
+    const contribCteLines = contributionWhere
+      ? [
+          `${ident(CONTRIB_CTE)} AS (`,
+          `  SELECT *`,
+          `  FROM ${ident(POP_CTE)} AS ${ident(baseTable)}`,
+          `  WHERE ${contributionWhere}`,
+          `)`,
+        ]
+      : [];
+
+    // --- Reachable populations P(1..n) and guards ---
+    const reachCtes = guards.map(renderReach);
+    const cardCteLines = [
+      `${ident("__grane_card")} AS (`,
+      `  SELECT ${guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`).join(",\n         ")}`,
+      `)`,
+    ];
+
+    // --- Analytical result ---
+    const resultCteLines = [`${ident("__grane_result")} AS (`];
+    resultCteLines.push(`  SELECT ${selects.join(",\n         ")}`);
+    resultCteLines.push(`  FROM ${ident(POP_CTE)} AS ${ident(baseTable)}`);
+    for (const join of joins) {
+      resultCteLines.push(`  ${renderJoin(join)}`);
+    }
+    // The snapshot join is already inside __grane_pop; pre-aggregation joins are not.
+    for (const j of cteJoins) {
+      if (j !== snapshotJoin) resultCteLines.push(`  ${j}`);
+    }
+    if (joinedDimFilters.length > 0) {
+      resultCteLines.push(`  WHERE ${joinedDimFilters.join("\n    AND ")}`);
+    }
+    if (groupBy.length > 0) {
+      resultCteLines.push(`  GROUP BY ${groupBy.join(", ")}`);
+    }
+    if (orderClauses.length > 0) {
+      // TODO(follow-up): ORDER BY + LIMIT live inside this CTE (LIMIT needs
+      // the ORDER BY here); the outer wrapper has no ORDER BY, and SQL does
+      // not guarantee a CTE's order survives the outer join. Repeat the
+      // ordering on the outer SELECT, with dialect NULL-placement parity.
+      resultCteLines.push(`  ORDER BY ${orderClauses.join(", ")}`);
+    }
+    resultCteLines.push(`  LIMIT ${resolved.limit}`, `)`);
+
+    const outerSelects = [
+      ...selectAliases.map((alias) => `${ident("__grane_result")}.${ident(alias)}`),
+      ...guards.map((g) => `${ident("__grane_card")}.${ident(g.column)}`),
+    ];
+    const allCtes = [
+      ...ctes,
+      popCteLines.join("\n"),
+      ...(contribCteLines.length > 0 ? [contribCteLines.join("\n")] : []),
+      ...reachCtes,
+      cardCteLines.join("\n"),
+      resultCteLines.join("\n"),
+    ];
+    lines.push(`WITH ${allCtes.join(",\n")}`);
+    lines.push(`SELECT ${outerSelects.join(",\n       ")}`);
+    lines.push(`FROM ${ident("__grane_card")}`);
+    lines.push(`LEFT JOIN ${ident("__grane_result")} ON TRUE`);
   }
-  lines.push(`SELECT ${selects.join(",\n       ")}`);
-  lines.push(`FROM ${qualify(baseTable)}`);
-  for (const join of joins) {
-    lines.push(renderJoin(join));
-  }
-  lines.push(...cteJoins);
-  if (where.length > 0) {
-    lines.push(`WHERE ${where.join("\n  AND ")}`);
-  }
-  if (groupBy.length > 0) {
-    lines.push(`GROUP BY ${groupBy.join(", ")}`);
-  }
-  if (orderClauses.length > 0) {
-    lines.push(`ORDER BY ${orderClauses.join(", ")}`);
-  }
-  lines.push(`LIMIT ${resolved.limit}`);
+
+  const finalized = params.finalize(lines.join("\n"));
 
   return {
-    sql: lines.join("\n"),
-    params: params.values,
+    sql: finalized.sql,
+    params: finalized.values,
     plan: {
       baseTable,
       joins,
       preAggregations,
-      columns: [
-        ...(resolved.time?.grain ? [timeAlias(resolved.time.grain)] : []),
-        ...resolved.dimensions.map((d) => d.name),
-        ...resolved.rawDimensions.map((d) => d.alias),
-        ...resolved.metrics.map((m) => m.name),
-        ...resolved.rawMetrics.map((m) => m.alias),
-      ],
+      columns: selectAliases,
+      groupColumns,
+      population: {
+        analytical: guards.length > 0 ? POP_CTE : null,
+        contributing: guards.length > 0 ? p0 : null,
+      },
     },
     guards,
     metricVersions,

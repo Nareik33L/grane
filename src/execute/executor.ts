@@ -38,24 +38,60 @@ export function newQueryId(): string {
 }
 
 /**
- * A many_to_one relationship promises that the joined key is unique. The
- * compiled statement measures that promise against the data it actually read;
- * a duplicated key would have multiplied every fact that matched it, so the
- * result is refused instead of returned — Grane does not deduplicate or pick a
- * row on the warehouse's behalf.
+ * A many_to_one relationship promises that the joined key is unique in the
+ * target table. The compiled statement measures that promise against the keys
+ * that metric-contributing facts actually reach through the relationship path
+ * (see `CardinalityGuard.keySource` / `reach`).
+ *
+ * Guard semantics (post-wrapper):
+ *   NULL  → no contributing fact reaches the table (empty population, NULL or
+ *           unmatched FKs, branch not reached) → safe; nothing to multiply.
+ *   1     → every reachable key maps to exactly one target row → safe.
+ *   > 1   → a reachable key maps to multiple target rows; the join would
+ *           multiply contributing facts → refuse.
+ *
+ * Every guard is checked. A violated earlier hop only *adds* rows to later
+ * reachable populations, so it cannot make a later guard look safe — and its
+ * own guard refuses regardless.
+ *
+ * The wrapper (`__grane_card LEFT JOIN __grane_result ON TRUE`) guarantees
+ * that the guard row is present even when the analytical GROUP BY produces
+ * zero rows, so we never skip based on rows.length.
  */
 function assertCardinality(compiled: CompiledQuery, rows: Record<string, unknown>[]): void {
-  if (compiled.guards.length === 0 || rows.length === 0) return;
+  if (compiled.guards.length === 0) return;
+  // The wrapper always returns at least one row when guards exist.
+  // If somehow we get zero rows, treat every guard as unobserved → refuse.
+  if (rows.length === 0) {
+    const g = compiled.guards[0]!;
+    throw unsafeQuery(
+      `Cardinality guard for relationship "${g.relationship}" (table "${g.table}") produced no rows — ` +
+        `the result cannot be trusted. This is a bug; please report it.`,
+      { relationship: g.relationship, table: g.table },
+    );
+  }
   const first = rows[0]!;
   for (const guard of compiled.guards) {
-    const observed = Number(first[guard.column] ?? 1);
+    const raw = first[guard.column];
+    // NULL means no relevant FK values → no violation possible → safe.
+    if (raw === null || raw === undefined) continue;
+    const observed = Number(raw);
     if (Number.isFinite(observed) && observed > 1) {
       throw unsafeQuery(
         `Relationship "${guard.relationship}" declares "${guard.keyColumn}" as the one side of a many_to_one join, ` +
-          `but the warehouse holds up to ${observed} rows for a single "${guard.keyColumn}" value. ` +
-          `Joining "${guard.table}" would multiply the facts that match those keys, so the result is refused. ` +
+          `but the warehouse holds up to ${observed} rows for a single "${guard.keyColumn}" value ` +
+          `among the keys that facts contributing to ${guard.protects.map((m) => `"${m}"`).join(", ")} reach ` +
+          `through ${guard.path.join(" -> ")}. ` +
+          `Joining "${guard.table}" would multiply those facts, so the result is refused. ` +
           `Fix the data or the relationship declaration; Grane will not deduplicate rows or pick one of them.`,
-        { relationship: guard.relationship, table: guard.table, key_column: guard.keyColumn, max_rows_per_key: observed },
+        {
+          relationship: guard.relationship,
+          table: guard.table,
+          key_column: guard.keyColumn,
+          max_rows_per_key: observed,
+          path: guard.path,
+          protects: guard.protects,
+        },
       );
     }
   }
@@ -71,12 +107,22 @@ export async function executeCompiled(
   }
   const startedAt = Date.now();
   const result = await connector.query(compiled.sql, compiled.params, limits);
-  const rows = result.rows.slice(0, limits.max_rows);
+  let rows = result.rows.slice(0, limits.max_rows);
   assertCardinality(compiled, rows);
   const hidden = result.columns.filter((name) => name.startsWith(GUARD_PREFIX));
   const columns = result.columns.filter((name) => !name.startsWith(GUARD_PREFIX));
   for (const row of rows) {
     for (const name of hidden) delete row[name];
+  }
+  // When the wrapper (`__grane_card LEFT JOIN __grane_result ON TRUE`) produced
+  // a single null-padding row because the analytical GROUP BY has zero rows,
+  // strip it so callers see an empty result. Applies only when the query has
+  // at least one dimension (grouped query); scalar queries (no dimensions) may
+  // legitimately return a single all-null metrics row (SUM of empty set).
+  if (compiled.guards.length > 0 && compiled.plan.groupColumns.length > 0) {
+    // A wrapper-padding row has every analytical column null.
+    const analyticalCols = compiled.plan.columns;
+    rows = rows.filter((row) => analyticalCols.some((c) => row[c] !== null && row[c] !== undefined));
   }
   const provenance: Provenance = {
     query_id: newQueryId(),

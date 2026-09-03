@@ -137,12 +137,41 @@ traversal. A query filter on the joined column is applied in `WHERE` after the
 join, so `=` and `!=` both exclude unmatched facts (`NULL` compares to nothing).
 `PRIMARY` / `UNIQUE` is the upstream **semantic** contract that the target key
 is unique; MetricFlow trusts that declaration and will fan out if the warehouse
-violates it. Grane additionally **runtime-verifies** the contract in the same
-`SELECT`: a hidden `MAX(rows-per-key)` over each joined table. If any key is
-duplicated the executor refuses (`unsafe_query`) rather than returning multiplied
-facts. It does not `DISTINCT`, pick a row, or relabel the result exploratory.
-`trust=governed` therefore means: the metadata said many-to-one, and the data
-this statement read honoured that.
+violates it. Grane additionally **runtime-verifies** the contract, in the same
+statement, scoped to the rows that could actually be multiplied:
+
+- **P0, the metric-contributing population** — base rows inside the query's
+  time bounds and base-table filters that can contribute to at least one
+  requested metric (its own base-table `filters`, its own time window, and
+  for semi-additive metrics the selected snapshot rows). A pending order
+  cannot contribute to `completed_revenue`, so its customer is not relevant to
+  that query's join. With several metrics (or a ratio) the population is the
+  union of the components' contributing rows: if any requested metric could be
+  multiplied by the relationship, the query refuses.
+- **P(n), the reachable population of each joined table** — the rows whose key
+  is referenced by a non-NULL FK in P(n-1). The rule is the same at every hop:
+  `orders -> customers -> managers -> regions` checks `regions` only for the
+  region ids of managers of customers of contributing orders, never for the
+  whole `managers` table.
+- **The guard** is `MAX(rows per key)` over P(n). NULL (nothing reachable) is
+  safe; above 1 refuses (`unsafe_query`) rather than returning multiplied
+  facts.
+
+Filters on a *joined* column are relationship traversals, not contribution
+predicates: `WHERE region = 'US'` is evaluated through the very join being
+verified, so it does not remove a duplicated customer from the population.
+Grane does not `DISTINCT`, pick a row, or relabel the result exploratory.
+`trust=governed` therefore means: the metadata said many-to-one, and every
+key a contributing fact reached in this statement honoured that. Each guard
+records which metrics it protects, its relationship path and the population
+that emits its keys (`compiled.guards[].protects / path / keySource`).
+
+For semi-additive metrics the base-table query filters constrain both steps:
+the rows the snapshot date is chosen from *and* the rows kept at that date.
+`ending_mrr WHERE segment = 'Enterprise' BY customer_status` picks the last
+Enterprise snapshot and sums only the Enterprise rows at it — never the other
+segments that happen to share the date — whether or not the query traverses a
+relationship, and per key when `group_by` selects a snapshot per customer.
 
 A query that combines a semi-additive metric with a metric whose row selection
 differs (an additive one, or a semi-additive one with a different filter,
