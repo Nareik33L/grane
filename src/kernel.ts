@@ -332,7 +332,7 @@ export class GraneKernel {
 
   compile(input: SemanticQueryInput): { resolved: ResolvedQuery; compiled: CompiledQuery } {
     const resolved = this.resolve(input);
-    const compiled = compileQuery(this.model, resolved);
+    const compiled = compileQuery(this.model, resolved, this.schemaCache);
     return { resolved, compiled };
   }
 
@@ -340,8 +340,17 @@ export class GraneKernel {
     resolved: ResolvedQuery;
     compiled: CompiledQuery;
   }> {
-    if (queryNeedsSchema(input, this.model)) {
-      await this.loadSchema();
+    // Live column types are required to distinguish DATE from timestamp-like
+    // time dimensions. Load the schema whenever the query has a time range
+    // (or any other path that already needed it).
+    if (queryNeedsSchema(input, this.model) || Boolean(input.time)) {
+      try {
+        await this.loadSchema();
+      } catch (err) {
+        // Compile-only / no-connector callers still compile; the compiler
+        // refuses non-UTC localization when the type stays unknown.
+        if (this.connector || this.schemaCache) throw err;
+      }
     }
     return this.compile(input);
   }

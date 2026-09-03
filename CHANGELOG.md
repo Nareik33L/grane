@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Time dimensions are classified from the live warehouse type, not by name.
+  A `DATE` is a civil calendar value: `project.timezone` no longer rewrites
+  `2026-08-01` into another day via `::timestamptz AT TIME ZONE`. Filtering
+  and grouping compare/truncate the warehouse DATE. Timestamp without time
+  zone is treated as a UTC wall-clock instant (session timezone is pinned to
+  UTC on DuckDB, matching Postgres `SET LOCAL TIME ZONE 'UTC'`); timestamp
+  with time zone is an instant and still localizes to `project.timezone`.
+  If the column type is unknown and the project timezone is not UTC,
+  compilation refuses rather than guessing. See `docs/warehouses.md` and
+  `tests/unit/date-timezone.test.ts`.
+- Pre-aggregation CTEs now honour the same many_to_one contract as the outer
+  query: each hop after the fan-out is a `LEFT JOIN` with a scoped runtime
+  cardinality guard. A participating duplicate inside `orders → order_items →
+  products` refuses; an unreachable duplicate does not. See
+  `tests/unit/preagg-cardinality.test.ts`.
+- An untimed metric (or ratio component) plus an explicit time range is an
+  `ambiguous_query`, whether requested alone or composed with timed metrics.
+  Companion metrics cannot change its meaning. Untimed metrics without a
+  time constraint are unchanged. See `tests/unit/untimed-composition.test.ts`.
+
 - Runtime cardinality checks are scoped to the rows a relationship could
   actually multiply: the **metric-contributing population** (base rows inside
   the time bounds and base-table filters that can contribute to at least one

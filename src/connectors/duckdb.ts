@@ -54,11 +54,24 @@ export class DuckDbConnector implements WarehouseConnector {
     } else if (this.path !== ":memory:") {
       opts.access_mode = "READ_ONLY";
     }
-    this.instance = await mod.DuckDBInstance.create(
-      this.path,
-      Object.keys(opts).length > 0 ? opts : undefined,
-    );
+    // Pin the session timezone so compiled timestamp casts are independent of
+    // the host TZ. Postgres already does SET LOCAL TIME ZONE 'UTC'.
+    const withTz = { ...opts, TimeZone: "UTC" };
+    try {
+      this.instance = await mod.DuckDBInstance.create(this.path, withTz);
+    } catch {
+      this.instance = await mod.DuckDBInstance.create(
+        this.path,
+        Object.keys(opts).length > 0 ? opts : undefined,
+      );
+    }
     this.conn = await this.instance.connect();
+    try {
+      // Session setting; may be rejected on some read-only attachments.
+      await this.conn.runAndReadAll("SET TimeZone = 'UTC'");
+    } catch {
+      // Keep the instance-level TimeZone pin when SET is unavailable.
+    }
     return this.conn;
   }
 

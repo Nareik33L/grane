@@ -14,6 +14,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { classifyTemporalType } from "../../src/connectors/dialect.js";
+import { columnDataType } from "../../src/connectors/types.js";
 import { loadConfig } from "../../src/config/load.js";
 import { GraneError } from "../../src/errors.js";
 import { GraneKernel } from "../../src/kernel.js";
@@ -43,6 +45,7 @@ interface GtCase {
 }
 
 describe.skipIf(!available)("Oakwell interop (dbt provider vs MetricFlow)", () => {
+  if (!available) return;
   const dir = mkdtempSync(join(tmpdir(), "grane-oakwell-"));
   writeFileSync(
     join(dir, "grane.yml"),
@@ -165,6 +168,71 @@ describe.skipIf(!available)("Oakwell interop (dbt provider vs MetricFlow)", () =
       const empty = await kernel.query({ metrics: ["ending_mrr"], dimensions: [status()], filters: [{ field: seg(), operator: "=", value: "Nonexistent" }], time: aug });
       expect(empty.trust).toBe("governed");
       expect(empty.rows).toEqual([]);
+    });
+  });
+
+  describe("DATE-backed ground truths are invariant under project.timezone", () => {
+    const dateTimezones = ["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"] as const;
+
+    it("changing project.timezone does not move civil DATE metrics", async () => {
+      const schema = await kernel.loadSchema();
+      const dateCases = cases.filter((c) => {
+        const metric = kernel.model.metrics.get(c.mf.metrics[0]!);
+        const ref = metric?.timeDimension;
+        if (!ref) return false;
+        return classifyTemporalType(columnDataType(schema, ref.table, ref.column), "duckdb") === "date";
+      });
+      expect(dateCases.length).toBeGreaterThan(0);
+
+      const utcValues = new Map<string, number>();
+      for (const c of dateCases) {
+        if (unsupportedMetrics.has(c.mf.metrics[0]!)) continue;
+        const result = await kernel.query(toQuery(c));
+        expect(result.trust, c.id).toBe("governed");
+        if (c.result_type === "scalar") utcValues.set(c.id, Number(result.rows[0]![c.mf.metrics[0]!]));
+      }
+
+      for (const tz of dateTimezones) {
+        if (tz === "UTC") continue;
+        const dirTz = mkdtempSync(join(tmpdir(), `grane-oakwell-${tz.replace(/\//g, "-")}-`));
+        writeFileSync(
+          join(dirTz, "grane.yml"),
+          [
+            "project:",
+            "  name: oakwell-interop",
+            `  timezone: ${tz}`,
+            "connection:",
+            "  type: duckdb",
+            `  path: ${JSON.stringify(WAREHOUSE)}`,
+            "  schema: main",
+            "providers:",
+            "  - type: dbt",
+            `    path: ${JSON.stringify(PROJECT)}`,
+            "",
+          ].join("\n"),
+        );
+        const loadedTz = loadConfig(dirTz);
+        const tzKernel = new GraneKernel(loadedTz.config, {
+          projectDir: loadedTz.projectDir,
+          providerWarnings: loadedTz.warnings,
+        });
+        try {
+          for (const c of dateCases) {
+            const metric = c.mf.metrics[0]!;
+            if (unsupportedMetrics.has(metric)) continue;
+            const result = await tzKernel.query(toQuery(c));
+            expect(result.trust, `${tz} ${c.id}`).toBe("governed");
+            if (c.result_type === "scalar") {
+              expect(close(Number(result.rows[0]![metric]), utcValues.get(c.id)!, c.tolerance), `${tz} ${c.id}`).toBe(true);
+              if (c.expected.value != null) {
+                expect(close(Number(result.rows[0]![metric]), c.expected.value, c.tolerance), `${tz} ${c.id} vs GT`).toBe(true);
+              }
+            }
+          }
+        } finally {
+          await tzKernel.close();
+        }
+      }
     });
   });
 });

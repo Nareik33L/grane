@@ -6,7 +6,14 @@ import type { FilterOperator, Scalar, MetricFilterItem } from "../config/schema.
 import { parseColumnRef, type ColumnRef } from "../model/refs.js";
 import { exclusiveEnd } from "../query/time.js";
 import { ambiguousQuery, invalidQuery, unsafeQuery } from "../errors.js";
-import { getDialect, postgresDialect, type SqlDialect } from "../connectors/dialect.js";
+import {
+  classifyTemporalType,
+  getDialect,
+  postgresDialect,
+  type SqlDialect,
+  type TemporalKind,
+} from "../connectors/dialect.js";
+import { columnDataType, type DatabaseSchema } from "../connectors/types.js";
 import { compilerNamespace } from "../connectors/create.js";
 
 /**
@@ -48,6 +55,19 @@ import { compilerNamespace } from "../connectors/create.js";
  * key that a contributing fact reaches refuses, even if a joined-dimension
  * WHERE would later hide the multiplied rows: that predicate is evaluated
  * through the very join whose contract is broken.
+ *
+ * The same contract applies inside pre-aggregation CTEs. A many_to_one hop
+ * taken while collapsing a one_to_many child (orders → order_items →
+ * products) is still a participating relationship: its reachable keys are
+ * guarded, with LEFT JOIN so unmatched / NULL foreign keys do not drop the
+ * child fact. Compilation strategy must not change the governed relationship
+ * contract.
+ *
+ * Time dimensions are not interchangeable warehouse types. A DATE is a civil
+ * calendar value and is filtered/grouped as that date in every project
+ * timezone. Timestamp-like columns are localized to project.timezone. If the
+ * warehouse type is unknown and the project timezone is not UTC, compilation
+ * refuses rather than guessing.
  */
 
 export interface JoinStep {
@@ -91,6 +111,8 @@ export interface CardinalityGuard {
   reach: string;
   /** Metrics (and raw metric aliases) whose results this guard protects. */
   protects: string[];
+  /** Outer analytical join, or a hop inside a pre-aggregation CTE. */
+  scope: "join" | "preagg";
 }
 
 /** Prefix of hidden columns the executor strips from results. */
@@ -164,7 +186,11 @@ export function quoteIdent(name: string): string {
   return postgresDialect.ident(name);
 }
 
-export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): CompiledQuery {
+export function compileQuery(
+  model: SemanticModel,
+  resolved: ResolvedQuery,
+  warehouseSchema?: DatabaseSchema | null,
+): CompiledQuery {
   const dialect = getDialect(model.config.connection.type);
   const schema = compilerNamespace(model.config.connection);
   const timezone = model.config.project.timezone;
@@ -176,7 +202,39 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   const measureSql = (metric: Metric): string => (metric.countsRows ? "1" : col(metric.measure!));
   const qualify = (table: string): string => dialect.qualifyTable(schema, table);
 
-  const localTime = (ref: ColumnRef): string => dialect.localizeTime(col(ref), timezone);
+  const temporalKind = (ref: ColumnRef): TemporalKind => {
+    const dataType = columnDataType(warehouseSchema, ref.table, ref.column);
+    const kind = classifyTemporalType(dataType, model.config.connection.type);
+    if (kind !== "unknown") return kind;
+    if (!timezone || timezone === "UTC") return "unknown";
+    throw unsafeQuery(
+      `Time dimension "${ref.table}.${ref.column}" cannot be localized to ${timezone}: ` +
+        (dataType
+          ? `warehouse type "${dataType}" is not a known DATE or TIMESTAMP type. `
+          : `its warehouse type is unknown at compile time. `) +
+        `Grane will not assume timezone semantics for an unclassified column. ` +
+        `Introspect the warehouse (so compilation can see the column type) or use a DATE / TIMESTAMP column.`,
+      { table: ref.table, column: ref.column, data_type: dataType, timezone },
+    );
+  };
+
+  /**
+   * DATE columns stay civil dates. Timestamp-like columns are localized to
+   * project.timezone (a no-op when the project timezone is UTC).
+   */
+  const timeExpr = (ref: ColumnRef): string => {
+    const kind = temporalKind(ref);
+    if (kind === "date") return col(ref);
+    return dialect.localizeTime(col(ref), timezone);
+  };
+
+  const timeBound = (value: string, ref: ColumnRef): string =>
+    temporalKind(ref) === "date"
+      ? dialect.castDate(params.add(value))
+      : dialect.castTimestamp(params.add(value));
+
+  const truncTime = (grain: string, ref: ColumnRef): string =>
+    dialect.dateTrunc(grain, timeExpr(ref), temporalKind(ref) === "date" ? "date" : undefined);
 
   // ---- Join planning for the outer query (dimensions, filters, time, direct measures) ----
   const joinedTables = new Set<string>([baseTable]);
@@ -233,6 +291,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       keySource: previous ? previous.reach : POP_CTE,
       reach: `${REACH_PREFIX}${edge.toTable}`,
       protects: [],
+      scope: "join",
     });
   };
 
@@ -281,7 +340,17 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     expr: string;
   }
 
+  const compiledScalars = new Map<string, MetricExpr>();
+
   const compileScalarMetric = (metric: Metric): MetricExpr => {
+    const cached = compiledScalars.get(metric.name);
+    if (cached) return cached;
+    const compiled = compileScalarMetricUncached(metric);
+    compiledScalars.set(metric.name, compiled);
+    return compiled;
+  };
+
+  const compileScalarMetricUncached = (metric: Metric): MetricExpr => {
     const measure = metric.measure!;
     const path = model.graph.findPath(baseTable, measure.table);
     if (!path) {
@@ -391,7 +460,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
     if (!sharedSnapshotCte) {
       const cteName = `last_${metric.name}`;
       // Snapshot dates are compared at the declared granularity (every row in the last period is kept).
-      const timeExpr = spec.granularity ? dialect.dateTrunc(spec.granularity, localTime(timeRef)) : col(timeRef);
+      const snapshotTime = spec.granularity ? truncTime(spec.granularity, timeRef) : col(timeRef);
       const keyExprs = spec.keys.map((key) => col(key));
       const whereParts: string[] = [];
       if (resolved.time) {
@@ -404,12 +473,12 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
         whereParts.push(compileQueryFilter(filter, params, col));
         if (filter.column.table !== baseTable) needsJoins = true;
       }
-      const grainExpr = resolved.time?.grain ? dialect.dateTrunc(resolved.time.grain, localTime(timeRef)) : null;
+      const grainExpr = resolved.time?.grain ? truncTime(resolved.time.grain, timeRef) : null;
       const groupBy = [...keyExprs, ...(grainExpr ? [grainExpr] : [])];
       const agg = spec.window === "first" ? "MIN" : "MAX";
       const selects = [
         ...keyExprs.map((expr, i) => `${expr} AS ${ident(`_key${i}`)}`),
-        `${agg}(${timeExpr}) AS ${ident("_as_of")}`,
+        `${agg}(${snapshotTime}) AS ${ident("_as_of")}`,
         ...(grainExpr ? [`${grainExpr} AS ${ident("_period")}`] : []),
       ];
       const cteSql = [
@@ -424,7 +493,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       ctes.push(cteSql);
       const onParts = [
         ...keyExprs.map((expr, i) => `${ident(cteName)}.${ident(`_key${i}`)} = ${expr}`),
-        `${ident(cteName)}.${ident("_as_of")} = ${timeExpr}`,
+        `${ident(cteName)}.${ident("_as_of")} = ${snapshotTime}`,
       ];
       cteJoins.push(`JOIN ${ident(cteName)} ON ${onParts.join(" AND ")}`);
       sharedSnapshotCte = { signature, name: cteName };
@@ -444,10 +513,10 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   };
 
   const timeBoundsSql = (ref: ColumnRef): string => {
-    const expr = localTime(ref);
+    const expr = timeExpr(ref);
     const from = resolved.time!.from;
     const toExclusive = exclusiveEnd(resolved.time!.to);
-    return `${expr} >= ${dialect.castTimestamp(params.add(from))} AND ${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`;
+    return `${expr} >= ${timeBound(from, ref)} AND ${expr} < ${timeBound(toExclusive, ref)}`;
   };
 
   const perMetricTimeFilter = (metric: Metric): string | null => {
@@ -476,6 +545,22 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   }
   const skipOuterTime = Boolean(resolved.time && (!resolved.time.shared || anySemiAdditive));
 
+  /**
+   * many_to_one hops taken inside a pre-aggregation CTE. Guards are emitted
+   * after P0 is known so they can scope to this metric's contributing rows.
+   */
+  interface PreAggHopPlan {
+    metric: Metric;
+    childTable: string;
+    childKey: string;
+    parentKey: string;
+    firstRelationship: string;
+    hops: Edge[];
+    childFilters: MetricFilterItem[];
+  }
+  const preAggHopPlans: PreAggHopPlan[] = [];
+  const preAggReachCtes: string[] = [];
+
   const compilePreAggregatedMetric = (metric: Metric, edges: Edge[], extraTimeFilter: string | null): MetricExpr => {
     if (metric.config.type === "count_distinct") {
       throw unsafeQuery(
@@ -499,11 +584,17 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
     const cteJoinClauses: string[] = [];
     const cteTables = new Set<string>([firstEdge.toTable]);
+    const laterHops: Edge[] = [];
     for (const edge of edges.slice(1)) {
       if (cteTables.has(edge.toTable)) continue;
       cteTables.add(edge.toTable);
+      laterHops.push(edge);
+      // LEFT JOIN: a missing / NULL target must not drop the child fact.
+      // For SUM/COUNT/AVG/MIN/MAX of the joined measure column this agrees
+      // with INNER JOIN (aggregates skip NULLs) but preserves the child row
+      // in the CTE population, matching ordinary many_to_one traversal.
       cteJoinClauses.push(
-        `  JOIN ${qualify(edge.toTable)} ON ${ident(edge.fromTable)}.${ident(edge.fromColumn)} = ${ident(edge.toTable)}.${ident(edge.toColumn)}`,
+        `  LEFT JOIN ${qualify(edge.toTable)} ON ${ident(edge.fromTable)}.${ident(edge.fromColumn)} = ${ident(edge.toTable)}.${ident(edge.toColumn)}`,
       );
     }
 
@@ -516,6 +607,18 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       (ref.table === baseTable ? outerFilters : insideFilters).push(filter);
     }
     const insideWhere = compileMetricFilters(insideFilters, params, col);
+    const childFilters = insideFilters.filter((filter) => parseColumnRef(filter.field)?.table === firstEdge.toTable);
+    if (laterHops.some((edge) => edge.cardinality !== "one_to_many")) {
+      preAggHopPlans.push({
+        metric,
+        childTable: firstEdge.toTable,
+        childKey: firstEdge.toColumn,
+        parentKey: firstEdge.fromColumn,
+        firstRelationship: firstEdge.relationship,
+        hops: laterHops.filter((edge) => edge.cardinality !== "one_to_many"),
+        childFilters,
+      });
+    }
 
     const valueColumns: string[] = [];
     let outerExpr: string;
@@ -687,7 +790,7 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
 
   if (resolved.time?.grain) {
     const alias = timeAlias(resolved.time.grain);
-    const expr = dialect.dateTrunc(resolved.time.grain, localTime(resolved.time.column));
+    const expr = truncTime(resolved.time.grain, resolved.time.column);
     selects.push(`${expr} AS ${ident(alias)}`);
     selectAliases.push(alias);
     groupColumns.push(alias);
@@ -733,8 +836,61 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   const p0 = contributionWhere ? CONTRIB_CTE : POP_CTE;
   const protectedMetrics = [...resolved.metrics.map((m) => m.name), ...resolved.rawMetrics.map((m) => m.alias)];
   for (const guard of guards) {
-    if (guard.fromTable === baseTable) guard.keySource = p0;
-    guard.protects = protectedMetrics;
+    if (guard.scope === "join" && guard.fromTable === baseTable) guard.keySource = p0;
+    if (guard.scope === "join") guard.protects = protectedMetrics;
+  }
+
+  // Pre-aggregation many_to_one hops: same guard contract, scoped to the
+  // child rows that this metric's contributing base rows actually reach.
+  for (const plan of preAggHopPlans) {
+    const metricPred = contributionPredicate(plan.metric);
+    const childCte = `${REACH_PREFIX}pre_${plan.metric.name}_${plan.childTable}`;
+    const parentIn = `${ident(plan.childTable)}.${ident(plan.childKey)} IN (SELECT ${ident(baseTable)}.${ident(plan.parentKey)} FROM ${ident(POP_CTE)} AS ${ident(baseTable)}${metricPred ? ` WHERE ${metricPred}` : ""})`;
+    const childFilterSql = compileMetricFilters(plan.childFilters, params, col);
+    const childWhere = childFilterSql ? `${parentIn}\n    AND ${childFilterSql}` : parentIn;
+    preAggReachCtes.push(
+      [
+        `${ident(childCte)} AS (`,
+        `  SELECT *`,
+        `  FROM ${qualify(plan.childTable)}`,
+        `  WHERE ${childWhere}`,
+        `)`,
+      ].join("\n"),
+    );
+    const protects = [
+      ...new Set([
+        plan.metric.name,
+        ...resolved.metrics
+          .filter(
+            (requested) =>
+              requested.name === plan.metric.name ||
+              requested.config.numerator === plan.metric.name ||
+              requested.config.denominator === plan.metric.name,
+          )
+          .map((requested) => requested.name),
+      ]),
+    ];
+    let previousSource = childCte;
+    let previousPath = [plan.firstRelationship];
+    for (const edge of plan.hops) {
+      const guard: CardinalityGuard = {
+        column: `${GUARD_PREFIX}pre_${plan.metric.name}_${edge.toTable}`,
+        table: edge.toTable,
+        key: edge.toColumn,
+        keyColumn: `${edge.toTable}.${edge.toColumn}`,
+        relationship: edge.relationship,
+        fromTable: edge.fromTable,
+        fromColumn: edge.fromColumn,
+        path: [...previousPath, edge.relationship],
+        keySource: previousSource,
+        reach: `${REACH_PREFIX}pre_${plan.metric.name}_${edge.toTable}`,
+        protects,
+        scope: "preagg",
+      };
+      guards.push(guard);
+      previousSource = guard.reach;
+      previousPath = guard.path;
+    }
   }
 
   // ---- WHERE ----
@@ -744,11 +900,11 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
   // the population used for cardinality scoping.
   const factSideWhere: string[] = [];
   if (resolved.time && !skipOuterTime) {
-    const expr = localTime(resolved.time.column);
+    const expr = timeExpr(resolved.time.column);
     const from = resolved.time.from;
     const toExclusive = exclusiveEnd(resolved.time.to);
-    factSideWhere.push(`${expr} >= ${dialect.castTimestamp(params.add(from))}`);
-    factSideWhere.push(`${expr} < ${dialect.castTimestamp(params.add(toExclusive))}`);
+    factSideWhere.push(`${expr} >= ${timeBound(from, resolved.time.column)}`);
+    factSideWhere.push(`${expr} < ${timeBound(toExclusive, resolved.time.column)}`);
   }
   const joinedDimFilters: string[] = [];
   for (const filter of resolved.filters) {
@@ -852,7 +1008,8 @@ export function compileQuery(model: SemanticModel, resolved: ResolvedQuery): Com
       : [];
 
     // --- Reachable populations P(1..n) and guards ---
-    const reachCtes = guards.map(renderReach);
+    // Pre-aggregation child populations first (they are keySources of later hops).
+    const reachCtes = [...preAggReachCtes, ...guards.map(renderReach)];
     const cardCteLines = [
       `${ident("__grane_card")} AS (`,
       `  SELECT ${guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`).join(",\n         ")}`,
