@@ -7,6 +7,7 @@ Experimental metrics executing as `trust: governed` was a later
 BREAK-GOVERNED finding and is also fixed. Item 7 (NULL-group padding)
 is also fixed. Item 11 (`__grane_` identifier collision) is also fixed.
 Item 12 (public `period_${grain}` alias collision) is also fixed.
+Item 13 (selected public output-name uniqueness) is also fixed.
 The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
@@ -134,3 +135,13 @@ agree). Model load does not reject the name; queries without that grain
 remain valid. Cross-grain and nearby names are not reserved. See
 `tests/unit/time-period-alias.test.ts`. Do not reopen as a general
 alias allocator.
+
+## 13. Selected public outputs can share a result name — fixed
+
+Resolved: after resolution, selected public SELECT names must be unique.
+A metric and dimension both named `code` is `ambiguous_query` before SQL.
+Identical logical selections (same canonical metric/dimension, same raw
+field+type+alias) are deduplicated. Generated `period_${grain}` collisions
+keep the PR #29 message. Model load does not reject coexisting names.
+See `tests/unit/public-output-names.test.ts`.
+
