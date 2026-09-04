@@ -1,6 +1,8 @@
 import { configError } from "../errors.js";
 import type { SemanticContribution } from "./types.js";
-import { emptyContribution } from "./types.js";
+import { emptyContribution, skipDefinition } from "./types.js";
+import { isReservedInternalIdent, INTERNAL_IDENT_PREFIX } from "../compile/internal-namespace.js";
+import type { EntityConfig, UnsupportedDefinition } from "../config/schema.js";
 
 type MapKey = "entities" | "metrics" | "dimensions" | "relationships";
 
@@ -30,6 +32,18 @@ export function mergeContributions(parts: SemanticContribution[]): SemanticContr
       const incoming = part[key];
       const target = out[key] as Record<string, { source?: { provider?: string; path?: string } }>;
       for (const [name, value] of Object.entries(incoming)) {
+        const table = key === "entities" ? (value as EntityConfig).table : undefined;
+        if (isReservedInternalIdent(name) || (table !== undefined && isReservedInternalIdent(table))) {
+          const colliding = isReservedInternalIdent(name) ? name : table!;
+          skipDefinition(out, {
+            kind: singular as UnsupportedDefinition["kind"],
+            name: colliding,
+            provider: value.source?.provider ?? "unknown",
+            path: value.source?.path,
+            reason: `uses Grane's reserved "${INTERNAL_IDENT_PREFIX}" prefix.`,
+          });
+          continue;
+        }
         if (name in target) {
           throw configError(
             `Duplicate ${singular} "${name}" from ${sourceLabel(target[name]!)} and ${sourceLabel(value)}. ` +
