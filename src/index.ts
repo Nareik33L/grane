@@ -27,7 +27,7 @@ export {
   type TrustLevel,
 } from "./query/model.js";
 export { trustHeadline, TRUST_HEADLINES } from "./query/trust.js";
-export { resolveQuery, resolveRowLimit, type ResolvedQuery, type RowLimitSource } from "./query/resolve.js";
+export { resolveQuery, resolveRowLimit, timeAlias, type ResolvedQuery, type RowLimitSource } from "./query/resolve.js";
 export { resolveRelativeRange, todayInTimeZone, isValidCivilDate } from "./query/time.js";
 export { compileQuery, type CompiledQuery, isHiddenResultColumn } from "./compile/compiler.js";
 export { isReservedInternalIdent, INTERNAL_IDENT_PREFIX } from "./compile/internal-namespace.js";
