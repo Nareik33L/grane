@@ -4,7 +4,8 @@ Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
 (`contains` LIKE wildcards) and item 1 (`project.week.starts`) were later
 fixed when independent reviews produced governed-wrong counterexamples.
 Experimental metrics executing as `trust: governed` was a later
-BREAK-GOVERNED finding and is also fixed. The rest stay deferred.
+BREAK-GOVERNED finding and is also fixed. Item 7 (NULL-group padding)
+is also fixed. The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
 
@@ -74,13 +75,14 @@ foreign-entity group_by is that provider's series declaration. See
   differ; aggregates of contributing rows agree.
 - **Priority:** Low / product decision.
 
-## 7. NULL-dimension group dropped by executor padding heuristic
+## 7. NULL-dimension group dropped by executor padding heuristic — fixed
 
-- **Observed:** The wrapper-padding strip treats an all-null analytical row
-  as empty. A real NULL-dimension group can look the same.
-- **Supported/documented:** Implementation detail; not documented.
-- **Governed-contract impact:** A legitimate NULL group can disappear.
-- **Priority:** Medium.
+Resolved: padding is identified by a structural marker (`1 AS "__grane_row"`
+on the analytical SELECT). The cardinality wrapper's LEFT JOIN miss is
+NULL in that column and is stripped. A real GROUP BY row whose visible
+dimension and metric values are NULL is preserved. Completeness (`__grane_n`)
+is read before the strip and counts real groups only. Trust is unchanged.
+See `tests/unit/null-group-padding.test.ts`.
 
 ## 8. `validate` vs kernel on an off-path metric filter
 

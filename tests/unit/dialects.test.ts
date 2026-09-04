@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { exampleKernel } from "../fixtures.js";
-import type { WarehouseType } from "../../src/connectors/dialect.js";
+import { RESULT_ROW_COLUMN } from "../../src/compile/compiler.js";
+import { WAREHOUSE_TYPES, type WarehouseType } from "../../src/connectors/dialect.js";
 
 function compileFor(type: WarehouseType) {
   const kernel = exampleKernel();
@@ -110,6 +111,14 @@ describe("warehouse SQL dialects", () => {
     expect(compiled.sql).toContain("?");
     expect(compiled.sql).not.toContain("$1");
     expectPositionalBinds(compiled.sql, compiled.params);
+  });
+
+  it("emits the structural row marker on every dialect and keeps it off plan.columns", () => {
+    for (const type of WAREHOUSE_TYPES) {
+      const compiled = compileFor(type);
+      expect(compiled.sql, type).toMatch(/1 AS [`"]__grane_row[`"]/);
+      expect(compiled.plan.columns, type).not.toContain(RESULT_ROW_COLUMN);
+    }
   });
 });
 
