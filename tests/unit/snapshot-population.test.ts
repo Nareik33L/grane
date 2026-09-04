@@ -229,9 +229,13 @@ describe.skipIf(!available)("semi-additive snapshot population + base query filt
     expect(n((await governed(k, { metrics: ["ending_mrr"], filters: [...PRO, f("tier", "gold")] })).rows[0]?.ending_mrr)).toBe(120);
     // basic AND tier=gold: snapshot from row 5 → 01-02; population is basic rows at 01-02 (4, 5); result keeps gold → 30.
     expect(by((await governed(k, { metrics: ["ending_mrr"], dimensions: ["tier"], filters: [...BASIC, f("tier", "gold")] })).rows, "tier", "ending_mrr")).toEqual({ gold: 30 });
-    // The joined filter must not hide a violation the base population reaches: row 4 (c2) is in P0.
+    // The joined filter constrains P(n) of dim_customers: c2's copies are
+    // silver/dup2, not gold, so they do not survive tier=gold.
     const dupSilver = await scenario({ dim_customers: [...CUSTOMERS, dupCustomer(2)] });
-    expect((await refusal(() => dupSilver.query({ metrics: ["ending_mrr"], dimensions: ["tier"], filters: [...BASIC, f("tier", "gold")] }))).status).toBe("unsafe_query");
+    expect(by((await governed(dupSilver, { metrics: ["ending_mrr"], dimensions: ["tier"], filters: [...BASIC, f("tier", "gold")] })).rows, "tier", "ending_mrr")).toEqual({ gold: 30 });
+    // Inverse: both copies of c2 match the joined filter → refuse.
+    const twoGold = await scenario({ dim_customers: [[1, "gold", 1], [2, "gold", 2], [2, "gold", 2]] });
+    expect((await refusal(() => twoGold.query({ metrics: ["ending_mrr"], dimensions: ["tier"], filters: [...BASIC, f("tier", "gold")] }))).status).toBe("unsafe_query");
     // ...but with plan=pro the base population is row 3 only, so c2's duplicate is unreachable.
     expect(by((await governed(dupSilver, { metrics: ["ending_mrr"], dimensions: ["tier"], filters: [...PRO, f("tier", "gold")] })).rows, "tier", "ending_mrr")).toEqual({ gold: 120 });
   });
@@ -344,8 +348,10 @@ describe.skipIf(!available)("semi-additive snapshot population + base query filt
     expect(pop).not.toContain(`"fct_mrr"."billing"`);
     // Metric filter lives in P0 and the FILTER clause; joined filter lives in the result.
     expect(compiled.sql).toMatch(new RegExp(`"${CONTRIB_CTE}" AS \\(\\n  SELECT \\*\\n  FROM "${POP_CTE}" AS "fct_mrr"\\n  WHERE \\("fct_mrr"\\."billing" = \\$\\d+\\)`));
+    expect(compiled.sql).toMatch(/"__grane_reach_dim_customers" AS \([\s\S]*AND "dim_customers"\."tier" = \$\d+/);
     expect(compiled.sql).toMatch(/"__grane_result" AS \([\s\S]*WHERE "dim_customers"\."tier" = \$\d+/);
-    // Parameters bind in textual order: snapshot CTE (billing, plan, tier), pop (plan), contrib (billing), result (billing, tier).
-    expect(compiled.params).toEqual(["monthly", "pro", "gold", "pro", "monthly", "monthly", "gold"]);
+    // Parameters bind in textual order: snapshot CTE (billing, plan, tier),
+    // pop (plan), contrib (billing), reach (tier), result (billing, tier).
+    expect(compiled.params).toEqual(["monthly", "pro", "gold", "pro", "monthly", "gold", "monthly", "gold"]);
   });
 });

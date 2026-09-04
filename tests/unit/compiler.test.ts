@@ -102,11 +102,12 @@ describe("deterministic SQL compiler", () => {
         { field: "channel", operator: "in", value: ["web", "mobile"] },
       ],
     });
-    // Base-table filter → population CTE (first in text); joined filter → result WHERE (last).
+    // Base-table filter → population CTE (first in text); joined filter →
+    // reach CTE of that table, then result WHERE (same sentinel, two binds).
     expect(compiled.sql).toContain('"orders"."channel" IN ($1, $2)');
-    expect(compiled.sql).toContain('"customers"."customer_type" = $5');
-    expect(compiled.params).toEqual(["web", "mobile", "completed", "completed", "business"]);
-    expect(placeholdersInTextualOrder(compiled.sql)).toEqual([1, 2, 3, 4, 5]);
+    expect(compiled.sql).toContain('"customers"."customer_type" = $4');
+    expect(compiled.params).toEqual(["web", "mobile", "completed", "business", "completed", "business"]);
+    expect(placeholdersInTextualOrder(compiled.sql)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it("enforces the configured row limit cap", () => {

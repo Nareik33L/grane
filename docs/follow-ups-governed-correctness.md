@@ -9,7 +9,8 @@ is also fixed. Item 11 (`__grane_` identifier collision) is also fixed.
 Item 12 (public `period_${grain}` alias collision) is also fixed.
 Item 13 (selected public output-name uniqueness) is also fixed.
 Item 8 (`validate` / compile disagreement on off-path metric filters)
-is also fixed.
+is also fixed. Item 10 (cardinality participation / NULL-measure
+false refusal) is also fixed, with an intentional conservative remainder.
 The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
@@ -111,14 +112,32 @@ or as warehouse-error rewriting.
 - **Governed-contract impact:** Sorted governed results can reshuffle.
 - **Priority:** Medium.
 
-## 10. Conservative NULL-measure cardinality behaviour
+## 10. Conservative NULL-measure cardinality behaviour — fixed (with an intentional remainder)
 
-- **Observed:** A NULL measure on a reachable duplicated key still refuses
-  (the join would multiply the fact row, even if the measure is NULL).
-- **Supported/documented:** Matches the written guard contract.
-- **Governed-contract impact:** Possible false refusal vs a more generous
-  "NULL measures cannot multiply" rule. Changing it is a product decision.
-- **Priority:** Low unless a fixture depends on it.
+Resolved: cardinality participation is derived from the requested outputs,
+not from a global `measure IS NOT NULL` heuristic.
+
+- Same-table query filters constrain P(n) of that table (and later hops
+  that read it). Duplicates that fail every predicate on T cannot appear
+  in the join+WHERE result and do not refuse. Duplicates that survive
+  the predicate still refuse. P0 / fact population is not shrunk by a
+  joined filter (the unsafe PR #19 regression). Metric-definition FILTER
+  clauses are not WHERE and do not shrink P(n).
+- NULL measures are excluded from P0 only for SUM / AVG / MIN / MAX /
+  COUNT(column) / COUNT DISTINCT whose measure lives on the base table,
+  and only when no selected dimension, raw dimension, or time grain comes
+  from a joined table. COUNT(*) keeps every qualifying row. A NULL SUM
+  row grouped by a joined dimension can still create extra groups, so it
+  stays in P0.
+
+Remaining conservative refusals (intentional support boundary, not a
+governed-wrong path): a duplicate on hop N while the query filter lives
+only on a later hop; joined metric-definition FILTER (does not remove
+groups); NULL facts that can affect selected joined-dimension groups.
+Do not reopen as DISTINCT / first-row / “trust the declaration”.
+See `tests/unit/query-cardinality.test.ts`,
+`tests/unit/cardinality-populations.test.ts`, and
+`tests/unit/cardinality-participation.test.ts`.
 
 ## 11. User aliases can collide with hidden `__grane_*` result columns — fixed
 

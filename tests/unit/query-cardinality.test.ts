@@ -178,9 +178,11 @@ describe.skipIf(!available)("B: fact-filter excludes the dup FK (invariant C)", 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cases C1/C2/C3: joined dimension filter (WHERE dim.col = X)
-// does NOT shrink the cardinality check (the FK still participates)
+// constrains P(n) of that same table. Duplicates that fail the predicate
+// cannot appear in the result (C1/C2). Duplicates that survive it refuse (C3).
+// P0 (facts) is not shrunk by the joined filter.
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!available)("C: joined-filter does not shrink cardinality check (invariant D)", () => {
+describe.skipIf(!available)("C: same-table joined filters constrain P(n) of that table", () => {
   // cust 1 → EU only (unique); cust 2 → region duplicated
   const DDL_C1 = [
     // cust 2 has two EU rows → filter region=US → 0 final rows but dup still participates
@@ -233,17 +235,22 @@ describe.skipIf(!available)("C: joined-filter does not shrink cardinality check 
     await Promise.all([k1?.close(), k2?.close(), k3?.close()]);
   });
 
-  it("C1: cust2 two-EU rows, filter US → 0 results but dup participates → refuse", async () => {
-    const refused = await refusal(() =>
-      k1.query({ metrics: ["revenue"], dimensions: ["region"], filters: [{ field: "region", operator: "=", value: "US" }] }),
-    );
-    expect(refused.status).toBe("unsafe_query");
+  it("C1: cust2 two-EU rows, filter US → 0 results; dups fail the predicate → governed empty", async () => {
+    const r = await k1.query({ metrics: ["revenue"], dimensions: ["region"], filters: [{ field: "region", operator: "=", value: "US" }] });
+    expect(r.trust).toBe("governed");
+    expect(r.rows).toEqual([]);
   });
 
-  it("C2: cust2 US+EU, filter US → 1 result but dup participates → refuse", async () => {
-    const refused = await refusal(() =>
-      k2.query({ metrics: ["revenue"], dimensions: ["region"], filters: [{ field: "region", operator: "=", value: "US" }] }),
-    );
+  it("C2: cust2 US+EU, filter US → 1 result; only the matching copy is in P(n) → governed 50", async () => {
+    const r = await k2.query({ metrics: ["revenue"], dimensions: ["region"], filters: [{ field: "region", operator: "=", value: "US" }] });
+    expect(r.trust).toBe("governed");
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]?.region).toBe("US");
+    expect(n(r.rows[0]?.revenue)).toBe(50);
+  });
+
+  it("C2 unfiltered: both region copies survive → refuse (inside-filter inverse)", async () => {
+    const refused = await refusal(() => k2.query({ metrics: ["revenue"], dimensions: ["region"] }));
     expect(refused.status).toBe("unsafe_query");
   });
 
@@ -335,9 +342,10 @@ describe.skipIf(!available)("E: semi-additive snapshot excludes historical-only 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cases F/G: empty result holes — the guard must still be checked
+// Cases F/G: empty result after a same-table joined filter.
+// Duplicates that fail the predicate are not in P(n); empty is governed.
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!available)("F/G: empty result holes (invariant D — empty result must not bypass a relevant violation)", () => {
+describe.skipIf(!available)("F/G: empty result after a same-table filter that matches no copy", () => {
   // cust 1 is duplicated in dim; grouped query with account=Nope → 0 analytic rows.
   // The dup is a participating FK so this must be refused.
   const DDL = [
@@ -355,28 +363,50 @@ describe.skipIf(!available)("F/G: empty result holes (invariant D — empty resu
   beforeAll(async () => { kernel = kernelFor(await buildWarehouse("fg", DDL)); });
   afterAll(async () => { await kernel?.close(); });
 
-  it("F: grouped query account=Nope → dup cust1 participates → refuse (not governed empty)", async () => {
-    const refused = await refusal(() =>
-      kernel.query({
-        metrics: ["revenue"],
-        dimensions: ["account"],
-        filters: [{ field: "account", operator: "=", value: "Nope" }],
-      }),
-    );
-    expect(refused.status).toBe("unsafe_query");
+  it("F: grouped query account=Nope → no matching copy in P(n) → governed empty", async () => {
+    const r = await kernel.query({
+      metrics: ["revenue"],
+      dimensions: ["account"],
+      filters: [{ field: "account", operator: "=", value: "Nope" }],
+    });
+    expect(r.trust).toBe("governed");
+    expect(r.rows).toEqual([]);
   });
 
-  it("G: scalar query (no dims) with joined dim filter account=Nope → refuse", async () => {
-    // Joining dim_customers to filter account=Nope with cust1 duplicated → refuse
-    const refused = await refusal(() =>
-      kernel.query({
-        metrics: ["revenue"],
-        filters: [{ field: "account", operator: "=", value: "Nope" }],
-      }),
-    );
-    // This query doesn't join (account filter is on a joined table so no join guard for scalar
-    // without a dimension... actually account filter requires the join → guard exists)
-    expect(refused.status).toBe("unsafe_query");
+  it("G: scalar query with joined filter account=Nope → governed NULL (no matching copy)", async () => {
+    const r = await kernel.query({
+      metrics: ["revenue"],
+      filters: [{ field: "account", operator: "=", value: "Nope" }],
+    });
+    expect(r.trust).toBe("governed");
+    expect(r.rows).toEqual([{ revenue: null }]);
+  });
+
+  it("F inverse: filter account=Acme with two Acme copies still refuses", async () => {
+    const ddl = [
+      `CREATE TABLE fct_orders (order_id INTEGER, customer_id INTEGER, ordered_at DATE, amount DECIMAL, channel VARCHAR, order_segment VARCHAR)`,
+      `INSERT INTO fct_orders VALUES (1, 1, '2026-01-01', 100, 'web', 'Enterprise')`,
+      `CREATE TABLE dim_customers (customer_id INTEGER, account VARCHAR, segment VARCHAR, manager_id INTEGER)`,
+      `INSERT INTO dim_customers VALUES (1, 'Acme', 'SMB', NULL), (1, 'Acme', 'ENT', NULL)`,
+      `CREATE TABLE dim_managers (manager_id INTEGER, manager_name VARCHAR)`,
+      `CREATE TABLE dim_products (product_id INTEGER, category VARCHAR)`,
+      `CREATE TABLE dim_tags (tag_row_id INTEGER, customer_id INTEGER, tag VARCHAR)`,
+      `CREATE TABLE dim_regions (customer_id INTEGER, region VARCHAR)`,
+      `CREATE TABLE fct_mrr_snapshot (customer_month_id VARCHAR, customer_id INTEGER, month_start DATE, mrr DECIMAL, snapshot_segment VARCHAR)`,
+    ];
+    const k = kernelFor(await buildWarehouse("f-inv", ddl));
+    try {
+      const refused = await refusal(() =>
+        k.query({
+          metrics: ["revenue"],
+          dimensions: ["account"],
+          filters: [{ field: "account", operator: "=", value: "Acme" }],
+        }),
+      );
+      expect(refused.status).toBe("unsafe_query");
+    } finally {
+      await k.close();
+    }
   });
 
   it("H: unique dim → governed empty (account=Nope, no dup)", async () => {

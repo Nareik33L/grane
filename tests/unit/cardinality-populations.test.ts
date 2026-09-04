@@ -6,8 +6,10 @@
  *
  *   P0    base rows that can contribute to at least one requested metric
  *         (query time bounds, base-table query filters, the metric's own
- *         base-table filters / per-metric time window, snapshot selection)
+ *         base-table filters / per-metric time window, snapshot selection,
+ *         and NULL-measure participation when no joined output is selected)
  *   P(n)  rows of the n-th joined table referenced by a non-NULL FK in P(n-1)
+ *         that pass query filters whose column lives on that table
  *   guard MAX(rows per key) over P(n)
  *
  * Every case below executes against DuckDB and asserts the analytical
@@ -360,23 +362,29 @@ describe.skipIf(!available)("multi-hop reachable populations", () => {
     expect(feb.status).toBe("unsafe_query");
   });
 
-  it("R: a joined filter on hop 1 does not shrink the population (hop-2 duplicate still refuses)", async () => {
+  it("R: a hop-1 filter that excludes the hop-2 duplicate branch executes; the matching branch still refuses", async () => {
     const k = await scenario({ orders: ORDERS, customers: CUSTOMERS, managers: [...MANAGERS, dup(MANAGERS[1]!, "RaviDup")], regions: REGIONS });
-    const r = await refusal(() =>
-      k.query({ metrics: ["revenue"], dimensions: ["manager_name"], filters: [{ field: "account", operator: "=", value: "Acme" }] }),
+    const acme = await k.query({ metrics: ["revenue"], dimensions: ["manager_name"], filters: [{ field: "account", operator: "=", value: "Acme" }] });
+    expect(acme.trust).toBe("governed");
+    expect(acme.rows).toEqual([{ manager_name: "Maya", revenue: 100 }]);
+    const corp = await refusal(() =>
+      k.query({ metrics: ["revenue"], dimensions: ["manager_name"], filters: [{ field: "account", operator: "=", value: "Corp" }] }),
     );
-    expect(r.status).toBe("unsafe_query");
+    expect(corp.status).toBe("unsafe_query");
     const clean = await scenario({ orders: ORDERS, customers: CUSTOMERS, managers: MANAGERS, regions: REGIONS });
     const ok = await clean.query({ metrics: ["revenue"], dimensions: ["manager_name"], filters: [{ field: "account", operator: "=", value: "Acme" }] });
     expect(ok.rows).toEqual([{ manager_name: "Maya", revenue: 100 }]);
   });
 
-  it("S: a joined filter on hop 2 does not hide a hop-3 duplicate", async () => {
+  it("S: a hop-2 filter that excludes the hop-3 duplicate branch executes; the matching branch still refuses", async () => {
     const k = await scenario({ orders: ORDERS, customers: CUSTOMERS, managers: MANAGERS, regions: [...REGIONS, dup(REGIONS[1]!, "USDup")] });
-    const r = await refusal(() =>
-      k.query({ metrics: ["revenue"], dimensions: ["region_name"], filters: [{ field: "manager_name", operator: "=", value: "Maya" }] }),
+    const maya = await k.query({ metrics: ["revenue"], dimensions: ["region_name"], filters: [{ field: "manager_name", operator: "=", value: "Maya" }] });
+    expect(maya.trust).toBe("governed");
+    expect(maya.rows).toEqual([{ region_name: "UK", revenue: 100 }]);
+    const ravi = await refusal(() =>
+      k.query({ metrics: ["revenue"], dimensions: ["region_name"], filters: [{ field: "manager_name", operator: "=", value: "Ravi" }] }),
     );
-    expect(r.status).toBe("unsafe_query");
+    expect(ravi.status).toBe("unsafe_query");
   });
 
   it("T: a joined filter on hop 3 over clean data executes", async () => {
@@ -458,15 +466,23 @@ describe.skipIf(!available)("metric-contributing populations", () => {
     expect(by(jan.rows, "account", "completed_revenue")).toEqual({ Acme: 100 });
   });
 
-  it("H: a joined query filter does not hide a violation for a contributing row", async () => {
+  it("H: a joined query filter on the duplicated table excludes a non-matching copy", async () => {
     const k = await scenario({ orders: ORDERS, customers: CUST2_DUP });
     const completed = await k.query({ metrics: ["completed_revenue"], filters: [{ field: "account", operator: "=", value: "Acme" }] });
     expect(completed.trust).toBe("governed");
     expect(n(completed.rows[0]?.completed_revenue)).toBe(100);
-    const pending = await refusal(() =>
-      k.query({ metrics: ["pending_revenue"], filters: [{ field: "account", operator: "=", value: "Acme" }] }),
+    // Corp is duplicated; account=Acme matches neither Corp copy → P(n) empty → governed 0/NULL.
+    const pendingAcme = await k.query({ metrics: ["pending_revenue"], filters: [{ field: "account", operator: "=", value: "Acme" }] });
+    expect(pendingAcme.trust).toBe("governed");
+    expect(pendingAcme.rows[0]?.pending_revenue == null || n(pendingAcme.rows[0]?.pending_revenue) === 0).toBe(true);
+    // Inverse: a predicate both copies satisfy (Corp and CorpDup) → refuse.
+    const pendingCorp = await refusal(() =>
+      k.query({
+        metrics: ["pending_revenue"],
+        filters: [{ field: "account", operator: "in", value: ["Corp", "CorpDup"] }],
+      }),
     );
-    expect(pending.status).toBe("unsafe_query");
+    expect(pendingCorp.status).toBe("unsafe_query");
   });
 
   it("J: COUNT(1) with a metric filter uses the filtered population", async () => {
