@@ -30,7 +30,7 @@ export type MetricFilterBind =
  * shape; callers treat those filters as unbound unless they sit on the grain.
  */
 export function preaggCteTables(path: JoinPath, grainTable: string): Set<string> | null {
-  if (!path.fansOut || path.ambiguous) return null;
+  if (!path.fansOut || path.ambiguous || path.fanningAmbiguous) return null;
   const first = path.edges[0];
   if (!first || first.fromTable !== grainTable) return null;
   return new Set(path.edges.map((edge) => edge.toTable));
@@ -161,6 +161,12 @@ export function assertMeasurePath(model: SemanticModel, metric: Metric, grainTab
     );
   }
   if (path.ambiguous) {
+    throw ambiguousQuery(
+      `Metric "${metric.name}" has ${ambiguousRelationshipMessage(grainTable, measureTable, path.alternatives)}`,
+      { metric: metric.name, from: grainTable, to: measureTable, paths: path.alternatives },
+    );
+  }
+  if (path.fanningAmbiguous) {
     throw ambiguousQuery(
       `Metric "${metric.name}" has ${ambiguousRelationshipMessage(grainTable, measureTable, path.alternatives)}`,
       { metric: metric.name, from: grainTable, to: measureTable, paths: path.alternatives },

@@ -384,7 +384,7 @@ function validateMetric(
         subject,
         message: `No relationship path from entity table "${baseTable}" to measure table "${metric.measure.table}". Add the relationship to relationships.yml.`,
       });
-    } else if (path.ambiguous) {
+    } else if (path.ambiguous || path.fanningAmbiguous) {
       issues.push({
         severity: "error",
         code: "ambiguous_relationship",

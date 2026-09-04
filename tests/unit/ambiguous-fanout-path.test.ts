@@ -113,8 +113,10 @@ describe("ambiguous fan-out measure path (structural)", () => {
     const b = new SemanticModel(dualFanoutConfig("shipments-first", { type: "duckdb", path: ":memory:", schema: "main" }));
     const pa = a.graph.findPath("orders", "products");
     const pb = b.graph.findPath("orders", "products");
-    expect(pa?.ambiguous).toBe(true);
-    expect(pb?.ambiguous).toBe(true);
+    expect(pa?.fanningAmbiguous).toBe(true);
+    expect(pb?.fanningAmbiguous).toBe(true);
+    expect(pa?.ambiguous).not.toBe(true);
+    expect(pb?.ambiguous).not.toBe(true);
     expect(pa?.alternatives?.length).toBeGreaterThanOrEqual(2);
     expect(pb?.alternatives?.length).toBeGreaterThanOrEqual(2);
     const idsA = new Set(pa!.alternatives);
@@ -134,7 +136,8 @@ describe("ambiguous fan-out measure path (structural)", () => {
       dualFanoutConfig("items-first", { type: "duckdb", path: ":memory:", schema: "main" }),
     );
     const path = model.graph.findPath("orders", "products");
-    expect(path?.ambiguous).toBe(true);
+    expect(path?.fanningAmbiguous).toBe(true);
+    expect(path?.ambiguous).not.toBe(true);
     expect(path?.alternatives?.some((s) => s.includes("items"))).toBe(true);
     expect(path?.alternatives?.some((s) => s.includes("shipments"))).toBe(true);
     expect(path?.alternatives?.some((s) => s.includes("items.product_id"))).toBe(true);
@@ -189,6 +192,7 @@ describe("ambiguous fan-out measure path (structural)", () => {
     const k = new GraneKernel(oneSafePlusInvalidConfig({ type: "duckdb", path: ":memory:", schema: "main" }));
     const path = k.model.graph.findPath("orders", "products");
     expect(path?.ambiguous).not.toBe(true);
+    expect(path?.fanningAmbiguous).not.toBe(true);
     expect(path?.fansOut).toBe(true);
   });
 
@@ -213,6 +217,20 @@ describe("ambiguous fan-out measure path (structural)", () => {
     expectAmbiguousMeasure(refusal(() => k.resolve({ metrics: ["filtered_weight"] })));
   });
 
+  it("multiple fanning routes to a dimension stay unsafe_query (not query-effective ambiguity)", () => {
+    const k = new GraneKernel(
+      dualFanoutConfig("items-first", { type: "duckdb", path: ":memory:", schema: "main" }, {
+        dimensions: {
+          order_id: { entity: "order", sql: "${orders.id}" },
+          product_wt: { entity: "product", sql: "${products.weight}" },
+        },
+      }),
+    );
+    const r = refusal(() => k.compile({ metrics: ["order_count"], dimensions: ["product_wt"] }));
+    expect(r.status).toBe("unsafe_query");
+    expect(r.message).toMatch(/one_to_many|fan out/i);
+  });
+
   it("does not solve ambiguity with mixed or exploratory trust", () => {
     const k = new GraneKernel(dualFanoutConfig("items-first", { type: "duckdb", path: ":memory:", schema: "main" }));
     const r = refusal(() => k.compile({ metrics: ["product_weight"] }));
@@ -232,6 +250,7 @@ describe("ambiguous fan-out measure path (structural)", () => {
     const model = new SemanticModel(uniqueFanoutConfig({ type: "duckdb", path: ":memory:", schema: "main" }));
     const path = model.graph.findPath("orders", "shipping_costs");
     expect(path?.ambiguous).not.toBe(true);
+    expect(path?.fanningAmbiguous).not.toBe(true);
     expect(path?.fansOut).toBe(true);
   });
 });

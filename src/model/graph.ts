@@ -32,12 +32,19 @@ export interface JoinPath {
   /** True if any traversed edge is one_to_many (row-multiplying). */
   fansOut: boolean;
   /**
-   * True when two or more equally valid semantic paths exist. Callers must
-   * refuse rather than use `edges` as a guess. Applies to both fan-out-free
-   * paths and fanning (pre-aggregation) paths.
+   * True when two or more fan-out-free paths exist. Callers that require a
+   * safe join must refuse rather than use `edges` as a guess.
    */
   ambiguous?: boolean;
-  /** Human-readable path descriptions when `ambiguous` is true. */
+  /**
+   * True when no safe path exists and two or more fanning paths exist.
+   * Measure pre-aggregation must refuse: those routes are equally valid and
+   * YAML/BFS order is not a discriminator. Dimension/filter joins still use
+   * `fansOut` → unsafe_query, because a fanning path is not valid for that
+   * operation (multiple impossible routes are not ambiguity).
+   */
+  fanningAmbiguous?: boolean;
+  /** Human-readable path descriptions when `ambiguous` or `fanningAmbiguous`. */
   alternatives?: string[];
 }
 
@@ -123,10 +130,10 @@ export class RelationshipGraph {
    * Find a join path between two tables.
    *
    * Fan-out-free paths are preferred. If two or more safe paths exist, the
-   * result is marked `ambiguous` — callers must not guess. A fanning path is
-   * returned only when no safe path exists. If two or more fanning paths
-   * exist, the result is also `ambiguous`: pre-aggregation still needs one
-   * authoritative route, and YAML/BFS order is not one.
+   * result is marked `ambiguous` — callers must not guess. A unique fanning
+   * path is returned when no safe path exists (pre-aggregation). If two or
+   * more fanning paths exist, `fanningAmbiguous` is set so measure callers
+   * can refuse; dimension callers still treat `fansOut` as unsafe_query.
    */
   findPath(fromTable: string, toTable: string): JoinPath | null {
     if (fromTable === toTable) return { edges: [], fansOut: false };
@@ -139,7 +146,15 @@ export class RelationshipGraph {
     if (deepSafe.length > 1) return this.markAmbiguous(deepSafe);
     if (deepSafe.length === 1) return deepSafe[0]!;
     const fanning = reachable.filter((path) => path.fansOut);
-    if (fanning.length > 1) return this.markAmbiguous(fanning);
+    if (fanning.length > 1) {
+      const first = fanning[0]!;
+      return {
+        edges: first.edges,
+        fansOut: true,
+        fanningAmbiguous: true,
+        alternatives: fanning.map(describeJoinPath),
+      };
+    }
     if (fanning.length === 1) return fanning[0]!;
     return this.bfs(fromTable, toTable, false);
   }

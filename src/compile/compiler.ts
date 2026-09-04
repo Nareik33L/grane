@@ -410,7 +410,7 @@ export function compileQuery(
       );
     }
 
-    if (path.ambiguous) {
+    if (path.ambiguous || path.fanningAmbiguous) {
       throw ambiguousQuery(
         `Metric "${metric.name}" has ${ambiguousRelationshipMessage(baseTable, measure.table, path.alternatives)}`,
         { metric: metric.name, from: baseTable, to: measure.table, paths: path.alternatives },
