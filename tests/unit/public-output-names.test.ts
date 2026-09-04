@@ -514,15 +514,14 @@ describe.skipIf(!duckdbOk)("public output uniqueness (DuckDB)", () => {
 
   it("filter-only dimension code does not collide with metric code", async () => {
     const k = kernel(codeModel);
-    for (const filters of [
-      [{ field: "code", operator: "is_null" as const }],
-      [{ field: "code", operator: "in" as const, value: [null] }],
-    ]) {
-      const result = await k.query({ metrics: ["code"], filters, time: Q });
-      expect(result.columns).toEqual(["code"]);
-      expectUniqueSchema(result);
-      expect(result.trust).toBe("governed");
-    }
+    const result = await k.query({
+      metrics: ["code"],
+      filters: [{ field: "code", operator: "is_null" }],
+      time: Q,
+    });
+    expect(result.columns).toEqual(["code"]);
+    expectUniqueSchema(result);
+    expect(result.trust).toBe("governed");
     const joined = await k.query({
       metrics: ["code"],
       filters: [{ field: "country", operator: "=", value: "US" }],

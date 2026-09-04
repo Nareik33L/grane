@@ -7,6 +7,7 @@ import {
 import type { DatabaseSchema } from "../connectors/types.js";
 import { isReservedInternalIdent, reservedInternalMessage } from "../compile/internal-namespace.js";
 import { classifyMetricFilterField } from "../compile/metric-filter-support.js";
+import { filterValueContainsJsonNull, jsonNullFilterMessage } from "../query/filter-null.js";
 
 /**
  * Structural validation: is every semantic definition legal and analytically
@@ -374,7 +375,7 @@ function validateMetric(
       }
     }
 
-    // Measure reachability and fan-out safety.
+    // Measure reachability, path uniqueness, and fan-out safety.
     const path = model.graph.findPath(baseTable, metric.measure.table);
     if (!path) {
       issues.push({
@@ -382,6 +383,15 @@ function validateMetric(
         code: "unreachable_measure",
         subject,
         message: `No relationship path from entity table "${baseTable}" to measure table "${metric.measure.table}". Add the relationship to relationships.yml.`,
+      });
+    } else if (path.ambiguous || path.fanningAmbiguous) {
+      issues.push({
+        severity: "error",
+        code: "ambiguous_relationship",
+        subject,
+        message:
+          `Metric "${metric.name}" has multiple relationship paths from "${baseTable}" to "${metric.measure.table}" ` +
+          `(${(path.alternatives ?? []).join("; ")}). YAML declaration order is not a semantic discriminator.`,
       });
     } else if (path.fansOut) {
       if (config.type === "count_distinct") {
@@ -426,6 +436,14 @@ function validateMetric(
       continue;
     }
     issues.push(...checkColumn(subject, ref.table, ref.column));
+    if (filterValueContainsJsonNull(filter.value) && filter.operator !== "is_null" && filter.operator !== "is_not_null") {
+      issues.push({
+        severity: "error",
+        code: "invalid_filter",
+        subject,
+        message: jsonNullFilterMessage(filter.operator, filter.field),
+      });
+    }
     if (config.type === "ratio") continue;
     const bound = classifyMetricFilterField(model, metric, baseTable, filter.field);
     if (!bound.ok) {

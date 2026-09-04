@@ -1,5 +1,5 @@
 import type { Metric, SemanticModel } from "../model/model.js";
-import { describeJoinPath, type JoinPath } from "../model/graph.js";
+import { ambiguousRelationshipMessage, describeJoinPath, type JoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
 import {
   GraneError,
@@ -8,6 +8,7 @@ import {
   unsafeQuery,
   type Refusal,
 } from "../errors.js";
+import { assertNoJsonNullFilterValue } from "../query/filter-null.js";
 
 /**
  * Where a metric-definition `table.column` filter is compiled.
@@ -29,7 +30,7 @@ export type MetricFilterBind =
  * shape; callers treat those filters as unbound unless they sit on the grain.
  */
 export function preaggCteTables(path: JoinPath, grainTable: string): Set<string> | null {
-  if (!path.fansOut || path.ambiguous) return null;
+  if (!path.fansOut || path.ambiguous || path.fanningAmbiguous) return null;
   const first = path.edges[0];
   if (!first || first.fromTable !== grainTable) return null;
   return new Set(path.edges.map((edge) => edge.toTable));
@@ -90,8 +91,7 @@ export function classifyMetricFilterTable(
     return {
       ok: false,
       refusal: ambiguousQuery(
-        `Metric "${metric.name}" filter on "${filterTable}" has multiple fan-out-free paths from "${grainTable}" ` +
-          `(${(path.alternatives ?? []).join("; ")}). Name the relationship you mean — guessing a path would silently change the numbers.`,
+        `Metric "${metric.name}" filter on "${filterTable}" has ${ambiguousRelationshipMessage(grainTable, filterTable, path.alternatives)}`,
         {
           metric: metric.name,
           table: filterTable,
@@ -146,6 +146,34 @@ export function classifyMetricFilterField(
   return bound;
 }
 
+/**
+ * Measure-table reachability for a scalar metric at `grainTable`.
+ * Ambiguous fanning (and safe) routes refuse here so resolve / compile /
+ * explain / query never BFS-pick a path.
+ */
+export function assertMeasurePath(model: SemanticModel, metric: Metric, grainTable: string): void {
+  if (metric.config.type === "ratio" || !metric.measure) return;
+  const measureTable = metric.measure.table;
+  const path = model.graph.findPath(grainTable, measureTable);
+  if (!path) {
+    throw invalidQuery(
+      `No relationship path from "${grainTable}" to measure table "${measureTable}" for metric "${metric.name}".`,
+    );
+  }
+  if (path.ambiguous) {
+    throw ambiguousQuery(
+      `Metric "${metric.name}" has ${ambiguousRelationshipMessage(grainTable, measureTable, path.alternatives)}`,
+      { metric: metric.name, from: grainTable, to: measureTable, paths: path.alternatives },
+    );
+  }
+  if (path.fanningAmbiguous) {
+    throw ambiguousQuery(
+      `Metric "${metric.name}" has ${ambiguousRelationshipMessage(grainTable, measureTable, path.alternatives)}`,
+      { metric: metric.name, from: grainTable, to: measureTable, paths: path.alternatives },
+    );
+  }
+}
+
 /** Refuse every metric-definition filter that would compile to an unbound identifier. */
 export function assertMetricFiltersBound(model: SemanticModel, metric: Metric, grainTable: string): void {
   if (metric.config.type === "ratio" && metric.filters.length > 0) {
@@ -156,6 +184,7 @@ export function assertMetricFiltersBound(model: SemanticModel, metric: Metric, g
     );
   }
   for (const filter of metric.filters) {
+    assertNoJsonNullFilterValue(filter.operator, filter.field, filter.value);
     const bound = classifyMetricFilterField(model, metric, grainTable, filter.field);
     if (!bound.ok) throw new GraneError(bound.refusal);
   }

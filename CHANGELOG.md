@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Ambiguous fan-out measure paths refuse with `ambiguous_query` instead of
+  BFS-picking the first YAML-declared route. Unique fan-out pre-aggregation
+  is unchanged. See `tests/unit/ambiguous-fanout-path.test.ts`.
+
+- Ordinary comparison and membership operators reject JSON null
+  (`invalid_query`) rather than compiling SQL `= NULL` / `IN (…, NULL)`.
+  Use `is_null` / `is_not_null`. Query filters and metric-definition filters
+  share the rule. See `tests/unit/null-filter-semantics.test.ts`.
+
 - Live PostgreSQL certification: GitHub Actions runs a purpose-built
   correctness corpus against PostgreSQL 16 on every PR (read-only runtime
   role, independent SQL oracles). Compile inspection is not treated as

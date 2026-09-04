@@ -24,7 +24,9 @@ import {
   type RawColumn,
 } from "../explore/raw.js";
 import { refuseReservedInternalIdent } from "../compile/internal-namespace.js";
-import { assertMetricFiltersBound } from "../compile/metric-filter-support.js";
+import { assertMetricFiltersBound, assertMeasurePath } from "../compile/metric-filter-support.js";
+import { assertNoJsonNullFilterValue } from "./filter-null.js";
+import { ambiguousRelationshipMessage } from "../model/graph.js";
 
 function refuseDeniedDimension(
   agent: AgentGrant | null | undefined,
@@ -255,13 +257,15 @@ export function resolveQuery(
     };
   });
 
-  // Metric-definition filters must bind at this grain. Same rule as compile, so
-  // resolve / explain / query agree before any SQL is emitted.
+  // Metric-definition filters must bind at this grain. Measure paths must be
+  // unique. Same rules as compile, so resolve / explain / query agree before
+  // any SQL is emitted.
   for (const metric of metrics) {
     assertMetricFiltersBound(model, metric, baseTable);
   }
   for (const metric of expandMetricComponents(model, metrics)) {
     assertMetricFiltersBound(model, metric, baseTable);
+    assertMeasurePath(model, metric, baseTable);
   }
 
   // --- Governed dimensions (must join without fan-out) ---
@@ -314,6 +318,13 @@ export function resolveQuery(
     ) {
       throw invalidQuery(`Filter on "${filter.field}" with operator "${filter.operator}" requires a value.`);
     }
+    if (filter.operator === "in" || filter.operator === "not_in") {
+      const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+      if (values.length === 0) {
+        throw invalidQuery(`Operator "${filter.operator}" requires a non-empty array value.`);
+      }
+    }
+    assertNoJsonNullFilterValue(filter.operator, filter.field, filter.value);
     if (!resolved.governed) {
       notes.push(`Filter field "${resolved.field}" is not defined in the Grane semantic model.`);
     } else {
@@ -675,7 +686,7 @@ function assertSafeJoin(model: SemanticModel, baseTable: string, column: ColumnR
   }
   if (path.ambiguous) {
     throw ambiguousQuery(
-      `Joining ${purpose} is ambiguous: multiple fan-out-free paths from "${baseTable}" to "${column.table}" (${(path.alternatives ?? []).join("; ")}). Name the relationship you mean — guessing a path would silently change the numbers.`,
+      `Joining ${purpose} is ambiguous: ${ambiguousRelationshipMessage(baseTable, column.table, path.alternatives)}`,
       { from: baseTable, to: column.table, paths: path.alternatives },
     );
   }
