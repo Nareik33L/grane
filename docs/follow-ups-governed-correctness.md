@@ -11,6 +11,7 @@ Item 13 (selected public output-name uniqueness) is also fixed.
 Item 8 (`validate` / compile disagreement on off-path metric filters)
 is also fixed. Item 10 (cardinality participation / NULL-measure
 false refusal) is also fixed, with an intentional conservative remainder.
+Item 9 (`ORDER BY` / outer-wrapper portability) is also fixed.
 The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
@@ -102,15 +103,19 @@ as `filter_out_of_scope`. Query filters that name a metric (or synonym) are
 `tests/unit/metric-filter-support.test.ts`. Do not reopen as a HAVING engine
 or as warehouse-error rewriting.
 
-## 9. `ORDER BY` / outer-wrapper portability
+## 9. `ORDER BY` / outer-wrapper portability — fixed
 
-- **Observed:** Ordering lives inside `__grane_result`; the outer
-  `card LEFT JOIN result` does not repeat it. SQL does not guarantee order
-  survives.
-- **Supported/documented:** TODO in the compiler. Dialect NULL-placement
-  also differs.
-- **Governed-contract impact:** Sorted governed results can reshuffle.
-- **Priority:** Medium.
+Resolved: promised ordering is emitted both inside `__grane_result`
+(ORDER BY + LIMIT choose semantic top-N / execution-cap membership) and
+on the outermost SELECT after `__grane_card LEFT JOIN __grane_result`,
+qualified as `__grane_result.<public output>`. SQL does not promise CTE
+order survives the wrapper join. Unguarded queries already ordered at
+the final SELECT and are unchanged. Default order is unchanged: time
+grain → `period_${grain}` ASC; otherwise first selected metric DESC when
+the query is grouped. `query.order` still requires a selected public
+output. NULLS FIRST/LAST is not part of the API; warehouses keep their
+default NULL placement. See `tests/unit/final-ordering.test.ts`. Do not
+reopen as pagination, ranking, or a new default sort product.
 
 ## 10. Conservative NULL-measure cardinality behaviour — fixed (with an intentional remainder)
 

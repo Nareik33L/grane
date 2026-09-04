@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Promised result order is repeated on the outermost SELECT after the
+  cardinality wrapper. Inner `__grane_result` still has ORDER BY + LIMIT so
+  semantic top-N membership is chosen before the wrapper join; SQL does not
+  promise CTE order survives that join. Default order is unchanged (time
+  grain → period ASC; otherwise first metric DESC when grouped). See
+  `tests/unit/final-ordering.test.ts`.
+
 - Cardinality guards inspect the rows that can participate in the requested
   result. Query filters on joined table T constrain P(n) of T (later hops
   read that filtered reach); they do not shrink the fact population P0.
