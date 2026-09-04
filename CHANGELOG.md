@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A group exists iff the query's analytical population produces that
+  GROUP BY key. Metric-definition FILTER is not query WHERE: SUM/AVG/MIN/MAX
+  over zero contributing values are NULL, COUNT is 0, and `fill_nulls_with`
+  COALESCE-s the aggregate without dropping the group. MetricFlow 0.212 may
+  omit those extra NULL/0 groups; contributing aggregates match. See
+  `tests/unit/noncontributing-groups.test.ts`.
+
 - Promised result order is repeated on the outermost SELECT after the
   cardinality wrapper. Inner `__grane_result` still has ORDER BY + LIMIT so
   semantic top-N membership is chosen before the wrapper join; SQL does not

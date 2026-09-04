@@ -12,6 +12,9 @@ Item 8 (`validate` / compile disagreement on off-path metric filters)
 is also fixed. Item 10 (cardinality participation / NULL-measure
 false refusal) is also fixed, with an intentional conservative remainder.
 Item 9 (`ORDER BY` / outer-wrapper portability) is also fixed.
+Item 6 (non-contributing groups / NULL vs 0) is also fixed as an explicit
+group-existence contract: groups come from the analytical population;
+metric FILTER is not WHERE. MetricFlow may omit the extra NULL/0 groups.
 The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
@@ -73,14 +76,27 @@ foreign-entity group_by is that provider's series declaration. See
   compatibility for those metrics; none if Grane documents a different rule.
 - **Priority:** High product decision. Do not silently change with timezone.
 
-## 6. Non-contributing NULL / 0 result groups
+## 6. Non-contributing NULL / 0 result groups — fixed (explicit contract)
 
-- **Observed:** Metric-definition filters as `FILTER` can leave groups with
-  NULL/fill values that MetricFlow omits.
-- **Supported/documented:** Noted as a follow-up in the compiler.
-- **Governed-contract impact:** Row sets (and ORDER BY/LIMIT over them) can
-  differ; aggregates of contributing rows agree.
-- **Priority:** Low / product decision.
+Resolved: a group exists iff the query's analytical population (base rows
+after query time bounds and query WHERE, LEFT JOINed to selected
+dimensions) produces that GROUP BY key.
+
+Metric-definition FILTER is not query WHERE. It changes contribution to
+that metric. SUM/AVG/MIN/MAX over zero contributing values are NULL;
+COUNT(*) / COUNT(column) / COUNT DISTINCT are 0. `fill_nulls_with`
+COALESCE-s the aggregate after grouping; it does not invent or drop
+groups. A group that contributes to one requested metric is not dropped
+because another requested metric is NULL. Synthetic wrapper padding
+remains `#27`. Cardinality P0 remains `#32`.
+
+MetricFlow 0.212 applies measure filters as source WHERE before GROUP BY
+and therefore omits groups Grane returns as NULL/0. Contributing
+aggregates match. That row-set difference is a provider boundary, not a
+governed-wrong number. Do not reopen as HAVING / WHERE metric IS NOT NULL
+or by converting FILTER into query WHERE.
+
+See `tests/unit/noncontributing-groups.test.ts`.
 
 ## 7. NULL-dimension group dropped by executor padding heuristic — fixed
 

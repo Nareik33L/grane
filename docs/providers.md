@@ -130,6 +130,17 @@ groupings are exact, but a per-period breakdown is refused (`unsafe_query`)
 because Grane has no time spine to produce the empty periods MetricFlow would
 return — it is never returned sparse as if it were complete.
 
+**Group existence vs MetricFlow measure filters.** Grane groups come from
+the query's analytical population (time bounds + query WHERE + LEFT JOIN
+dimensions), then apply metric-definition filters as SQL `FILTER` (or
+`CASE` on dialects without `FILTER`). A group whose rows fail the metric
+filter still appears, with NULL for SUM/AVG/MIN/MAX and 0 for COUNT.
+MetricFlow 0.212 compiles the same predicate as source `WHERE` before
+`GROUP BY`, so it omits those groups. Totals and contributing group
+values match; the extra NULL/0 groups are the provider boundary. Query
+`WHERE country='UK'` removes non-UK groups; a metric `FILTER country='UK'`
+does not. Do not convert one into the other.
+
 Joins that traverse a declared `many_to_one` relationship are `LEFT JOIN`s:
 unmatched facts (missing dimension row or NULL foreign key) stay in the
 population and land in the NULL group, matching MetricFlow's metric-to-dimension

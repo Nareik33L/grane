@@ -749,11 +749,15 @@ export function compileQuery(
    * period has no data, and Grane has no time spine to draw those rows from, so
    * a per-period breakdown is refused instead of returned sparse.
    *
-   * TODO(follow-up, product decision): metric-definition filters are FILTER
-   * clauses over the analytical population, so a group with no contributing
-   * rows still appears (NULL, or the fill value). MetricFlow filters the rows
-   * first and omits such groups. Aggregates agree; row sets (and therefore
-   * ORDER BY/LIMIT over them) can differ. Not to be changed casually.
+   * Metric-definition filters are FILTER clauses over the analytical
+   * population, so a group with no contributing rows still appears (NULL,
+   * or the fill value). They are not query WHERE: they do not remove groups.
+   * MetricFlow 0.212 applies the same predicate as source WHERE before
+   * GROUP BY and therefore omits those groups. Contributing aggregates
+   * match; row sets can include extra NULL/0 groups. That is an explicit
+   * provider boundary (see docs/providers.md). Do not "fix" it with HAVING
+   * metric IS NOT NULL — that would drop groups another requested metric
+   * still needs.
    */
   const fillNulls = (metric: Metric, expr: string): string => {
     if (metric.config.join_to_timespine && resolved.time?.grain) {
