@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Identifiers in the `__grane_` prefix are reserved for internal
+  execution. A user metric named `__grane_row` is refused rather than
+  silently stripped from a successful result. Provider imports skip the
+  name as unsupported. See `tests/unit/internal-namespace.test.ts`.
+
 - Cardinality-wrapper padding is identified by a structural marker
   (`__grane_row`), not by “every visible column is NULL”. A real GROUP
   BY row whose dimension and metric values are NULL is preserved. A

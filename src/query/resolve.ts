@@ -22,6 +22,7 @@ import {
   hintUngovernedDimension,
   type RawColumn,
 } from "../explore/raw.js";
+import { refuseReservedInternalIdent } from "../compile/internal-namespace.js";
 
 function refuseDeniedDimension(
   agent: AgentGrant | null | undefined,
@@ -241,11 +242,13 @@ export function resolveQuery(
       );
     }
     assertNumericRawMetric(column, raw.type);
+    const alias = raw.alias ?? defaultRawMetricAlias(raw.type, column.ref);
+    refuseReservedInternalIdent("Raw metric alias", alias, "query");
     return {
       field: column.ref,
       qualified: column.qualified,
       type: raw.type,
-      alias: raw.alias ?? defaultRawMetricAlias(raw.type, column.ref),
+      alias,
       dataType: column.dataType,
     };
   });
@@ -269,6 +272,7 @@ export function resolveQuery(
   // --- Raw dimensions ---
   const rawDimensions = query.raw_dimensions.map((requested) => {
     const column = resolveRaw(requested, "raw_dimension");
+    refuseReservedInternalIdent("Raw dimension", column.alias, "query");
     assertSafeJoin(model, baseTable, column.ref, `raw dimension "${column.qualified}"`);
     notes.push(`"${column.qualified}" is not defined in the Grane semantic model.`);
     return column;

@@ -5,7 +5,8 @@ Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
 fixed when independent reviews produced governed-wrong counterexamples.
 Experimental metrics executing as `trust: governed` was a later
 BREAK-GOVERNED finding and is also fixed. Item 7 (NULL-group padding)
-is also fixed. The rest stay deferred.
+is also fixed. Item 11 (`__grane_` identifier collision) is also fixed.
+The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
 
@@ -112,3 +113,13 @@ See `tests/unit/null-group-padding.test.ts`.
 - **Governed-contract impact:** Possible false refusal vs a more generous
   "NULL measures cannot multiply" rule. Changing it is a product decision.
 - **Priority:** Low unless a fixture depends on it.
+
+## 11. User aliases can collide with hidden `__grane_*` result columns — fixed
+
+Resolved: identifiers in the `__grane_` prefix (ASCII case-insensitive)
+are reserved for internal execution. Native YAML metric, dimension,
+entity, entity-table, and synonym names that use the prefix are
+`config_error`. Provider imports are skipped as `unsupported`. Query-time
+raw aliases are `invalid_query`. Hidden-column cleanup strips the whole
+prefix. Harmless nearby names (`grane_row`, `_grane_row`) remain legal.
+See `tests/unit/internal-namespace.test.ts`. Do not reopen #27.

@@ -15,6 +15,7 @@ import {
 } from "../connectors/dialect.js";
 import { columnDataType, type DatabaseSchema } from "../connectors/types.js";
 import { compilerNamespace } from "../connectors/create.js";
+import { isInternalResultColumn } from "./internal-namespace.js";
 
 /**
  * The deterministic query compiler.
@@ -128,7 +129,7 @@ export const RESULT_TOTAL_COLUMN = "__grane_n";
 export const RESULT_ROW_COLUMN = "__grane_row";
 
 export function isHiddenResultColumn(name: string): boolean {
-  return name.startsWith(GUARD_PREFIX) || name === RESULT_TOTAL_COLUMN || name === RESULT_ROW_COLUMN;
+  return isInternalResultColumn(name);
 }
 /** Analytical population: base rows after time bounds and base-table query filters. */
 export const POP_CTE = "__grane_pop";

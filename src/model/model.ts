@@ -11,6 +11,7 @@ import type {
 import { RelationshipGraph } from "./graph.js";
 import { parseColumnRef, type ColumnRef } from "./refs.js";
 import { undefinedDimension, undefinedMetric, unsupportedDimension, unsupportedMetric } from "../errors.js";
+import { refuseReservedInternalIdent } from "../compile/internal-namespace.js";
 
 /** Normalised metric filter (the map form is converted to equality items). */
 export function normaliseMetricFilters(config: MetricConfig): MetricFilterItem[] {
@@ -159,6 +160,8 @@ export class SemanticModel {
     this.graph = new RelationshipGraph(config.relationships);
 
     for (const [name, entity] of Object.entries(config.entities)) {
+      refuseReservedInternalIdent("Entity", name, "config");
+      refuseReservedInternalIdent("Entity table", entity.table, "config");
       this.entities.set(name, { name, config: entity });
     }
     for (const item of config.unsupported) {
@@ -167,6 +170,10 @@ export class SemanticModel {
     }
 
     for (const [name, metric] of Object.entries(config.metrics)) {
+      refuseReservedInternalIdent("Metric", name, "config");
+      for (const synonym of metric.synonyms) {
+        refuseReservedInternalIdent("Metric synonym", synonym, "config");
+      }
       const entityTable = config.entities[metric.entity]?.table;
       const countsRows = metric.type === "count" && !metric.sql;
       const measure = metric.sql
@@ -202,6 +209,7 @@ export class SemanticModel {
     }
 
     for (const [name, dimension] of Object.entries(config.dimensions)) {
+      refuseReservedInternalIdent("Dimension", name, "config");
       const column = parseColumnRef(dimension.sql);
       if (column) {
         this.dimensions.set(name, { name, config: dimension, column });

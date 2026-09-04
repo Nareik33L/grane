@@ -5,6 +5,7 @@ import {
   isTemporalType,
 } from "../connectors/dialect.js";
 import type { DatabaseSchema } from "../connectors/types.js";
+import { isReservedInternalIdent, reservedInternalMessage } from "../compile/internal-namespace.js";
 
 /**
  * Structural validation: is every semantic definition legal and analytically
@@ -73,6 +74,22 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
 
   // --- Entities ---
   for (const entity of model.entities.values()) {
+    if (isReservedInternalIdent(entity.name)) {
+      issues.push({
+        severity: "error",
+        code: "reserved_internal_name",
+        subject: `entity:${entity.name}`,
+        message: reservedInternalMessage("Entity", entity.name),
+      });
+    }
+    if (isReservedInternalIdent(entity.config.table)) {
+      issues.push({
+        severity: "error",
+        code: "reserved_internal_name",
+        subject: `entity:${entity.name}`,
+        message: reservedInternalMessage("Entity table", entity.config.table),
+      });
+    }
     checkColumn(`entity:${entity.name}`, entity.config.table, entity.config.primary_key);
   }
 
@@ -96,6 +113,14 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
   // --- Dimensions ---
   for (const dimension of model.dimensions.values()) {
     const subject = `dimension:${dimension.name}`;
+    if (isReservedInternalIdent(dimension.name)) {
+      issues.push({
+        severity: "error",
+        code: "reserved_internal_name",
+        subject,
+        message: reservedInternalMessage("Dimension", dimension.name),
+      });
+    }
     if (!dimension.column.table) {
       issues.push({
         severity: "error",
@@ -151,7 +176,20 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
   }
   const metricReports: MetricReport[] = [];
   for (const metric of model.metrics.values()) {
-    const metricIssues = validateMetric(model, metric, checkColumnFactory(issues, tableColumns), columnType);
+    const reserved: ValidationIssue[] = isReservedInternalIdent(metric.name)
+      ? [
+          {
+            severity: "error",
+            code: "reserved_internal_name",
+            subject: `metric:${metric.name}`,
+            message: reservedInternalMessage("Metric", metric.name),
+          },
+        ]
+      : [];
+    const metricIssues = [
+      ...reserved,
+      ...validateMetric(model, metric, checkColumnFactory(issues, tableColumns), columnType),
+    ];
     issues.push(...metricIssues);
     const ok = metricIssues.every((i) => i.severity !== "error");
     metricReports.push({
