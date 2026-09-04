@@ -402,6 +402,20 @@ export function resolveQuery(
     };
   }
 
+  // --- Public time-grain alias vs selected fields ---
+  // `period_${grain}` is a stable public result column. A selected metric,
+  // dimension, or raw alias of the same name would emit a duplicate SELECT
+  // alias; warehouses then suffix or overwrite, and the agent-visible schema
+  // is no longer the one Grane declared. Refuse before compilation.
+  if (time?.grain) {
+    refusePeriodAliasCollision(time.grain, [
+      ...metrics.map((m) => ({ kind: "metric" as const, name: m.name })),
+      ...dimensions.map((d) => ({ kind: "dimension" as const, name: d.name })),
+      ...rawMetrics.map((m) => ({ kind: "raw metric alias" as const, name: m.alias })),
+      ...rawDimensions.map((d) => ({ kind: "raw dimension" as const, name: d.alias })),
+    ]);
+  }
+
   // --- Ordering references selected fields ---
   const selectable = new Set<string>([
     ...metrics.map((m) => m.name),
@@ -459,8 +473,26 @@ export function resolveQuery(
   };
 }
 
+/**
+ * Public result-column name for `time.grain`.
+ * Stable API: period_day, period_week, period_month, period_quarter, period_year.
+ */
 export function timeAlias(grain: TimeGrain): string {
   return `period_${grain}`;
+}
+
+export function refusePeriodAliasCollision(
+  grain: TimeGrain,
+  fields: Array<{ kind: string; name: string }>,
+): void {
+  const period = timeAlias(grain);
+  const colliding = fields.filter((field) => field.name === period);
+  if (colliding.length === 0) return;
+  const listed = colliding.map((field) => `${field.kind} "${field.name}"`).join(", ");
+  throw ambiguousQuery(
+    `time.grain "${grain}" produces public field "${period}", which collides with selected ${listed}.`,
+    { field: period, grain, colliding },
+  );
 }
 
 export function computeTrust(

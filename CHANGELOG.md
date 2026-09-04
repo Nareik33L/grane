@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Generated time-grain output `period_${grain}` (for example `period_month`)
+  is a stable public result field. A selected metric, dimension, or raw
+  alias of the same name is `ambiguous_query` rather than a successful
+  result with duplicate SELECT aliases. The name remains legal in queries
+  that do not generate that period field. See
+  `tests/unit/time-period-alias.test.ts`.
+
 - Identifiers in the `__grane_` prefix are reserved for internal
   execution. A user metric named `__grane_row` is refused rather than
   silently stripped from a successful result. Provider imports skip the

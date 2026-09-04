@@ -6,6 +6,7 @@ fixed when independent reviews produced governed-wrong counterexamples.
 Experimental metrics executing as `trust: governed` was a later
 BREAK-GOVERNED finding and is also fixed. Item 7 (NULL-group padding)
 is also fixed. Item 11 (`__grane_` identifier collision) is also fixed.
+Item 12 (public `period_${grain}` alias collision) is also fixed.
 The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
@@ -123,3 +124,13 @@ entity, entity-table, and synonym names that use the prefix are
 raw aliases are `invalid_query`. Hidden-column cleanup strips the whole
 prefix. Harmless nearby names (`grane_row`, `_grane_row`) remain legal.
 See `tests/unit/internal-namespace.test.ts`. Do not reopen #27.
+
+## 12. Generated `period_${grain}` collides with user fields — fixed
+
+Resolved: `time.grain` emits a stable public column `period_${grain}`.
+A selected metric, dimension, or raw alias of that exact name is
+`ambiguous_query` at resolve (compile / explain / query / MCP validate
+agree). Model load does not reject the name; queries without that grain
+remain valid. Cross-grain and nearby names are not reserved. See
+`tests/unit/time-period-alias.test.ts`. Do not reopen as a general
+alias allocator.
