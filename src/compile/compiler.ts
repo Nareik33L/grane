@@ -1,12 +1,13 @@
 import { vacuousSnapshotSeriesKeys, vacuousSnapshotSeriesMessage, type SemanticModel, type Metric } from "../model/model.js";
 import type { ResolvedQuery, ResolvedFilter, RowLimitSource } from "../query/resolve.js";
 import { timeAlias } from "../query/resolve.js";
-import type { Edge } from "../model/graph.js";
+import { ambiguousRelationshipMessage, type Edge } from "../model/graph.js";
 import type { FilterOperator, Scalar, MetricFilterItem } from "../config/schema.js";
 import { parseColumnRef, type ColumnRef } from "../model/refs.js";
 import { exclusiveEnd } from "../query/time.js";
 import { GraneError, ambiguousQuery, invalidQuery, unsafeQuery } from "../errors.js";
 import { assertMetricFiltersBound, classifyMetricFilterField } from "./metric-filter-support.js";
+import { assertNoJsonNullFilterValue } from "../query/filter-null.js";
 import {
   classifyTemporalType,
   getDialect,
@@ -285,7 +286,7 @@ export function compileQuery(
     }
     if (path.ambiguous) {
       throw ambiguousQuery(
-        `Joining "${targetTable}" (${purpose}) is ambiguous: multiple fan-out-free paths from "${baseTable}" (${(path.alternatives ?? []).join("; ")}). Name the relationship you mean.`,
+        `Joining "${targetTable}" (${purpose}) is ambiguous: ${ambiguousRelationshipMessage(baseTable, targetTable, path.alternatives)}`,
         { from: baseTable, to: targetTable, paths: path.alternatives },
       );
     }
@@ -411,8 +412,8 @@ export function compileQuery(
 
     if (path.ambiguous) {
       throw ambiguousQuery(
-        `Metric "${metric.name}" has multiple fan-out-free paths from "${baseTable}" to "${measure.table}". Name the relationship you mean.`,
-        { from: baseTable, to: measure.table, paths: path.alternatives },
+        `Metric "${metric.name}" has ${ambiguousRelationshipMessage(baseTable, measure.table, path.alternatives)}`,
+        { metric: metric.name, from: baseTable, to: measure.table, paths: path.alternatives },
       );
     }
 
@@ -1300,7 +1301,7 @@ function compileMetricFilters(
     if (!ref) {
       throw invalidQuery(`Metric filter field "${filter.field}" is not a table.column reference.`);
     }
-    return compileOperator(formatCol(ref), filter.operator, filter.value, params);
+    return compileOperator(formatCol(ref), filter.operator, filter.value, params, filter.field);
   });
   return clauses.join(" AND ");
 }
@@ -1310,7 +1311,7 @@ function compileQueryFilter(
   params: Params,
   formatCol: (ref: ColumnRef) => string,
 ): string {
-  return compileOperator(formatCol(filter.column), filter.operator, filter.value, params);
+  return compileOperator(formatCol(filter.column), filter.operator, filter.value, params, filter.field);
 }
 
 function rawAggregateFn(type: "sum" | "count" | "count_distinct" | "avg" | "min" | "max"): "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" {
@@ -1334,6 +1335,7 @@ function compileOperator(
   operator: FilterOperator,
   value: Scalar | Scalar[] | undefined,
   params: Params,
+  field = columnExpr,
 ): string {
   switch (operator) {
     case "is_null":
@@ -1346,10 +1348,12 @@ function compileOperator(
       if (values.length === 0) {
         throw invalidQuery(`Operator "${operator}" requires a non-empty array value.`);
       }
+      assertNoJsonNullFilterValue(operator, field, values);
       const placeholders = values.map((v) => params.add(v)).join(", ");
       return `${columnExpr} ${operator === "in" ? "IN" : "NOT IN"} (${placeholders})`;
     }
     case "contains": {
+      assertNoJsonNullFilterValue(operator, field, value);
       if (typeof value !== "string") {
         throw invalidQuery(`Operator "contains" requires a string value.`);
       }
@@ -1362,6 +1366,7 @@ function compileOperator(
     case ">=":
     case "<":
     case "<=": {
+      assertNoJsonNullFilterValue(operator, field, value);
       if (Array.isArray(value)) {
         throw invalidQuery(`Operator "${operator}" does not accept an array value.`);
       }

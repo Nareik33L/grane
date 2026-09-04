@@ -194,3 +194,10 @@ field+type+alias) are deduplicated. Generated `period_${grain}` collisions
 keep the PR #29 message. Model load does not reject coexisting names.
 See `tests/unit/public-output-names.test.ts`.
 
+## 14. Boolean / integer filter coercion — deferred
+
+Observed by the post-#36 unrestricted gauntlet: `flag = 1` can compile as
+an integer bind against a boolean column. Out of scope for the JSON-null
+and ambiguous-path fix. Do not treat warehouse coercion as governed
+boolean semantics. Explicit `true` / `false` remain the supported literals.
+

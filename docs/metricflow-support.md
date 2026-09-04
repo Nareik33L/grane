@@ -33,7 +33,7 @@ Parser: `src/providers/dbt/parse.ts`. Mapper: `src/providers/dbt/map.ts`.
 | `join_to_timespine` | query-shape dependent | Totals OK; per-period `time.grain` is `unsafe_query` (no spine). COALESCE is not timespine fill. |
 | `non_additive_dimension` | supported with constraints | `min`/`max` window; foreign-entity `group_by` or empty (global snapshot); day–year grain. Combined with an unsupported window type: skip the metric. |
 | `agg_time_dimension` | supported | Must be a declared time dimension of the model. Untimed component + query time: `ambiguous_query` (#20). |
-| metric filters | supported with constraints | `=` / `!=` / `<>` / `and` on the metric's own model; #31 grain / fan-out / SA off-grain classification unchanged |
+| metric filters | supported with constraints | `=` / `!=` / `<>` / `and` on the metric's own model; JSON `NULL` literals are not imported (not mapped to `is_null`); #31 grain / fan-out / SA off-grain classification unchanged |
 | query time grain (output) | query-shape dependent | Must be ≥ the metric's native grain. Day grouping of a month-grain metric is `unsafe_query`. |
 | metric-defined grain vs query range | supported with constraints | Native week/month/quarter/year expands civil `from`/`to` to complete overlapping periods (MetricFlow 0.212). Day stays civil. Mixed coarse + civil-day metrics in one query refuse. |
 | component temporal alignment | query-shape dependent | Ratio components must share entity; mixed native grains in one query refuse; untimed companion must not inherit time (#20) |
