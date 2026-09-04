@@ -16,6 +16,9 @@ the one you need.
 | Databricks | `databricks` | `npm install @databricks/sql` |
 
 Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
+Every pull request also executes a compact live-PostgreSQL correctness corpus
+(GitHub Actions `postgres:16` service, restricted `grane_readonly` role).
+Compile inspection of other dialects is not runtime certification.
 First week on Postgres: [first-week.md](first-week.md). Production Docker:
 [production.md](production.md).
 

@@ -8,6 +8,23 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: grane
+          POSTGRES_PASSWORD: grane
+          POSTGRES_DB: grane_demo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U grane -d grane_demo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      GRANE_PG_WRITE_URL: postgres://grane:grane@localhost:5432/grane_demo
+      GRANE_PG_READ_URL: postgres://grane_readonly:grane_readonly@localhost:5432/grane_demo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,6 +32,8 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - name: Show PostgreSQL version
+        run: node --input-type=module -e "import pg from 'pg'; const c=new pg.Client({connectionString:process.env.GRANE_PG_WRITE_URL}); await c.connect(); console.log((await c.query('select version()')).rows[0].version); await c.end();"
       - run: npm run test:unit
       # The A/B/C thesis benchmark. DuckDB is a devDependency, so this runs
       # without making it a default runtime install.
