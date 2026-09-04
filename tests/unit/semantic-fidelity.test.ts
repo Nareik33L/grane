@@ -195,7 +195,10 @@ describe("dbt import: what is and is not imported", () => {
     expect(skipped.paid_share).toMatch(/carries a filter/);
     expect(skipped.arr).toMatch(/derived expr is not a simple metric \/ metric ratio/);
     expect(skipped.mrr_mom_change).toMatch(/offset_window "1 month"/);
-    expect(skipped.trailing_tickets).toMatch(/"cumulative" is not compiled/);
+    expect(skipped.trailing_tickets).toMatch(/"cumulative".*window 30 days/);
+    expect(skipped.revenue_ytd).toMatch(/grain_to_date year/);
+    expect(skipped.all_time_revenue).toMatch(/"cumulative" is not compiled/);
+    expect(skipped.tickets_vs_trailing).toMatch(/trailing_tickets.*was not imported/);
     expect(skipped.trial_conversion).toMatch(/"conversion" is not compiled/);
     for (const name of Object.keys(skipped)) {
       expect(contribution.metrics[name]).toBeUndefined();
@@ -481,7 +484,11 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
   describe("C. semi-additive", () => {
     it("one snapshot date for the whole set when group_by is omitted (MetricFlow default)", async () => {
       expect(contribution.metrics.ending_mrr).toEqual(
-        expect.objectContaining({ additive: "semi", semi_additive: { window: "last", group_by: [], granularity: "month" } }),
+        expect.objectContaining({
+          additive: "semi",
+          time_granularity: "month",
+          semi_additive: { window: "last", group_by: [], granularity: "month" },
+        }),
       );
       // Not 660 (summed), not 350 (per customer): the August snapshot.
       expect(await value({ metrics: ["ending_mrr"], time: JUN_AUG }, "ending_mrr")).toBe(150);
@@ -491,6 +498,16 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
     it("the snapshot is chosen inside the requested window, not looked back past it", async () => {
       expect(await value({ metrics: ["ending_mrr"], time: JUL }, "ending_mrr")).toBe(370);
       expect(await value({ metrics: ["ending_mrr"], time: { from: "2026-06-01", to: "2026-06-30" } }, "ending_mrr")).toBe(140);
+    });
+
+    it("aligns a partial month window to the month-grain snapshot (MetricFlow query-window alignment)", async () => {
+      // Without alignment this is 0 (no month_start DATE in 02..31) with fill_nulls_with 0.
+      const partial = await kernel.query({ metrics: ["ending_mrr"], time: { from: "2026-08-02", to: "2026-08-31" } });
+      expect(partial.trust).toBe("governed");
+      expect(Number(partial.rows[0]?.ending_mrr)).toBe(150);
+      expect(await value({ metrics: ["new_mrr"], time: { from: "2026-07-15", to: "2026-08-15" } }, "new_mrr")).toBe(230);
+      // Day-grain revenue is not expanded: 2026-07-06..07-31 drops the 5 Jul paid invoice of 100.
+      expect(await value({ metrics: ["revenue"], time: { from: "2026-07-06", to: "2026-07-31" } }, "revenue")).toBe(200);
     });
 
     it("month grain gives one snapshot per month", async () => {
@@ -568,7 +585,7 @@ describe.skipIf(!available)("executed semantics (DuckDB)", () => {
         kernel.query({ metrics: ["monthly_balance"], time: { from: "2024-03-01", to: "2024-04-30", grain: "day" } }),
       );
       expect(refused.status).toBe("unsafe_query");
-      expect(refused.message).toMatch(/month granularity/);
+      expect(refused.message).toMatch(/month grain/);
     });
 
     it("refuses a time.dimension other than the metric's own instead of ignoring it", async () => {

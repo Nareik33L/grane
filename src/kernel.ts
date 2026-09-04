@@ -38,6 +38,7 @@ export interface CatalogMetric {
   status: string;
   synonyms: string[];
   time_dimension: string | null;
+  time_granularity: string | null;
   definition_version: string;
   available_dimensions: string[];
   source: { provider: string; path?: string };
@@ -246,6 +247,7 @@ export class GraneKernel {
         status: m.config.status,
         synonyms: m.config.synonyms,
         time_dimension: m.timeDimension ? `${m.timeDimension.table}.${m.timeDimension.column}` : null,
+        time_granularity: m.config.time_granularity ?? null,
         definition_version: m.definitionVersion,
         available_dimensions: this.model.availableDimensions(m).filter((name) => dimensionAllowed(this.agent, name)),
         source: m.config.source ?? { provider: "native" },

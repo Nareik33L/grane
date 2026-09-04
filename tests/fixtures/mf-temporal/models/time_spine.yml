@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: time_spine_daily
+    description: Daily time spine required by MetricFlow 0.212 to parse the project.
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day

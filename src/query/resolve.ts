@@ -13,6 +13,7 @@ import type { DatabaseSchema } from "../connectors/types.js";
 import { ambiguousQuery, invalidQuery, unsafeQuery, GraneError, undefinedMetric, undefinedDimension } from "../errors.js";
 import { explorationPolicy, type ExplorationPolicy } from "../explore/policy.js";
 import { isValidCivilDate, MONTH_NUMBERS, resolveRelativeRange } from "./time.js";
+import { alignQueryTimeToMetricGrains, assertOutputGrainCompatible } from "./metric-grain.js";
 import type { AgentGrant } from "../auth/agents.js";
 import { dimensionAllowed, metricAllowed } from "../auth/agents.js";
 import {
@@ -402,6 +403,19 @@ export function resolveQuery(
         );
       }
     }
+    const timeComponents = expandMetricComponents(model, metrics);
+    if (governedTime) {
+      const aligned = alignQueryTimeToMetricGrains(
+        timeComponents,
+        from,
+        to,
+        model.config.project.week.starts,
+      );
+      from = aligned.from;
+      to = aligned.to;
+      if (aligned.note) notes.push(aligned.note);
+    }
+    assertOutputGrainCompatible(timeComponents, query.time.grain ?? null);
     time = {
       column: resolvedTime.column,
       from,

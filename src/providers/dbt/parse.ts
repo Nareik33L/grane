@@ -237,11 +237,25 @@ function parseMeasure(raw: unknown): MfMeasure | null {
   };
 }
 
+/** MetricFlow window: YAML `"90 days"` or manifest `{ count, granularity }`. */
+function formatMfWindow(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (!isRecord(value)) return undefined;
+  const count = value.count;
+  const granularity = str(value.granularity);
+  if ((typeof count === "number" || typeof count === "string") && granularity) {
+    return `${count} ${granularity}`;
+  }
+  return undefined;
+}
+
 function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: string): MfMetric | null {
   if (!isRecord(raw)) return null;
   const name = str(raw.name);
   if (!name) return null;
   const params = isRecord(raw.type_params) ? raw.type_params : {};
+  const cumulativeParams = isRecord(params.cumulative_type_params) ? params.cumulative_type_params : {};
+  const conversionParams = isRecord(params.conversion_type_params) ? params.conversion_type_params : {};
   return {
     name,
     type: (str(raw.type) ?? "simple").toLowerCase(),
@@ -258,6 +272,9 @@ function parseEmbeddedMetric(raw: unknown, sourcePath: string, semanticModel: st
     nonAdditive: parseNonAdditive(raw.non_additive_dimension ?? params.non_additive_dimension),
     fillNullsWith: raw.fill_nulls_with ?? params.fill_nulls_with,
     joinToTimespine: (raw.join_to_timespine ?? params.join_to_timespine) === true,
+    window: formatMfWindow(raw.window ?? params.window ?? cumulativeParams.window ?? conversionParams.window),
+    grainToDate:
+      str(raw.grain_to_date) ?? str(params.grain_to_date) ?? str(cumulativeParams.grain_to_date),
     semanticModel,
     sourcePath,
   };

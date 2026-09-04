@@ -130,6 +130,30 @@ describe.skipIf(!available)("Oakwell interop (dbt provider vs MetricFlow)", () =
     expect(outcomes.filter((o) => o === "match")).toHaveLength(cases.length - 1);
   });
 
+  describe("MetricFlow month-grain query-window alignment", () => {
+    it("partial August ending_mrr matches the full-month snapshot (2,309,714.33), not 0", async () => {
+      const full = await kernel.query({ metrics: ["ending_mrr"], time: { from: "2026-08-01", to: "2026-08-31" } });
+      const partial = await kernel.query({ metrics: ["ending_mrr"], time: { from: "2026-08-02", to: "2026-08-31" } });
+      expect(full.trust).toBe("governed");
+      expect(partial.trust).toBe("governed");
+      expect(close(Number(full.rows[0]!.ending_mrr), 2309714.33)).toBe(true);
+      expect(close(Number(partial.rows[0]!.ending_mrr), 2309714.33)).toBe(true);
+      expect(partial.notes.some((n) => n.includes("aligned to month grain 2026-08-01..2026-08-31"))).toBe(true);
+    });
+
+    it("partial-month additive new_mrr expands to the overlapping months (MetricFlow oracle 67,320.67)", async () => {
+      const result = await kernel.query({ metrics: ["new_mrr"], time: { from: "2026-07-15", to: "2026-08-15" } });
+      expect(result.trust).toBe("governed");
+      expect(close(Number(result.rows[0]!.new_mrr), 67320.67)).toBe(true);
+    });
+
+    it("day-grain revenue on a mid-month start is not expanded", async () => {
+      const result = await kernel.query({ metrics: ["revenue"], time: { from: "2026-07-02", to: "2026-07-31" } });
+      expect(result.trust).toBe("governed");
+      expect(close(Number(result.rows[0]!.revenue), 2154558.37)).toBe(true);
+    });
+  });
+
   describe("semi-additive snapshot + base-table filter + relationship traversal", () => {
     // `mf query --decimals 2 --metrics ending_mrr --group-by customer__customer_status
     //    --where "{{ Dimension('customer_month__customer_segment') }} = ..." --start-time 2026-08-01 --end-time 2026-08-31`

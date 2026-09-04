@@ -122,6 +122,15 @@ export const metricConfigSchema = z
     filters: metricFiltersSchema.optional(),
     time_dimension: z.string().optional(),
     /**
+     * Native grain of `time_dimension` (MetricFlow `time_granularity` on the
+     * agg time dimension). Day, or omitted, keeps civil `from`/`to` bounds.
+     * Week/month/quarter/year align the requested range to complete periods
+     * of that grain before filtering — MetricFlow's query-window alignment —
+     * rather than clipping a period-grain column to a partial civil window.
+     * A requested `time.grain` finer than this value is `unsafe_query`.
+     */
+    time_granularity: semiAdditiveGranularitySchema.optional(),
+    /**
      * How the measure combines across the time dimension.
      * `full` (default) may be summed across dates. `semi` keeps one snapshot
      * per key within the requested time range (see `semi_additive`), then

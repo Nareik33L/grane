@@ -1,0 +1,8 @@
+name: mf_temporal
+version: "1.0.0"
+config-version: 2
+profile: mf_temporal
+model-paths: ["models"]
+clean-targets: ["target", "logs"]
+flags:
+  require_nested_cumulative_type_params: false

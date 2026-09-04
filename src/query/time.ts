@@ -7,6 +7,7 @@
  */
 
 import { ambiguousQuery, invalidQuery } from "../errors.js";
+import type { SemiAdditiveGranularity, WeekStarts } from "../config/schema.js";
 
 export interface CalendarDate {
   year: number;
@@ -103,6 +104,68 @@ export function addDays(date: CalendarDate, days: number): CalendarDate {
 
 export function startOfMonth(date: CalendarDate): CalendarDate {
   return { ...date, day: 1 };
+}
+
+export function endOfMonth(date: CalendarDate): CalendarDate {
+  return { year: date.year, month: date.month, day: daysInMonth(date.year, date.month) };
+}
+
+/**
+ * First day of the civil week containing `date`. Sunday-start weeks treat
+ * Sunday as day 0; Monday-start weeks treat Monday as day 0.
+ */
+export function startOfWeek(date: CalendarDate, weekStarts: WeekStarts): CalendarDate {
+  const utc = new Date(Date.UTC(date.year, date.month - 1, date.day));
+  const dow = utc.getUTCDay();
+  const startDow = weekStarts === "sunday" ? 0 : 1;
+  const delta = (dow - startDow + 7) % 7;
+  return addDays(date, -delta);
+}
+
+export function endOfWeek(date: CalendarDate, weekStarts: WeekStarts): CalendarDate {
+  return addDays(startOfWeek(date, weekStarts), 6);
+}
+
+export function endOfQuarter(date: CalendarDate): CalendarDate {
+  return addDays(addMonths(startOfQuarter(date), 3), -1);
+}
+
+export const TIME_GRAIN_ORDER: Record<SemiAdditiveGranularity, number> = {
+  day: 0,
+  week: 1,
+  month: 2,
+  quarter: 3,
+  year: 4,
+};
+
+/**
+ * Expand a civil inclusive range so it covers every complete period of
+ * `grain` that overlaps `[from, to]`. Day is a no-op. MetricFlow 0.212
+ * does this for month-grain (and coarser) agg time dimensions: a window
+ * that overlaps August becomes 1 Aug … 31 Aug, not a 30-day clip.
+ */
+export function alignCivilRangeToGrain(
+  from: string,
+  to: string,
+  grain: SemiAdditiveGranularity,
+  weekStarts: WeekStarts = "monday",
+): { from: string; to: string } {
+  if (grain === "day") return { from, to };
+  const start = parseCivilDate(from);
+  const end = parseCivilDate(to);
+  switch (grain) {
+    case "week":
+      return { from: formatDate(startOfWeek(start, weekStarts)), to: formatDate(endOfWeek(end, weekStarts)) };
+    case "month":
+      return { from: formatDate(startOfMonth(start)), to: formatDate(endOfMonth(end)) };
+    case "quarter":
+      return { from: formatDate(startOfQuarter(start)), to: formatDate(endOfQuarter(end)) };
+    case "year":
+      return {
+        from: formatDate({ year: start.year, month: 1, day: 1 }),
+        to: formatDate({ year: end.year, month: 12, day: 31 }),
+      };
+  }
 }
 
 /** Gregorian length of a civil month. February uses the 4/100/400 leap rule. */

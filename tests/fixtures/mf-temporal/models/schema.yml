@@ -1,0 +1,80 @@
+version: 2
+
+models:
+  - name: fct_daily
+    description: Daily sales Dec 2025–Jun 2026 with uneven month totals 10/100/20/300/40/500/60.
+    semantic_model:
+      enabled: true
+      name: daily_sales
+    agg_time_dimension: sold_on
+    columns:
+      - name: sale_id
+        entity:
+          type: primary
+          name: sale
+      - name: customer_id
+        entity:
+          type: foreign
+          name: customer
+      - name: sold_on
+        granularity: day
+        dimension:
+          type: time
+          name: sold_on
+      - name: status
+        dimension:
+          type: categorical
+          name: status
+    metrics:
+      - name: revenue
+        type: simple
+        agg: sum
+        expr: amount
+      - name: sale_count
+        type: simple
+        agg: count
+        expr: 1
+      - name: distinct_customers
+        type: simple
+        agg: count_distinct
+        expr: customer_id
+      - name: paid_revenue
+        type: simple
+        agg: sum
+        expr: amount
+        filter: |
+          {{ Dimension('sale__status') }} = 'paid'
+
+  - name: fct_monthly
+    description: One row per customer per month. ending_balance is a month-start snapshot.
+    semantic_model:
+      enabled: true
+      name: monthly_snapshot
+    agg_time_dimension: month_start
+    columns:
+      - name: snapshot_id
+        entity:
+          type: primary
+          name: customer_month
+      - name: customer_id
+        entity:
+          type: foreign
+          name: customer
+      - name: month_start
+        granularity: month
+        dimension:
+          type: time
+          name: month_start
+    metrics:
+      - name: ending_balance
+        type: simple
+        agg: sum
+        expr: ending_balance
+        fill_nulls_with: 0
+        non_additive_dimension:
+          name: month_start
+          window_agg: max
+      - name: new_amount
+        type: simple
+        agg: sum
+        expr: new_amount

@@ -112,13 +112,18 @@ Imported, with the upstream semantics preserved:
 | `filter: {{ Dimension('order__status') }} = 'completed'` — `=`, `!=`, `<>`, string / number / boolean literal, joined with `and`, on the metric's own model | Metric filter with the **same operator** |
 | `non_additive_dimension` (`window_agg` / `window_choice` `max` or `min`; `group_by` / `window_groupings` entities) | `additive: semi` with an explicit `semi_additive` block: `window`, `group_by` (foreign entities — MetricFlow's series declaration; **empty keeps one snapshot for the whole result**, MetricFlow's default) and the dimension's declared `time_granularity`. A `group_by` of the model's own primary or unique entity is skipped: that key is the model grain, so first/last would keep every historical row. A foreign entity is a relationship role plus an explicit snapshot partition; it is imported as native explicit `group_by` of that column, not as proof that the key is temporally unique. Filters and the time range apply before the snapshot is chosen. |
 | `ratio`, or `derived` whose expr is exactly `metric / metric` | Ratio, when both components are imported and share one entity |
+| Declared `time_granularity` on the agg time dimension (`day` / `week` / `month` / `quarter` / `year`) | Stored as `time_granularity` on the imported metric. Day (or omitted) keeps civil `from`/`to`. Coarser grains expand the requested range to complete overlapping periods of that grain before filtering — MetricFlow 0.212 query-window alignment — so a month-start snapshot DATE is not clipped out of a 30-day window. A `time.grain` finer than that native grain is `unsafe_query`. Mixing coarse-grain and civil-day metrics in one query is `unsafe_query`. |
 
-Skipped with a reason: cumulative, conversion, other derived expressions
+Skipped with a reason: cumulative (including unbounded, rolling `window`, and
+`grain_to_date`), conversion, other derived expressions
 (`× 12`, `a - b`, offsets, aliases), `median` / `percentile`, ratios whose
 numerator and denominator sit at different grains, ratios with their own
 filter or filtered inputs, filters using `or`, `in`, `>`/`<`, `null`,
 `TimeDimension`, `Entity`, SQL wrappers or another model's dimension,
 SQL-expression dimensions, and snapshot dimensions at sub-day granularity.
+A ratio or derived metric whose component was not imported is skipped with
+that component's reason (no laundering through arithmetic). See
+`docs/metricflow-support.md`.
 `fill_nulls_with` (an integer) is applied as `COALESCE(<aggregate>, n)` after
 aggregation — the declared semantics, and what MetricFlow compiles for a
 `type_params.measure` input (note: dbt-core 1.12 does not pass the field
