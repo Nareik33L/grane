@@ -46,17 +46,28 @@ import { isInternalResultColumn } from "./internal-namespace.js";
  *
  *   P0    = metric-contributing population: base rows inside the query's time
  *           bounds and base-table filters that can contribute to at least one
- *           requested metric (its own base-table filters / time window).
+ *           requested metric (its own base-table filters / time window, and —
+ *           when no selected output comes from a joined table — a per-metric
+ *           NULL-measure participation predicate).
  *   P(n)  = rows of the n-th joined table referenced by a non-NULL FK of a row
- *           in P(n-1) — the same rule for every hop.
+ *           in P(n-1), further restricted to rows that pass query filters
+ *           whose column lives on that same table T. Later hops read the
+ *           already-filtered P(n-1), so a duplicate sitting only on a
+ *           filter-excluded branch is not in P(n). Filters on a different
+ *           table never shrink this hop (a hop-2 predicate cannot hide a
+ *           hop-1 duplicate). Pre-aggregation hops do not take query filters.
  *   guard = MAX(rows per key) over P(n).
  *
- * A duplicated key that no contributing fact reaches (unused, filtered out,
- * outside the time range, not snapshot-selected, behind a different branch of
- * an earlier hop) cannot multiply anything and does not refuse. A duplicated
- * key that a contributing fact reaches refuses, even if a joined-dimension
- * WHERE would later hide the multiplied rows: that predicate is evaluated
- * through the very join whose contract is broken.
+ * A duplicated key that no contributing fact reaches (unused, filtered out
+ * of P0, outside the time range, not snapshot-selected, behind a different
+ * branch of an earlier hop) cannot multiply anything and does not refuse.
+ * A duplicated key whose matching T-rows survive the same-table query
+ * filters refuses: those rows are exactly the copies the join + WHERE can
+ * keep. Duplicates that fail every same-table query predicate cannot appear
+ * in the analytical result, so they do not refuse. Metric-definition
+ * FILTER clauses are not WHERE — they do not remove groups — and must not
+ * shrink P(n). Joined query filters must not shrink P0 (the fact population);
+ * shrinking the fact side is the unsafe PR #19 regression.
  *
  * The same contract applies inside pre-aggregation CTEs. A many_to_one hop
  * taken while collapsing a one_to_many child (orders → order_items →
@@ -88,8 +99,10 @@ export interface JoinStep {
  * *reachable* population of a joined table: the rows whose key is referenced
  * by the relevant population one hop earlier (see `keySource`). Any value
  * above 1 means the declared many_to_one contract is violated for a key that
- * a metric-contributing fact actually reaches, and the executor refuses the
- * result. NULL means no fact reaches the table at all (nothing to multiply).
+ * a metric-contributing fact actually reaches (after same-table query
+ * filters on that hop), and the executor refuses the result. NULL means no
+ * contributing fact reaches a matching row of the table at all (nothing to
+ * multiply).
  *
  * Every guard can answer: which metrics it protects (`protects`), which
  * relationship (`relationship`), through which path (`path`), and which
@@ -322,20 +335,33 @@ export function compileQuery(
   const renderJoin = (join: JoinStep): string => `${join.join} ${qualify(join.table)} ON ${join.on}`;
 
   /**
+   * Query filters on a joined table T, reused in P(n) for T. Compiled once;
+   * the same sentinel may appear in the reach CTE and in `__grane_result`
+   * WHERE. `Params.finalize` binds by textual order, so positional `?`
+   * dialects stay consistent.
+   */
+  const joinedFiltersByTable = new Map<string, string[]>();
+
+  /**
    * P(n): the rows of the joined table whose key is referenced by a non-NULL
-   * FK in P(n-1). Every hop is defined the same way; P0 is the
-   * metric-contributing base population. A violated hop can only *add* rows
-   * to P(n) (both duplicates are reachable), so a corrupted earlier hop makes
-   * later guards stricter, never laxer — and its own guard refuses anyway.
+   * FK in P(n-1), AND which pass query filters whose column is on this table.
+   * P0 is the metric-contributing base population. A violated hop can only
+   * *add* rows to P(n) (both duplicates are reachable), so a corrupted earlier
+   * hop makes later guards stricter, never laxer — and its own guard refuses
+   * anyway. Same-table query filters are the predicates the result WHERE will
+   * keep; applying them here does not shrink P0 and does not hide a duplicate
+   * that the join + WHERE can still emit.
    */
   const renderReach = (guard: CardinalityGuard): string => {
     const fk = `${ident(guard.fromTable)}.${ident(guard.fromColumn)}`;
+    const sameTableFilters = guard.scope === "join" ? (joinedFiltersByTable.get(guard.table) ?? []) : [];
+    const filterSql = sameTableFilters.length > 0 ? `\n    AND ${sameTableFilters.join("\n    AND ")}` : "";
     return [
       `${ident(guard.reach)} AS (`,
       `  SELECT *`,
       `  FROM ${qualify(guard.table)}`,
       `  WHERE ${ident(guard.table)}.${ident(guard.key)} IN (`,
-      `    SELECT ${fk} FROM ${ident(guard.keySource)} AS ${ident(guard.fromTable)} WHERE ${fk} IS NOT NULL)`,
+      `    SELECT ${fk} FROM ${ident(guard.keySource)} AS ${ident(guard.fromTable)} WHERE ${fk} IS NOT NULL)${filterSql}`,
       `)`,
     ].join("\n");
   };
@@ -855,15 +881,53 @@ export function compileQuery(
   // A base row can contribute to metric M only if it passes M's own
   // base-table filters (and M's own time window when the query's time range is
   // applied per metric). Filters on joined tables are relationship
-  // traversals, not contribution predicates: they are evaluated *through* the
-  // join and must not hide a violation of that join (see C1/C2/C3 in
-  // tests/unit/query-cardinality.test.ts). Every join in this statement sits in
-  // the one shared FROM, so a duplicated key multiplies the facts feeding
-  // *every* metric that row contributes to; the population a guard protects is
-  // therefore the union over all requested metrics. null = unfiltered = TRUE.
+  // traversals, not contribution predicates: they must not shrink P0 (see
+  // tests/unit/query-cardinality.test.ts C3 and tests/unit/cardinality-populations.test.ts
+  // R/S). They *may* constrain P(n) of the table they are on, because that is
+  // the same predicate the result WHERE uses on those copies.
+  //
+  // NULL measures: COUNT(*) / row-counts keep every qualifying row. SUM / AVG /
+  // MIN / MAX / COUNT(column) / COUNT DISTINCT ignore NULL inputs for the
+  // numeric value, but a NULL fact can still create a grouped output row when
+  // a selected dimension (or time grain) comes from a joined table. Only when
+  // every selected output is on the base table is a NULL measure excluded from
+  // P0 — and only for that metric's own measure column on the base table.
+  // Raw metrics, child-table (pre-agg) measures, and joined metric-definition
+  // FILTER clauses keep the conservative "row stays in P0" behaviour.
+  // Every join in this statement sits in the one shared FROM, so a duplicated
+  // key multiplies the facts feeding *every* metric that row contributes to;
+  // the population a guard protects is therefore the union over all requested
+  // metrics. null = unfiltered = TRUE.
+  const joinedGroupExistence =
+    resolved.dimensions.some((dimension) => dimension.column.table !== baseTable) ||
+    resolved.rawDimensions.some((raw) => raw.ref.table !== baseTable) ||
+    Boolean(resolved.time?.grain && resolved.time.column.table !== baseTable);
+
+  const measureParticipation = (metric: Metric): string | null => {
+    if (joinedGroupExistence) return null;
+    if (metric.countsRows) return null;
+    const measure = metric.measure;
+    if (!measure || measure.table !== baseTable || !measure.column) return null;
+    switch (metric.config.type) {
+      case "sum":
+      case "avg":
+      case "min":
+      case "max":
+      case "count":
+      case "count_distinct":
+        return `${col(measure)} IS NOT NULL`;
+      default:
+        return null;
+    }
+  };
+
   const contributionPredicate = (metric: Metric): string | null => {
     const baseFilters = metric.filters.filter((filter) => parseColumnRef(filter.field)?.table === baseTable);
-    return andFilters(compileMetricFilters(baseFilters, params, col), perMetricTimeFilter(metric));
+    return andFilters(
+      compileMetricFilters(baseFilters, params, col),
+      perMetricTimeFilter(metric),
+      measureParticipation(metric),
+    );
   };
   const contributions = components.map(contributionPredicate);
   const everyRowContributes = resolved.rawMetrics.length > 0 || contributions.some((predicate) => predicate === null);
@@ -932,9 +996,9 @@ export function compileQuery(
 
   // ---- WHERE ----
   // Fact-side filters: time bounds (when not already inside a snapshot CTE) +
-  // filters on the base table itself. These define the analytical population.
-  // Joined-dimension filters go only in the analytical result query, not in
-  // the population used for cardinality scoping.
+  // filters on the base table itself. These define the analytical population
+  // (P0's parent). Joined-dimension filters go in the analytical result query
+  // AND in P(n) for that same table; they must not enter `__grane_pop`.
   const factSideWhere: string[] = [];
   if (resolved.time && !skipOuterTime) {
     const expr = timeExpr(resolved.time.column);
@@ -950,6 +1014,9 @@ export function compileQuery(
       factSideWhere.push(clause);
     } else {
       joinedDimFilters.push(clause);
+      const existing = joinedFiltersByTable.get(filter.column.table) ?? [];
+      existing.push(clause);
+      joinedFiltersByTable.set(filter.column.table, existing);
     }
   }
 
@@ -979,8 +1046,8 @@ export function compileQuery(
   //                     semi-additive metrics)
   //   __grane_contrib   P0: rows of __grane_pop that can contribute to at least
   //                     one requested metric (omitted when every row can)
-  //   __grane_reach_T   P(n): rows of T referenced by a non-NULL FK in P(n-1),
-  //                     one per joined table, in traversal order
+  //   __grane_reach_T   P(n): rows of T referenced by a non-NULL FK in P(n-1)
+  //                     that pass query filters on T, one per joined table
   //   __grane_card      one scalar per guard: MAX(rows per key) over P(n)
   //   __grane_result    the analytical SELECT over __grane_pop + joins
   //   outer SELECT      __grane_card LEFT JOIN __grane_result ON TRUE, so the
@@ -1020,8 +1087,9 @@ export function compileQuery(
     // filters must be reapplied to the rows AT that date, otherwise a row that
     // fails the filter but shares the date would be aggregated (and could
     // reach a duplicate key it has no business reaching). Joined-dimension
-    // filters stay in __grane_result by policy; metric filters stay in P0 and
-    // the FILTER clause. Time bounds are implied by the snapshot date.
+    // filters stay out of __grane_pop (and out of P0): they constrain P(n) of
+    // that table and the result WHERE. Metric filters stay in P0 and the
+    // FILTER clause. Time bounds are implied by the snapshot date.
     const popCteLines = [`${ident(POP_CTE)} AS (`];
     if (snapshotJoin) {
       popCteLines.push(`  SELECT ${ident(baseTable)}.*`, `  FROM ${qualify(baseTable)}`, `  ${snapshotJoin}`);

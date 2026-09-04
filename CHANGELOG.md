@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Cardinality guards inspect the rows that can participate in the requested
+  result. Query filters on joined table T constrain P(n) of T (later hops
+  read that filtered reach); they do not shrink the fact population P0.
+  Duplicates that fail every same-table predicate no longer false-refuse.
+  Duplicates that survive the predicate still refuse. NULL measures are
+  excluded from P0 only for base-table SUM/AVG/MIN/MAX/COUNT(column)/COUNT
+  DISTINCT when no selected output comes from a joined table; COUNT(*) and
+  joined group-by keep every qualifying row. See
+  `tests/unit/cardinality-participation.test.ts`.
+
 - Selected public result names must be unique. A metric and a dimension
   both named `code` is `ambiguous_query` rather than a successful result
   with duplicate SELECT aliases (`code` / `code:1`). Identical logical

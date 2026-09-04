@@ -58,8 +58,9 @@ describe("warehouse SQL dialects", () => {
       filters: [{ field: "customer_type", operator: "=", value: "business" }],
     });
     expectPositionalBinds(compiled.sql, compiled.params);
-    // Population CTE (time) → contributing population (metric filter) → result (metric filter, joined filter).
-    expect(compiled.params).toEqual(["2026-07-01", "2026-08-01", "completed", "completed", "business"]);
+    // Population CTE (time) → contributing population (metric filter) →
+    // reach CTE (joined filter) → result (metric filter, joined filter).
+    expect(compiled.params).toEqual(["2026-07-01", "2026-08-01", "completed", "business", "completed", "business"]);
     // The outer wrapper references result aliases, never re-renders aggregates.
     expect(compiled.sql).toMatch(/LEFT JOIN `__grane_result` ON TRUE$/);
     expect(compiled.sql.split("\n").filter((line) => line.includes("SUM(CASE WHEN"))).toHaveLength(1);
