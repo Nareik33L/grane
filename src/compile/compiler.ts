@@ -602,8 +602,9 @@ export function compileQuery(
   const skipOuterTime = Boolean(resolved.time && (!resolved.time.shared || anySemiAdditive));
 
   /**
-   * many_to_one hops taken inside a pre-aggregation CTE. Guards are emitted
-   * after P0 is known so they can scope to this metric's contributing rows.
+   * Later hops of a pre-aggregation path, in travel order. Includes
+   * intermediate one_to_many hops so reach CTE aliases stay aligned even
+   * when those hops are not uniqueness-guarded.
    */
   interface PreAggHopPlan {
     metric: Metric;
@@ -616,6 +617,8 @@ export function compileQuery(
   }
   const preAggHopPlans: PreAggHopPlan[] = [];
   const preAggReachCtes: string[] = [];
+  /** Reach CTEs for every later pre-aggregation hop, in path order. */
+  const preAggReachGuards: CardinalityGuard[] = [];
 
   const compilePreAggregatedMetric = (metric: Metric, edges: Edge[], extraTimeFilter: string | null): MetricExpr => {
     if (metric.config.type === "count_distinct") {
@@ -666,6 +669,11 @@ export function compileQuery(
     }
     const insideWhere = compileMetricFilters(insideFilters, params, col);
     const childFilters = insideFilters.filter((filter) => parseColumnRef(filter.field)?.table === firstEdge.toTable);
+    // Walk every later hop so reach CTE aliases stay aligned with the current
+    // table. one_to_many hops are not uniqueness-guarded, but skipping them
+    // used to leave keySource on an earlier table while fromTable advanced
+    // (`AS hop_sku` over a hop_mid CTE). Include them in the walk whenever a
+    // later many_to_one / one_to_one hop still needs a guard.
     if (laterHops.some((edge) => edge.cardinality !== "one_to_many")) {
       preAggHopPlans.push({
         metric,
@@ -673,7 +681,7 @@ export function compileQuery(
         childKey: firstEdge.toColumn,
         parentKey: firstEdge.fromColumn,
         firstRelationship: firstEdge.relationship,
-        hops: laterHops.filter((edge) => edge.cardinality !== "one_to_many"),
+        hops: laterHops,
         childFilters,
       });
     }
@@ -993,7 +1001,10 @@ export function compileQuery(
         protects,
         scope: "preagg",
       };
-      guards.push(guard);
+      preAggReachGuards.push(guard);
+      if (edge.cardinality !== "one_to_many") {
+        guards.push(guard);
+      }
       previousSource = guard.reach;
       previousPath = guard.path;
     }
@@ -1130,7 +1141,11 @@ export function compileQuery(
 
     // --- Reachable populations P(1..n) and guards ---
     // Pre-aggregation child populations first (they are keySources of later hops).
-    const reachCtes = [...preAggReachCtes, ...guards.map(renderReach)];
+    const reachCtes = [
+      ...preAggReachCtes,
+      ...preAggReachGuards.map(renderReach),
+      ...guards.filter((guard) => guard.scope === "join").map(renderReach),
+    ];
     const cardCteLines = [
       `${ident("__grane_card")} AS (`,
       `  SELECT ${guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`).join(",\n         ")}`,
