@@ -5,7 +5,9 @@ Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
 fixed when independent reviews produced governed-wrong counterexamples.
 Experimental metrics executing as `trust: governed` was a later
 BREAK-GOVERNED finding and is also fixed. Item 7 (NULL-group padding)
-is also fixed. The rest stay deferred.
+is also fixed. Item 11 (internal result-column name collision)
+was observed during #27 certification and is recorded, not fixed
+in that PR. The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
 
@@ -112,3 +114,22 @@ See `tests/unit/null-group-padding.test.ts`.
 - **Governed-contract impact:** Possible false refusal vs a more generous
   "NULL measures cannot multiply" rule. Changing it is a product decision.
 - **Priority:** Low unless a fixture depends on it.
+
+## 11. User aliases can collide with hidden `__grane_*` result columns
+
+- **Observed during PR #27 certification (not fixed there):**
+  The executor strips every column matching `isHiddenResultColumn`:
+  `__grane_row`, `__grane_n`, `__grane_card_*`. CTE names
+  (`__grane_pop`, `__grane_result`, `__grane_contrib`,
+  `__grane_reach_*`) are also reserved in generated SQL.
+  A user-defined metric, dimension, or raw alias with the exact name
+  `__grane_row` is removed from a successful result (and can collide
+  in the SELECT list with the padding marker). The same class of
+  collision applies to `__grane_n` and `__grane_card_*`.
+- **Supported/documented:** Internal names were not reserved against
+  the semantic model. Certified #27 SHA
+  `971848a454698e5790010f644172b90c98ded779` does not include a fix.
+- **Governed-contract impact:** A governed query can silently omit a
+  requested field whose alias matches an internal column.
+- **Priority:** Medium. Refuse or rename at resolve/compile time;
+  do not strip a user field. Do not reopen #27.
