@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Unique multi-hop pre-aggregation reach/cardinality CTEs walk every hop in
+  the selected path, including intermediate `one_to_many` hops that are not
+  uniqueness-guarded. Previously those hops were skipped, so a later
+  `many_to_one` guard could alias an earlier CTE (`FROM reach_hop_mid AS hop_sku`)
+  and the warehouse binder failed. Depth-general: any unique path with a
+  1:N hop between the first child and a later N:1 hop. See
+  `tests/unit/preagg-multihop-alias.test.ts`.
+
 - Ambiguous fan-out measure paths refuse with `ambiguous_query` instead of
   BFS-picking the first YAML-declared route. Unique fan-out pre-aggregation
   is unchanged. See `tests/unit/ambiguous-fanout-path.test.ts`.
