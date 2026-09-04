@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Imported MetricFlow metrics whose agg time dimension is week, month,
+  quarter, or year expand the requested civil `from`/`to` to complete
+  overlapping periods of that grain (MetricFlow 0.212 query-window
+  alignment) rather than clipping a period-grain DATE to a partial window
+  and returning `trust: governed`. Day-grain metrics keep civil bounds.
+  Cumulative / `grain_to_date` / `offset_window` / conversion stay skipped
+  at import with the construct in the reason; a ratio cannot launder a
+  skipped component. See `tests/unit/metricflow-time-grain.test.ts`.
+
 - A group exists iff the query's analytical population produces that
   GROUP BY key. Metric-definition FILTER is not query WHERE: SUM/AVG/MIN/MAX
   over zero contributing values are NULL, COUNT is 0, and `fill_nulls_with`

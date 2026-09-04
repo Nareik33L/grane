@@ -15,7 +15,10 @@ Item 9 (`ORDER BY` / outer-wrapper portability) is also fixed.
 Item 6 (non-contributing groups / NULL vs 0) is also fixed as an explicit
 group-existence contract: groups come from the analytical population;
 metric FILTER is not WHERE. MetricFlow may omit the extra NULL/0 groups.
-The rest stay deferred.
+Item 5 (MetricFlow time-window / metric-grain alignment) is also fixed:
+imported week/month/quarter/year agg time dimensions expand the query
+window to complete overlapping periods; cumulative/window/offset remain
+explicitly unsupported. The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
 
@@ -65,16 +68,18 @@ MetricFlow group_by of a primary/unique entity is skipped at import;
 foreign-entity group_by is that provider's series declaration. See
 `tests/unit/semi-additive-series-key.test.ts`.
 
-## 5. MetricFlow time-window / metric-grain alignment
+## 5. MetricFlow time-window / metric-grain alignment — fixed
 
-- **Observed:** Large differentials on partial periods (e.g. `ending_mrr`
-  over a 30-day range; additive month-grain metrics). See
-  `docs/time-window-grain.md`.
-- **Supported/documented:** Grane applies the requested civil `from`/`to`
-  to the time column. MetricFlow may align bounds to the metric grain.
-- **Governed-contract impact:** High if Grane claims MetricFlow
-  compatibility for those metrics; none if Grane documents a different rule.
-- **Priority:** High product decision. Do not silently change with timezone.
+Resolved: imported metrics whose agg time dimension declares week / month /
+quarter / year expand the requested civil `from`/`to` to complete overlapping
+periods of that grain (MetricFlow 0.212 query-window alignment). Day-grain
+metrics keep civil bounds. A requested output grain finer than the native
+grain, or a mix of coarse-grain and civil-day metrics in one query, is
+`unsafe_query`. Cumulative / `grain_to_date` / `offset_window` / conversion
+remain skipped at import with the construct in the reason; ratios cannot
+launder a skipped component. See `docs/time-window-grain.md`,
+`docs/metricflow-support.md`, `tests/unit/metricflow-time-grain.test.ts`.
+Do not implement a MetricFlow cumulative engine here.
 
 ## 6. Non-contributing NULL / 0 result groups — fixed (explicit contract)
 

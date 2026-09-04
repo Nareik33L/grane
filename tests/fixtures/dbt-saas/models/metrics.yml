@@ -102,6 +102,20 @@ metrics:
     input_metric: support_tickets
     window: 30 days
 
+  - name: revenue_ytd
+    type: cumulative
+    input_metric: revenue
+    grain_to_date: year
+
+  - name: all_time_revenue
+    type: cumulative
+    input_metric: revenue
+
+  - name: tickets_vs_trailing
+    type: ratio
+    numerator: support_tickets
+    denominator: trailing_tickets
+
   - name: trial_conversion
     type: conversion
     entity: customer

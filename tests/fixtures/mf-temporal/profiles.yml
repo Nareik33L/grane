@@ -1,0 +1,8 @@
+mf_temporal:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: data/mf_temporal.duckdb
+      threads: 1
+      schema: main

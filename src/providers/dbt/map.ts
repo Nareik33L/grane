@@ -4,6 +4,7 @@ import {
   type MetricConfig,
   type MetricFilterItem,
   type SemiAdditiveConfig,
+  type SemiAdditiveGranularity,
 } from "../../config/schema.js";
 import type { SemanticContribution } from "../types.js";
 import { emptyContribution, skipDefinition, withSource } from "../types.js";
@@ -325,6 +326,8 @@ interface SimpleOptions {
   fillNullsWith?: unknown;
   joinToTimespine?: boolean;
   sourcePath: string;
+  /** Native grain of the agg time dimension, when MetricFlow declared one. */
+  timeGranularity?: SemiAdditiveGranularity;
 }
 
 function sqlRef(table: string, column: string): string {
@@ -389,6 +392,20 @@ function emitSimple(
   const timeCol = timeDimensionColumn(model, timeName);
   if (timeName && !timeCol) {
     return fail(`agg_time_dimension "${timeName}" is not a declared time dimension on semantic model "${model.name}".`);
+  }
+  const timeDim = timeName
+    ? model.dimensions.find((d) => d.type === "time" && (d.name === timeName || d.column === timeName))
+    : undefined;
+  let timeGranularity = opts.timeGranularity;
+  if (!timeGranularity && timeDim?.granularity) {
+    const parsed = semiAdditiveGranularitySchema.safeParse(timeDim.granularity);
+    if (!parsed.success) {
+      return fail(
+        `agg_time_dimension "${timeName}" has time granularity "${timeDim.granularity}"; ` +
+          `Grane compiles day, week, month, quarter, or year only.`,
+      );
+    }
+    timeGranularity = parsed.data;
   }
 
   // Filters from every layer, operator preserved.
@@ -481,6 +498,7 @@ function emitSimple(
       semi_additive: semi,
       fill_nulls_with: fillNullsWith,
       join_to_timespine: opts.joinToTimespine ? true : undefined,
+      time_granularity: timeGranularity,
       status: "approved",
     },
     { provider: ctx.provider, path: opts.sourcePath },
@@ -500,14 +518,27 @@ function describeInput(input: MfMetricInput, measureInput = false): string | nul
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
+function describeTemporalConstruct(metric: MfMetric): string {
+  const parts: string[] = [];
+  if (metric.window) parts.push(`window ${metric.window}`);
+  if (metric.grainToDate) parts.push(`grain_to_date ${metric.grainToDate}`);
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
+
 function addSimpleMetric(ctx: MapContext, metric: MfMetric, model: MfSemanticModel | undefined): void {
   const fail = (reason: string) => ctx.skip("metric", metric.name, reason, metric.sourcePath);
   const type = metric.type;
   if (type === "cumulative" || type === "conversion") {
-    return fail(`MetricFlow type "${type}" is not compiled by Grane.`);
+    return fail(`MetricFlow type "${type}"${describeTemporalConstruct(metric)} is not compiled by Grane.`);
   }
   if (type !== "simple") {
     return fail(`MetricFlow type "${type}" is not recognised by Grane.`);
+  }
+  if (metric.window) {
+    return fail(`MetricFlow window "${metric.window}" is not compiled by Grane.`);
+  }
+  if (metric.grainToDate) {
+    return fail(`MetricFlow grain_to_date "${metric.grainToDate}" is not compiled by Grane.`);
   }
 
   if (metric.measure) {
@@ -556,6 +587,12 @@ function addCompoundMetric(ctx: MapContext, metric: MfMetric): void {
   const { out } = ctx;
   const fail = (reason: string) => ctx.skip("metric", metric.name, reason, metric.sourcePath);
 
+  if (metric.window) {
+    return fail(`MetricFlow window "${metric.window}" is not compiled by Grane.`);
+  }
+  if (metric.grainToDate) {
+    return fail(`MetricFlow grain_to_date "${metric.grainToDate}" is not compiled by Grane.`);
+  }
   if (metric.fillNullsWith !== undefined || metric.joinToTimespine) {
     return fail(`fill_nulls_with / join_to_timespine are only defined for simple metrics; MetricFlow rejects them on type "${metric.type}".`);
   }

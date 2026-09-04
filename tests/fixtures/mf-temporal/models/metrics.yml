@@ -1,0 +1,56 @@
+version: 2
+
+metrics:
+  - name: paid_rate
+    type: ratio
+    numerator: paid_revenue
+    denominator: sale_count
+
+  - name: revenue_per_sale
+    type: derived
+    expr: revenue / sale_count
+    input_metrics:
+      - name: revenue
+      - name: sale_count
+
+  - name: trailing_7d_revenue
+    type: cumulative
+    input_metric: revenue
+    window: 7 days
+
+  - name: trailing_3m_new_amount
+    type: cumulative
+    input_metric: new_amount
+    window: 3 months
+
+  - name: revenue_mtd
+    type: cumulative
+    input_metric: revenue
+    grain_to_date: month
+
+  - name: revenue_qtd
+    type: cumulative
+    input_metric: revenue
+    grain_to_date: quarter
+
+  - name: revenue_ytd
+    type: cumulative
+    input_metric: revenue
+    grain_to_date: year
+
+  - name: all_time_revenue
+    type: cumulative
+    input_metric: revenue
+
+  - name: prior_month_balance
+    type: derived
+    expr: ending_balance
+    input_metrics:
+      - name: ending_balance
+        alias: prior_ending_balance
+        offset_window: 1 month
+
+  - name: balance_vs_trailing
+    type: ratio
+    numerator: ending_balance
+    denominator: trailing_3m_new_amount

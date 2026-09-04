@@ -80,6 +80,13 @@ export interface MfMetric {
   /** Semantic model this simple metric belongs to, when known. */
   semanticModel?: string;
   sourcePath: string;
+  /**
+   * MetricFlow window / grain_to_date when present (string form, e.g. "90 day"
+   * or "year"). Absent on ordinary simple metrics. Used to skip rather than
+   * flatten a windowed definition into a simple aggregate.
+   */
+  window?: string;
+  grainToDate?: string;
 }
 
 export interface MfSemanticModel {
