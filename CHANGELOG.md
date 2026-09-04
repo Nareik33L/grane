@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Live PostgreSQL certification: GitHub Actions runs a purpose-built
+  correctness corpus against PostgreSQL 16 on every PR (read-only runtime
+  role, independent SQL oracles). Compile inspection is not treated as
+  warehouse certification. See `tests/unit/postgres-live-certification.test.ts`.
+
 - Imported MetricFlow metrics whose agg time dimension is week, month,
   quarter, or year expand the requested civil `from`/`to` to complete
   overlapping periods of that grain (MetricFlow 0.212 query-window
