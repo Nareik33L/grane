@@ -147,11 +147,20 @@ describe("structural validation", () => {
     expect(metric.issues.some((i) => i.code === "grain_mismatch")).toBe(true);
   });
 
-  it("rejects metric filters outside the metric's grain", () => {
+  it("rejects metric filters the compiler cannot bind at the metric grain", () => {
     const config = exampleConfig();
-    config.metrics["revenue"]!.filters = { "customers.country": "UK" };
+    config.metrics["revenue"]!.filters = { "payments.status": "succeeded" };
     const report = validateModel(new SemanticModel(config));
     const revenue = report.metrics.find((m) => m.metric === "revenue")!;
     expect(revenue.issues.some((i) => i.code === "filter_out_of_scope")).toBe(true);
+    expect(revenue.issues.find((i) => i.code === "filter_out_of_scope")!.message).toMatch(/one_to_many/);
+  });
+
+  it("allows a many_to_one parent filter that compile joins onto the grain", () => {
+    const config = exampleConfig();
+    config.metrics["revenue"]!.filters = { "orders.status": "completed", "customers.country": "UK" };
+    const report = validateModel(new SemanticModel(config));
+    const revenue = report.metrics.find((m) => m.metric === "revenue")!;
+    expect(revenue.issues.some((i) => i.code === "filter_out_of_scope")).toBe(false);
   });
 });

@@ -8,6 +8,8 @@ BREAK-GOVERNED finding and is also fixed. Item 7 (NULL-group padding)
 is also fixed. Item 11 (`__grane_` identifier collision) is also fixed.
 Item 12 (public `period_${grain}` alias collision) is also fixed.
 Item 13 (selected public output-name uniqueness) is also fixed.
+Item 8 (`validate` / compile disagreement on off-path metric filters)
+is also fixed.
 The rest stay deferred.
 
 ## 0. Experimental status vs `trust: governed` — fixed
@@ -87,15 +89,17 @@ dimension and metric values are NULL is preserved. Completeness (`__grane_n`)
 is read before the strip and counts real groups only. Trust is unchanged.
 See `tests/unit/null-group-padding.test.ts`.
 
-## 8. `validate` vs kernel on an off-path metric filter
+## 8. `validate` vs kernel on an off-path metric filter — fixed
 
-- **Observed:** Validate can flag an off-path metric filter that the kernel
-  later allows into a raw binder error.
-- **Supported/documented:** Validate is structural; compile is the
-  execution gate.
-- **Governed-contract impact:** Agents can see `ok` from validate and then
-  hit an unstructured warehouse error.
-- **Priority:** Medium. Compile should refuse structurally.
+Resolved: compile refuses a metric-definition filter whose table is not
+bound in the FILTER/WHERE clause (unreachable table, fan-out-only path,
+ratio-owned filters). MCP `validate` (explain) and `query` therefore agree
+before the warehouse runs. Model `validate` uses the same bind-scope, so a
+many_to_one parent filter that compile already joins is no longer flagged
+as `filter_out_of_scope`. Query filters that name a metric (or synonym) are
+`invalid_query`, not a physical-column hint. See
+`tests/unit/metric-filter-support.test.ts`. Do not reopen as a HAVING engine
+or as warehouse-error rewriting.
 
 ## 9. `ORDER BY` / outer-wrapper portability
 

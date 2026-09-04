@@ -6,6 +6,7 @@ import {
 } from "../connectors/dialect.js";
 import type { DatabaseSchema } from "../connectors/types.js";
 import { isReservedInternalIdent, reservedInternalMessage } from "../compile/internal-namespace.js";
+import { classifyMetricFilterField } from "../compile/metric-filter-support.js";
 
 /**
  * Structural validation: is every semantic definition legal and analytically
@@ -297,6 +298,16 @@ function validateMetric(
         });
       }
     }
+    if (metric.filters.length > 0) {
+      issues.push({
+        severity: "error",
+        code: "filter_out_of_scope",
+        subject,
+        message:
+          `Ratio metric "${metric.name}" cannot carry its own metric filters; they are not applied to the ratio result. ` +
+          `Put table.column predicates on the numerator and denominator metrics instead.`,
+      });
+    }
   } else {
     if (!metric.measure) {
       issues.push({
@@ -400,7 +411,9 @@ function validateMetric(
     }
   }
 
-  // Metric filters must parse and reference reachable tables.
+  // Metric filters must parse and bind to a table the compiler will actually
+  // place in the FILTER/WHERE clause. Unreachable or fan-out-only tables are
+  // refused here and at compile time — never left for the warehouse binder.
   for (const filter of metric.filters) {
     const ref = parseColumnRef(filter.field);
     if (!ref) {
@@ -413,21 +426,15 @@ function validateMetric(
       continue;
     }
     issues.push(...checkColumn(subject, ref.table, ref.column));
-    const measureTable = metric.measure?.table ?? baseTable;
-    if (ref.table !== baseTable && ref.table !== measureTable) {
-      const onMeasurePath = model.graph
-        .findPath(baseTable, measureTable)
-        ?.edges.some((e) => e.toTable === ref.table);
-      if (!onMeasurePath) {
-        issues.push({
-          severity: "error",
-          code: "filter_out_of_scope",
-          subject,
-          message:
-            `Metric filter on "${filter.field}" references a table outside the metric's grain ` +
-            `("${baseTable}") and measure path. V0.1 metric filters must stay within those tables.`,
-        });
-      }
+    if (config.type === "ratio") continue;
+    const bound = classifyMetricFilterField(model, metric, baseTable, filter.field);
+    if (!bound.ok) {
+      issues.push({
+        severity: "error",
+        code: "filter_out_of_scope",
+        subject,
+        message: bound.refusal.message,
+      });
     }
   }
 
