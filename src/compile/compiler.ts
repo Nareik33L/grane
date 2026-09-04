@@ -5,7 +5,8 @@ import type { Edge } from "../model/graph.js";
 import type { FilterOperator, Scalar, MetricFilterItem } from "../config/schema.js";
 import { parseColumnRef, type ColumnRef } from "../model/refs.js";
 import { exclusiveEnd } from "../query/time.js";
-import { ambiguousQuery, invalidQuery, unsafeQuery } from "../errors.js";
+import { GraneError, ambiguousQuery, invalidQuery, unsafeQuery } from "../errors.js";
+import { assertMetricFiltersBound, classifyMetricFilterField } from "./metric-filter-support.js";
 import {
   classifyTemporalType,
   getDialect,
@@ -389,6 +390,8 @@ export function compileQuery(
       );
     }
 
+    assertMetricFiltersBound(model, metric, baseTable);
+
     if (metric.semiAdditive) {
       return compileSemiAdditiveMetric(metric);
     }
@@ -399,10 +402,9 @@ export function compileQuery(
       // Measure is on the base table or safely reachable: aggregate directly.
       joinPathTo(measure.table, `measure of metric "${metric.name}"`);
       const filterClause = andFilters(compileMetricFilters(metric.filters, params, col), perMetricTime);
-      const fn = aggregateFn(metric);
       return {
         expr: filterClause
-          ? dialect.filteredAggregate(fn, measureSql(metric), filterClause)
+          ? filteredAggregateExpr(dialect, metric, measureSql(metric), filterClause)
           : directAggregate(metric, measureSql(metric)),
       };
     }
@@ -625,13 +627,15 @@ export function compileQuery(
       );
     }
 
-    // Metric filters: path-table filters go inside the CTE; base-table filters
-    // become a FILTER clause on the outer aggregate.
+    // Metric filters: CTE-local tables stay inside the pre-aggregation WHERE;
+    // grain and fan-out-free joins are FILTER predicates on the outer aggregate
+    // (those tables are joined onto the grain, never into the CTE).
     const insideFilters: MetricFilterItem[] = [];
     const outerFilters: MetricFilterItem[] = [];
     for (const filter of metric.filters) {
-      const ref = parseColumnRef(filter.field)!;
-      (ref.table === baseTable ? outerFilters : insideFilters).push(filter);
+      const bound = classifyMetricFilterField(model, metric, baseTable, filter.field);
+      if (!bound.ok) throw new GraneError(bound.refusal);
+      (bound.placement === "preagg_cte" ? insideFilters : outerFilters).push(filter);
     }
     const insideWhere = compileMetricFilters(insideFilters, params, col);
     const childFilters = insideFilters.filter((filter) => parseColumnRef(filter.field)?.table === firstEdge.toTable);
@@ -740,6 +744,7 @@ export function compileQuery(
     metricVersions[metric.name] = metric.definitionVersion;
     if (metric.config.source) metricSources[metric.name] = metric.config.source;
     if (metric.config.type === "ratio") {
+      assertMetricFiltersBound(model, metric, baseTable);
       const numerator = model.metrics.get(metric.config.numerator!);
       const denominator = model.metrics.get(metric.config.denominator!);
       if (!numerator || !denominator) {
@@ -786,8 +791,8 @@ export function compileQuery(
       const ref = parseColumnRef(filter.field);
       if (!ref || ref.table === baseTable) continue;
       const path = model.graph.findPath(baseTable, ref.table);
-      // Filters on a one_to_many path belong inside the pre-aggregation CTE,
-      // not as an outer join that would fan out the grain.
+      // Fan-out filters are refused (or compiled inside a pre-aggregation CTE).
+      // Fan-out-free joins are attached here so FILTER (WHERE joined.col …) binds.
       if (path && !path.fansOut && !path.ambiguous) {
         joinPathTo(ref.table, `metric filter "${filter.field}" of "${metric.name}"`);
       }
@@ -1143,6 +1148,22 @@ function aggregateFn(metric: Metric): "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" {
 function directAggregate(metric: Metric, measureExpr: string): string {
   if (metric.config.type === "count_distinct") return `COUNT(DISTINCT ${measureExpr})`;
   return `${aggregateFn(metric)}(${measureExpr})`;
+}
+
+function filteredAggregateExpr(
+  dialect: SqlDialect,
+  metric: Metric,
+  measureExpr: string,
+  filterSql: string,
+): string {
+  // COUNT(col) FILTER is not COUNT(DISTINCT col). Distinct must stay distinct
+  // under a metric-definition predicate, including CASE-based dialects.
+  if (metric.config.type === "count_distinct") {
+    return dialect.supportsFilterClause
+      ? `COUNT(DISTINCT ${measureExpr}) FILTER (WHERE ${filterSql})`
+      : `COUNT(DISTINCT CASE WHEN ${filterSql} THEN ${measureExpr} END)`;
+  }
+  return dialect.filteredAggregate(aggregateFn(metric), measureExpr, filterSql);
 }
 
 function andFilters(...parts: Array<string | null | undefined>): string | null {

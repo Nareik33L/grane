@@ -23,6 +23,7 @@ import {
   type RawColumn,
 } from "../explore/raw.js";
 import { refuseReservedInternalIdent } from "../compile/internal-namespace.js";
+import { assertMetricFiltersBound } from "../compile/metric-filter-support.js";
 
 function refuseDeniedDimension(
   agent: AgentGrant | null | undefined,
@@ -253,6 +254,15 @@ export function resolveQuery(
     };
   });
 
+  // Metric-definition filters must bind at this grain. Same rule as compile, so
+  // resolve / explain / query agree before any SQL is emitted.
+  for (const metric of metrics) {
+    assertMetricFiltersBound(model, metric, baseTable);
+  }
+  for (const metric of expandMetricComponents(model, metrics)) {
+    assertMetricFiltersBound(model, metric, baseTable);
+  }
+
   // --- Governed dimensions (must join without fan-out) ---
   let dimensions = query.dimensions.map((name) => {
     let dimension;
@@ -279,10 +289,11 @@ export function resolveQuery(
   });
 
   // --- Filters: governed dimension or raw table.column ---
+  const rawMetricAliases = rawMetrics.map((raw) => raw.alias);
   const filters: ResolvedFilter[] = query.filters.map((filter) => {
     let resolved;
     try {
-      resolved = resolveFilterField(model, filter.field, schema, policy);
+      resolved = resolveFilterField(model, filter.field, schema, policy, rawMetricAliases);
     } catch (err) {
       if (err instanceof GraneError && err.refusal.status === "undefined_dimension" && agent?.dimensions?.length) {
         throw undefinedDimension(filter.field, similarDimensions(agent, []));
@@ -597,12 +608,32 @@ function resolveFilterField(
   field: string,
   schema: DatabaseSchema | null,
   policy: ExplorationPolicy,
+  rawMetricAliases: string[],
 ): { column: ColumnRef; field: string; governed: boolean } {
   try {
     const dimension = model.resolveDimension(field);
     return { column: dimension.column, field: dimension.name, governed: true };
   } catch (err) {
     if (!(err instanceof GraneError) || err.refusal.status !== "undefined_dimension") throw err;
+    // Query filters are dimension / raw table.column predicates. A metric name
+    // (or synonym) is not HAVING: refusing here keeps validate/explain/query
+    // from hinting an unrelated physical column of the same public name.
+    const metric = importedMetricNamed(model, field);
+    if (metric) {
+      throw invalidQuery(
+        `Query filter "${field}" resolves to metric "${metric.name}". Grane query filters apply to dimensions ` +
+          `(and raw table.column fields), not to metric results. Put a table.column predicate on the metric ` +
+          `definition if you need a metric-scoped row filter.`,
+        { metric: metric.name, field },
+      );
+    }
+    if (rawMetricAliases.some((alias) => alias === field)) {
+      throw invalidQuery(
+        `Query filter "${field}" matches a raw metric alias in this query. Grane query filters apply to dimensions ` +
+          `(and raw table.column fields), not to metric results.`,
+        { field },
+      );
+    }
     const ref = parseColumnRef(field);
     if (ref) {
       const raw = resolveRawColumn(field, { model, policy, schema, purpose: "filter" });
@@ -610,6 +641,14 @@ function resolveFilterField(
     }
     hintUngovernedDimension(field, err.refusal.similar ?? [], model, schema);
     throw err;
+  }
+}
+
+function importedMetricNamed(model: SemanticModel, field: string): Metric | null {
+  try {
+    return model.resolveMetric(field);
+  } catch {
+    return null;
   }
 }
 
