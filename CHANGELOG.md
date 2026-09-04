@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Selected public result names must be unique. A metric and a dimension
+  both named `code` is `ambiguous_query` rather than a successful result
+  with duplicate SELECT aliases (`code` / `code:1`). Identical logical
+  selections are deduplicated. Generated `period_${grain}` collisions keep
+  the PR #29 contract. See `tests/unit/public-output-names.test.ts`.
+
 - Generated time-grain output `period_${grain}` (for example `period_month`)
   is a stable public result field. A selected metric, dimension, or raw
   alias of the same name is `ambiguous_query` rather than a successful

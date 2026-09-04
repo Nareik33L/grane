@@ -169,7 +169,7 @@ export function resolveQuery(
   }
 
   // --- Governed metrics (synonyms resolve; unknown names refuse) ---
-  const metrics = query.metrics.map((name) => {
+  let metrics = query.metrics.map((name) => {
     let metric;
     try {
       metric = model.resolveMetric(name);
@@ -233,7 +233,7 @@ export function resolveQuery(
     resolveRawColumn(requested, { model, policy, schema, purpose });
 
   // --- Raw metrics (exploratory aggregations) ---
-  const rawMetrics: ResolvedRawMetric[] = query.raw_metrics.map((raw, index) => {
+  let rawMetrics: ResolvedRawMetric[] = query.raw_metrics.map((raw, index) => {
     const column = resolveRaw(raw.field, `raw_metrics[${index}]`);
     if (column.ref.table !== baseTable) {
       throw invalidQuery(
@@ -254,7 +254,7 @@ export function resolveQuery(
   });
 
   // --- Governed dimensions (must join without fan-out) ---
-  const dimensions = query.dimensions.map((name) => {
+  let dimensions = query.dimensions.map((name) => {
     let dimension;
     try {
       dimension = resolveGovernedDimension(model, name, schema);
@@ -270,7 +270,7 @@ export function resolveQuery(
   });
 
   // --- Raw dimensions ---
-  const rawDimensions = query.raw_dimensions.map((requested) => {
+  let rawDimensions = query.raw_dimensions.map((requested) => {
     const column = resolveRaw(requested, "raw_dimension");
     refuseReservedInternalIdent("Raw dimension", column.alias, "query");
     assertSafeJoin(model, baseTable, column.ref, `raw dimension "${column.qualified}"`);
@@ -402,19 +402,37 @@ export function resolveQuery(
     };
   }
 
-  // --- Public time-grain alias vs selected fields ---
-  // `period_${grain}` is a stable public result column. A selected metric,
-  // dimension, or raw alias of the same name would emit a duplicate SELECT
-  // alias; warehouses then suffix or overwrite, and the agent-visible schema
-  // is no longer the one Grane declared. Refuse before compilation.
-  if (time?.grain) {
-    refusePeriodAliasCollision(time.grain, [
-      ...metrics.map((m) => ({ kind: "metric" as const, name: m.name })),
-      ...dimensions.map((d) => ({ kind: "dimension" as const, name: d.name })),
-      ...rawMetrics.map((m) => ({ kind: "raw metric alias" as const, name: m.alias })),
-      ...rawDimensions.map((d) => ({ kind: "raw dimension" as const, name: d.alias })),
-    ]);
-  }
+  // Identical logical selections (same canonical metric, same dimension,
+  // same raw field+type+alias) would otherwise emit duplicate SELECT aliases
+  // of one output. Keep the first occurrence; request order does not matter
+  // for collision detection among *different* outputs.
+  metrics = uniqueByIdentity(metrics, (metric) => `metric:${metric.name}`);
+  dimensions = uniqueByIdentity(dimensions, (dimension) => `dimension:${dimension.name}`);
+  rawMetrics = uniqueByIdentity(
+    rawMetrics,
+    (metric) => `raw_metric:${metric.alias}\0${metric.type}\0${metric.qualified}`,
+  );
+  rawDimensions = uniqueByIdentity(rawDimensions, (dimension) => `raw_dimension:${dimension.alias}`);
+
+  // Public result columns must be unique before SQL. Hidden internals
+  // (__grane_n / __grane_row / __grane_card_*) are not part of this schema.
+  refuseDuplicatePublicOutputs([
+    ...(time?.grain
+      ? [{ kind: "time grain", name: timeAlias(time.grain), identity: `grain:${time.grain}` }]
+      : []),
+    ...dimensions.map((d) => ({ kind: "dimension", name: d.name, identity: `dimension:${d.name}` })),
+    ...rawDimensions.map((d) => ({
+      kind: "raw dimension",
+      name: d.alias,
+      identity: `raw_dimension:${d.alias}`,
+    })),
+    ...metrics.map((m) => ({ kind: "metric", name: m.name, identity: `metric:${m.name}` })),
+    ...rawMetrics.map((m) => ({
+      kind: "raw metric alias",
+      name: m.alias,
+      identity: `raw_metric:${m.alias}\0${m.type}\0${m.qualified}`,
+    })),
+  ]);
 
   // --- Ordering references selected fields ---
   const selectable = new Set<string>([
@@ -493,6 +511,52 @@ export function refusePeriodAliasCollision(
     `time.grain "${grain}" produces public field "${period}", which collides with selected ${listed}.`,
     { field: period, grain, colliding },
   );
+}
+
+function uniqueByIdentity<T>(items: T[], identity: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const key = identity(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Selected public SELECT aliases must be unique. Comparison uses the
+ * canonical stored name actually emitted in the result (quoted, case-preserving).
+ * Generated `period_${grain}` collisions keep the PR #29 message.
+ */
+export function refuseDuplicatePublicOutputs(
+  fields: Array<{ kind: string; name: string; identity: string }>,
+): void {
+  const byName = new Map<string, Array<{ kind: string; name: string; identity: string }>>();
+  for (const field of fields) {
+    const list = byName.get(field.name) ?? [];
+    list.push(field);
+    byName.set(field.name, list);
+  }
+  for (const [name, claimants] of byName) {
+    const distinct = uniqueByIdentity(claimants, (field) => field.identity);
+    if (distinct.length < 2) continue;
+    const generated = distinct.find((field) => field.identity.startsWith("grain:"));
+    if (generated) {
+      const grain = generated.identity.slice("grain:".length) as TimeGrain;
+      refusePeriodAliasCollision(
+        grain,
+        distinct.filter((field) => field !== generated),
+      );
+      continue;
+    }
+    const listed = distinct.map((field) => `${field.kind} "${field.name}"`).join(", ");
+    throw ambiguousQuery(`selected outputs produce duplicate public field "${name}": ${listed}.`, {
+      field: name,
+      colliding: distinct.map((field) => ({ kind: field.kind, name: field.name })),
+    });
+  }
 }
 
 export function computeTrust(
