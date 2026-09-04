@@ -285,7 +285,8 @@ describe.skipIf(!duckOk)("unique multi-hop preaggregation aliases (DuckDB)", () 
 
   it("unreachable sku duplicate does not refuse", async () => {
     const db = await loadDuck([
-      ...HOP_DDL.filter((s) => !s.includes("INSERT INTO skus")),
+      ...HOP_DDL.filter((s) => !s.includes("skus")),
+      `CREATE TABLE skus (sku_pk INTEGER, grams DOUBLE PRECISION)`,
       `INSERT INTO skus VALUES (10, 1.5), (20, 5.0), (99, 8), (99, 8)`,
     ]);
     const k = new GraneKernel(hopConfig({ type: "duckdb", path: db, schema: "main" }));
