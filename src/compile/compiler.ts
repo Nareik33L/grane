@@ -1021,21 +1021,29 @@ export function compileQuery(
   }
 
   // ---- ORDER BY ----
-  const orderClauses: string[] = [];
+  // Promised order is explicit. When `query.order` is empty Grane keeps the
+  // existing defaults (time grain → period ASC; otherwise first selected
+  // metric DESC when the query is grouped). Those defaults are the contract
+  // for semantic top-N / execution-cap membership as well as presentation.
+  const orderKeys: Array<{ field: string; direction: "ASC" | "DESC" }> = [];
   for (const order of resolved.order) {
-    orderClauses.push(`${ident(order.field)} ${order.direction === "desc" ? "DESC" : "ASC"}`);
+    orderKeys.push({ field: order.field, direction: order.direction === "desc" ? "DESC" : "ASC" });
   }
-  if (orderClauses.length === 0) {
+  if (orderKeys.length === 0) {
     if (resolved.time?.grain) {
-      orderClauses.push(`${ident(timeAlias(resolved.time.grain))} ASC`);
+      orderKeys.push({ field: timeAlias(resolved.time.grain), direction: "ASC" });
     } else if (
       (resolved.dimensions.length > 0 || resolved.rawDimensions.length > 0) &&
       (resolved.metrics.length > 0 || resolved.rawMetrics.length > 0)
     ) {
       const first = resolved.metrics[0]?.name ?? resolved.rawMetrics[0]!.alias;
-      orderClauses.push(`${ident(first)} DESC`);
+      orderKeys.push({ field: first, direction: "DESC" });
     }
   }
+  const renderOrderBy = (qualifyTable?: string): string =>
+    orderKeys
+      .map((key) => `${qualifyTable ? `${ident(qualifyTable)}.` : ""}${ident(key.field)} ${key.direction}`)
+      .join(", ");
 
   // ---- Assemble ----
   // No joins → no guards → the plain statement. With joins, the statement is
@@ -1050,8 +1058,11 @@ export function compileQuery(
   //                     that pass query filters on T, one per joined table
   //   __grane_card      one scalar per guard: MAX(rows per key) over P(n)
   //   __grane_result    the analytical SELECT over __grane_pop + joins
+  //                     (ORDER BY + LIMIT here choose semantic top-N / cap)
   //   outer SELECT      __grane_card LEFT JOIN __grane_result ON TRUE, so the
-  //                     guard row exists even when GROUP BY yields no rows
+  //                     guard row exists even when GROUP BY yields no rows;
+  //                     ORDER BY is repeated here so returned order is not
+  //                     warehouse-dependent CTE preservation
   const lines: string[] = [];
 
   if (guards.length === 0) {
@@ -1071,8 +1082,8 @@ export function compileQuery(
     if (groupBy.length > 0) {
       lines.push(`GROUP BY ${groupBy.join(", ")}`);
     }
-    if (orderClauses.length > 0) {
-      lines.push(`ORDER BY ${orderClauses.join(", ")}`);
+    if (orderKeys.length > 0) {
+      lines.push(`ORDER BY ${renderOrderBy()}`);
     }
     lines.push(`LIMIT ${resolved.limit}`);
   } else {
@@ -1138,12 +1149,13 @@ export function compileQuery(
     if (groupBy.length > 0) {
       resultCteLines.push(`  GROUP BY ${groupBy.join(", ")}`);
     }
-    if (orderClauses.length > 0) {
-      // TODO(follow-up): ORDER BY + LIMIT live inside this CTE (LIMIT needs
-      // the ORDER BY here); the outer wrapper has no ORDER BY, and SQL does
-      // not guarantee a CTE's order survives the outer join. Repeat the
-      // ordering on the outer SELECT, with dialect NULL-placement parity.
-      resultCteLines.push(`  ORDER BY ${orderClauses.join(", ")}`);
+    if (orderKeys.length > 0) {
+      // Inner ORDER BY + LIMIT choose which rows belong to semantic top-N /
+      // the execution cap. SQL does not promise a CTE's order survives the
+      // outer card ⨯ result join, so the same keys are repeated on the
+      // outermost SELECT. Do not move ORDER BY out of the CTE: LIMIT without
+      // that inner sort would pick the wrong members.
+      resultCteLines.push(`  ORDER BY ${renderOrderBy()}`);
     }
     resultCteLines.push(`  LIMIT ${resolved.limit}`, `)`);
 
@@ -1165,6 +1177,9 @@ export function compileQuery(
     lines.push(`SELECT ${outerSelects.join(",\n       ")}`);
     lines.push(`FROM ${ident("__grane_card")}`);
     lines.push(`LEFT JOIN ${ident("__grane_result")} ON TRUE`);
+    if (orderKeys.length > 0) {
+      lines.push(`ORDER BY ${renderOrderBy("__grane_result")}`);
+    }
   }
 
   const finalized = params.finalize(lines.join("\n"));
