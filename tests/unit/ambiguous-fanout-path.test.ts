@@ -464,7 +464,8 @@ relationships:
     expect(sql.code).not.toBe(0);
     expect(exec.code).not.toBe(0);
     expect(sql.stderr + sql.stdout).toMatch(/ERROR \(ambiguous_query\)/);
-    expect(exec.stderr + exec.stdout).toMatch(/ERROR \(ambiguous_query\)/);
+    const refused = JSON.parse(exec.stdout) as { ok: false; status: string };
+    expect(refused).toMatchObject({ ok: false, status: "ambiguous_query" });
   });
 });
 

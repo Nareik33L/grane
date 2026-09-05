@@ -722,7 +722,8 @@ relationships:
     expect(sql.code).not.toBe(0);
     expect(exec.code).not.toBe(0);
     expect(sql.stderr + sql.stdout).toMatch(/ERROR \(invalid_query\)/);
-    expect(exec.stderr + exec.stdout).toMatch(/ERROR \(invalid_query\)/);
+    const refused = JSON.parse(exec.stdout) as { ok: false; status: string };
+    expect(refused).toMatchObject({ ok: false, status: "invalid_query" });
     expect(sql.stderr + exec.stderr).not.toMatch(/Binder Error/i);
     const ok = await run(["query", "uk_revenue", "--from", "2026-01-01", "--to", "2026-01-31", "--json"]);
     expect(ok.code).toBe(0);

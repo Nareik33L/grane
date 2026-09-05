@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../../src/config/load.js";
 import { GraneKernel } from "../../src/kernel.js";
-import { runDemo, type DemoIo } from "../../src/demo/run.js";
+import { formatDemoNextSteps, runDemo, type DemoIo } from "../../src/demo/run.js";
 import { demoWarehouseConfigPath } from "../../src/demo/project.js";
 import { splitSqlStatements } from "../../src/demo/duckdb.js";
 
@@ -25,6 +25,15 @@ const duckdb = await (async () => {
     return false;
   }
 })();
+
+describe("demo next steps", () => {
+  it("does not imply Docker is required to keep using the DuckDB demo", () => {
+    const text = formatDemoNextSteps("/tmp/demo/analytics", "see demo.md", false).join("\n");
+    expect(text).toMatch(/Docker is not required/);
+    expect(text).toMatch(/not used by the DuckDB demo/);
+    expect(text).toContain("docker compose up");
+  });
+});
 
 describe("demo warehouse config path", () => {
   it("stores a project-local warehouse as a relative path", () => {

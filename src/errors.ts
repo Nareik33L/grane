@@ -131,3 +131,77 @@ export function unsafeQuery(message: string, details?: unknown): GraneError {
 export function configError(message: string, details?: unknown): GraneError {
   return new GraneError({ status: "config_error", message, details });
 }
+
+/**
+ * Safe one-line message for CLI / doctor / logs. Prefers `message`, then
+ * `code`, then `String(err)`. Strips credentials and stack frames.
+ */
+export function publicErrorMessage(err: unknown): string {
+  const raw = rawErrorText(err);
+  const redacted = redactSensitive(raw).replace(/\r?\n[\s\S]*$/, "").trim();
+  return redacted || "Unknown error";
+}
+
+export function warehouseUnreachable(warehouse: string, err: unknown): Error {
+  return new Error(`Cannot reach the ${warehouse} warehouse: ${publicErrorMessage(err)}`);
+}
+
+export function looksUnreachable(err: unknown): boolean {
+  const code = errorCode(err);
+  const text = `${code} ${rawErrorText(err)}`.toLowerCase();
+  return /econnrefused|enotfound|etimedout|econnreset|eai_again|ehostunreach|epipe|econnaborted|connect e|connection refused|could not connect|remaining connection slots|server closed the connection|no pg_hba|password authentication failed|timeout expired|connection terminated/.test(
+    text,
+  );
+}
+
+export function wrapIfUnreachable(warehouse: string, err: unknown): never {
+  if (looksUnreachable(err)) throw warehouseUnreachable(warehouse, err);
+  if (err instanceof Error) throw err;
+  throw new Error(publicErrorMessage(err));
+}
+
+function errorCode(err: unknown): string {
+  if (err && typeof err === "object" && "code" in err && (err as { code?: unknown }).code != null) {
+    return String((err as { code: unknown }).code);
+  }
+  return "";
+}
+
+function rawErrorText(err: unknown): string {
+  if (err instanceof Error) {
+    const msg = err.message?.trim() ?? "";
+    const code = errorCode(err);
+    if (msg && code && !msg.includes(code)) return `${msg} (${code})`;
+    if (msg) return msg;
+    if (code) return `${err.name && err.name !== "Error" ? err.name : "Error"} (${code})`;
+    if (err.name && err.name !== "Error") return err.name;
+    return String(err);
+  }
+  if (err && typeof err === "object") {
+    const rec = err as Record<string, unknown>;
+    const msg = typeof rec.message === "string" ? rec.message.trim() : "";
+    const code = rec.code != null ? String(rec.code) : "";
+    if (msg && code && !msg.includes(code)) return `${msg} (${code})`;
+    if (msg) return msg;
+    if (code) return code;
+  }
+  const text = String(err).trim();
+  return text && text !== "[object Object]" ? text : "";
+}
+
+function redactSensitive(text: string): string {
+  return text
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s)'"]+/gi, (url) => {
+      try {
+        const parsed = new URL(url);
+        if (parsed.password || parsed.username) {
+          parsed.password = parsed.password ? "***" : "";
+          parsed.username = parsed.username ? "***" : parsed.username;
+        }
+        return parsed.toString();
+      } catch {
+        return url.replace(/:\/\/[^/@\s]+@/g, "://***@");
+      }
+    })
+    .replace(/\b(password|pwd|secret|token|api[_-]?key|motherduck_token)\s*[=:]\s*\S+/gi, "$1=***");
+}

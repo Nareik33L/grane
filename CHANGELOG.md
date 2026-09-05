@@ -4,6 +4,16 @@
 
 ## 0.6.5
 
+- Public-alpha P2/P3 cleanup: useful warehouse connection errors; `mcp doctor`
+  is not "ready" when the warehouse is unreachable; `--json` refusals are
+  machine-readable JSON; CLI `--time-dimension` maps to Query Model
+  `time.dimension`; MySQL install hint is `mysql2`; SECURITY.md; provider
+  and warehouse maturity wording; source maps excluded from the npm tarball;
+  DuckDB demo next-steps no longer imply Docker is required; package keywords
+  and public-alpha label; CONTRIBUTING build/typecheck; example seed link;
+  human query table/footer stay on stdout; `init --provider` fails early on
+  a missing or unrecognisable path.
+
 - Public-alpha front door: the package exposes both `grane` and
   `grane-analytics` binaries so `npx grane-analytics demo` resolves after
   this version is published (0.6.4 on npm has neither `demo` nor that

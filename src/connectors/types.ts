@@ -82,12 +82,19 @@ export function inferRelationships(schema: DatabaseSchema): Record<
   return relationships;
 }
 
+/** npm package name to install. Subpath imports (mysql2/promise) are not packages. */
+export function npmInstallName(pkg: string): string {
+  if (pkg === "mysql2/promise") return "mysql2";
+  return pkg;
+}
+
 export async function loadOptionalModule<T>(pkg: string, warehouse: string): Promise<T> {
   try {
     return (await import(pkg)) as T;
   } catch {
+    const install = npmInstallName(pkg);
     throw new Error(
-      `The ${warehouse} connector requires the "${pkg}" package. Install it in the same project as Grane:\n  npm install ${pkg}`,
+      `The ${warehouse} connector requires the "${install}" package. Install it in the same project as Grane:\n  npm install ${install}`,
     );
   }
 }
