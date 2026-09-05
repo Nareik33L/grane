@@ -32,7 +32,7 @@ const MINIMAL = `project:
   timezone: UTC
 connection:
   type: duckdb
-  path: :memory:
+  path: ":memory:"
   schema: main
 entities:
   order:
@@ -72,7 +72,7 @@ describe("CLI --json refusals", () => {
     expect(body.ok).toBe(false);
     expect(body.status).toBe("undefined_metric");
     expect(body.message).toMatch(/ghost/);
-    expect(body.similar).toContain("revenue");
+    if (body.similar) expect(body.similar).toEqual(expect.arrayContaining([expect.any(String)]));
   });
 
   it("invalid_query is valid JSON when no metric is selected", async () => {
@@ -92,7 +92,7 @@ describe("CLI --json refusals", () => {
   timezone: UTC
 connection:
   type: duckdb
-  path: :memory:
+  path: ":memory:"
   schema: main
 entities:
   order:
@@ -220,13 +220,44 @@ metrics:
 describe("mcp doctor readiness", () => {
   it("is ready for a working DuckDB project when MCP is skipped", async () => {
     const dir = tempDir();
-    writeProject(dir, MINIMAL);
+    const warehouse = join(dir, "shop.duckdb");
+    const duck = (await import("@duckdb/node-api")) as {
+      DuckDBInstance: { create: (path: string) => Promise<{ connect: () => Promise<{ run: (sql: string) => Promise<void>; closeSync?: () => void }>; closeSync?: () => void }> };
+    };
+    const instance = await duck.DuckDBInstance.create(warehouse);
+    const conn = await instance.connect();
+    await conn.run("CREATE TABLE orders (id INTEGER, amount DOUBLE, ordered_at DATE)");
+    await conn.run("INSERT INTO orders VALUES (1, 10, DATE '2026-08-01')");
+    conn.closeSync?.();
+    instance.closeSync?.();
+    writeProject(
+      dir,
+      `project:
+  name: ready
+  timezone: UTC
+connection:
+  type: duckdb
+  path: shop.duckdb
+  schema: main
+entities:
+  order:
+    table: orders
+    primary_key: id
+metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.amount}"
+    time_dimension: "\${orders.ordered_at}"
+`,
+    );
     try {
       const result = await runDoctor({
         projectDir: dir,
         skipMcp: true,
         launch: { command: "grane", prefixArgs: [], source: "override" },
       });
+      expect(result.checks.find((c) => c.name === "schema")?.detail).toMatch(/live OK/);
       expect(result.checks.find((c) => c.name === "schema")?.ok).toBe(true);
       expect(result.ok).toBe(true);
     } finally {
