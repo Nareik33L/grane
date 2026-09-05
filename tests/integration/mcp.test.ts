@@ -37,7 +37,9 @@ describe.skipIf(!dbUp)("MCP over streamable HTTP (integration)", () => {
 
   beforeAll(async () => {
     const { config } = loadConfig(exampleDir);
+    config.connection.type = "postgres";
     config.connection.url = DB_URL;
+    config.connection.schema = "public";
     kernel = new GraneKernel(config);
     await serveHttp(kernel, PORT);
 

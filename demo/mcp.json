@@ -2,7 +2,7 @@
   "mcpServers": {
     "grane": {
       "command": "npx",
-      "args": ["-y", "grane-analytics", "-p", "demo/analytics", "serve", "--stdio"]
+      "args": ["-y", "grane-analytics@0.6.5", "-p", "demo/analytics", "serve", "--stdio"]
     }
   }
 }

@@ -7,7 +7,8 @@ starting point.
 If you have not used Grane yet, run the bundled shop first:
 
 ```bash
-npx grane-analytics demo
+npx grane-analytics demo   # requires grane-analytics@0.6.5+ on npm
+# from a clone: npm install && npm run demo
 ```
 
 That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).

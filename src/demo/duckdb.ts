@@ -55,7 +55,7 @@ export async function loadDuckDbModule(): Promise<DuckDbMod> {
     throw new Error(
       "The demo warehouse uses DuckDB and needs @duckdb/node-api. Install it, then re-run:\n" +
         "  npm install @duckdb/node-api\n" +
-        "  npx grane-analytics demo",
+        "  npx grane-analytics demo   # grane-analytics@0.6.5+",
     );
   }
 

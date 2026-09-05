@@ -16,7 +16,7 @@ import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
 import { recordAudit, refusalFromError } from "./audit.js";
 import type { SemanticAuditEvent } from "./audit.js";
 
-export const GRANE_VERSION = "0.6.4";
+export const GRANE_VERSION = "0.6.5";
 
 export interface ServerInfo {
   name: "grane";

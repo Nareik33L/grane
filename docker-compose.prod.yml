@@ -12,7 +12,7 @@
 services:
   grane:
     build: .
-    image: ghcr.io/nareik33l/grane:0.6.4
+    image: ghcr.io/nareik33l/grane:0.6.5
     container_name: grane
     environment:
       DATABASE_URL: ${DATABASE_URL}

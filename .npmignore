@@ -2,4 +2,6 @@
 .grane/
 **/.grane/
 *.duckdb
+**/*.duckdb
 *.duckdb.wal
+**/*.duckdb.wal

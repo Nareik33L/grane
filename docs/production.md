@@ -12,7 +12,7 @@ Use HTTP when an agent in another process or network needs MCP.
 Pushes of `v*` tags publish to GitHub Container Registry:
 
 ```text
-ghcr.io/nareik33l/grane:0.6.4
+ghcr.io/nareik33l/grane:0.6.5
 ghcr.io/nareik33l/grane:latest
 ```
 
@@ -38,7 +38,7 @@ docker run --rm \
   -e GRANE_AUDIT_PATH=/var/log/grane/audit.jsonl \
   -v /path/to/analytics:/project:ro \
   -v grane-audit:/var/log/grane \
-  ghcr.io/nareik33l/grane:0.6.4
+  ghcr.io/nareik33l/grane:0.6.5
 ```
 
 Or from this repo, against **your** warehouse (not the demo shop):

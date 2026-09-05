@@ -30,7 +30,7 @@ export function demoMarkdownPath(root = packageRoot()): string {
   return join(demoRoot(root), "README.md");
 }
 
-/** YAML project used for both DuckDB and Postgres; connection is overridden in code. */
+/** YAML project for the default DuckDB demo. `--postgres` overrides connection in-process. */
 export function bundledDuckdbProject(root = packageRoot()): string {
   return demoAnalyticsDir(root);
 }

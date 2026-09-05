@@ -5,9 +5,9 @@ project:
     starts: monday
 
 connection:
-  type: postgres
-  url: ${DATABASE_URL:-postgres://grane_readonly:grane_readonly@localhost:5433/grane_demo}
-  schema: public
+  type: duckdb
+  path: warehouse.duckdb
+  schema: main
 
 limits:
   max_rows: 10000

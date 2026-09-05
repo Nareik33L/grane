@@ -4,10 +4,13 @@ A small SaaS/e-commerce warehouse with a planted last-month revenue drop.
 
 ```bash
 # from the repo root
-npx grane-analytics demo
-# or: npm run demo
-# Postgres: docker compose up
+npm run demo
+# after grane-analytics@0.6.5 is on npm: npx grane-analytics demo
+# optional Postgres: docker compose up -d postgres --wait && npm run demo:postgres
 ```
+
+The default run builds `analytics/warehouse.duckdb` and points `analytics/grane.yml` at it.
+Later `query` / `validate` / MCP commands use that DuckDB file. Docker is not required.
 
 The 40-second walkthrough is [`why-revenue-fell.gif`](why-revenue-fell.gif) (still: [`why-revenue-fell.svg`](why-revenue-fell.svg)).
 
