@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loadConfig } from "../../config/load.js";
+import { publicErrorMessage } from "../../errors.js";
 import { GraneKernel, GRANE_VERSION } from "../../kernel.js";
 import type { DoctorCheck, DoctorResult, ResolvedLaunch } from "./types.js";
 import { childEnv, stdioArgs } from "./launch.js";
@@ -43,7 +44,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       name: "project",
       ok: false,
       level: "error",
-      detail: (err as Error).message,
+      detail: publicErrorMessage(err),
     });
     return { ok: false, projectDir, checks };
   }
@@ -74,7 +75,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       name: "model",
       ok: false,
       level: "error",
-      detail: (err as Error).message,
+      detail: publicErrorMessage(err),
     });
   }
 
@@ -100,9 +101,9 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
     } catch (err) {
       checks.push({
         name: "schema",
-        ok: true,
-        level: "warn",
-        detail: `database unreachable: ${(err as Error).message}`,
+        ok: false,
+        level: "error",
+        detail: `warehouse unreachable: ${publicErrorMessage(err)}`,
       });
     }
   }
@@ -136,7 +137,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
         name: "mcp",
         ok: false,
         level: "error",
-        detail: (err as Error).message,
+        detail: publicErrorMessage(err),
       });
     }
   }
@@ -159,7 +160,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
         name: "http",
         ok: false,
         level: "error",
-        detail: (err as Error).message,
+        detail: publicErrorMessage(err),
       });
     }
   }
@@ -199,7 +200,7 @@ export async function probeHttp(mcpUrl: string): Promise<{ ok: boolean; detail: 
       healthNote = `health ${healthUrl} HTTP ${res.status}`;
     }
   } catch (err) {
-    healthNote = `health unreachable (${(err as Error).message})`;
+    healthNote = `health unreachable (${publicErrorMessage(err)})`;
   }
 
   const client = new Client({ name: "grane-mcp-doctor", version: GRANE_VERSION });
@@ -214,7 +215,7 @@ export async function probeHttp(mcpUrl: string): Promise<{ ok: boolean; detail: 
     }
     return { ok: true, detail: `${healthNote}; tools: ${tools.join(", ")}` };
   } catch (err) {
-    return { ok: false, detail: `${healthNote}; MCP: ${(err as Error).message}` };
+    return { ok: false, detail: `${healthNote}; MCP: ${publicErrorMessage(err)}` };
   } finally {
     await client.close().catch(() => undefined);
   }

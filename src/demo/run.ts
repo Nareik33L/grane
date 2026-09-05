@@ -193,23 +193,32 @@ function printRefusal(io: DemoIo, label: string, status: string | null): void {
   io.log("");
 }
 
-function printNextSteps(io: DemoIo, projectDir: string, demoMarkdown: string, serving: boolean): void {
-  io.log("────────────────────────────────────────");
-  io.log("Ask your agent this question:");
-  io.log("");
-  io.log(`  ${DEMO_QUESTION}`);
-  io.log("");
-  io.log("The agent should catalog governed metrics, find Germany, then investigate");
-  io.log("permitted raw payments.failure_code (trust: mixed). It must not write SQL.");
-  io.log("");
+export function formatDemoNextSteps(projectDir: string, demoMarkdown: string, serving: boolean): string[] {
+  const lines = [
+    "────────────────────────────────────────",
+    "Ask your agent this question:",
+    "",
+    `  ${DEMO_QUESTION}`,
+    "",
+    "The agent should catalog governed metrics, find Germany, then investigate",
+    "permitted raw payments.failure_code (trust: mixed). It must not write SQL.",
+    "",
+  ];
   if (!serving) {
-    io.log("Connect a local agent (stdio):");
-    io.log(`  grane -p ${projectDir} mcp connect cursor`);
-    io.log(`  grane -p ${projectDir} mcp connect claude`);
-    io.log("");
-    io.log("  or: docker compose up");
-    io.log("");
+    lines.push(
+      "Connect a local agent to this DuckDB project (Docker is not required):",
+      `  grane -p ${projectDir} mcp connect cursor`,
+      `  grane -p ${projectDir} mcp connect claude`,
+      "",
+      "Optional next step — a separate Postgres shop, not used by the DuckDB demo:",
+      "  docker compose up",
+      "",
+    );
   }
-  io.log(`What you should see: ${demoMarkdown}`);
-  io.log(`Questions:           ${join(demoRoot(), "questions.md")}`);
+  lines.push(`What you should see: ${demoMarkdown}`, `Questions:           ${join(demoRoot(), "questions.md")}`);
+  return lines;
+}
+
+function printNextSteps(io: DemoIo, projectDir: string, demoMarkdown: string, serving: boolean): void {
+  for (const line of formatDemoNextSteps(projectDir, demoMarkdown, serving)) io.log(line);
 }

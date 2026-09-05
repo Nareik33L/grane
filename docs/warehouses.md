@@ -99,13 +99,22 @@ npm install @duckdb/node-api
 Relative file paths are resolved from the directory that contains `grane.yml`.
 
 The canonical shop is `demo/`. `npx grane-analytics demo` materialises
-`demo/seed/duckdb.sql` into a local DuckDB file (Node, not Python):
+`demo/seed/duckdb.sql` into a local DuckDB file (Node, not Python) and
+writes `connection.type: duckdb` into that project:
 
 ```bash
 npx grane-analytics demo   # requires grane-analytics@0.6.5+
 # from a clone: npm install && npm run demo
-# or: python3 example/scripts/build_duckdb.py   # also writes Parquet
 npx grane-analytics -p demo/analytics query revenue -d country --last last_month
+```
+
+The Python helper builds the same seed into `example/analytics-duckdb/`
+(also Parquet / MotherDuck / Databricks export). Query that project, not
+`demo/analytics`:
+
+```bash
+python3 example/scripts/build_duckdb.py
+npx grane-analytics -p example/analytics-duckdb query revenue -d country --last last_month
 ```
 
 ### MotherDuck (hosted DuckDB)

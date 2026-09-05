@@ -16,6 +16,16 @@ deterministic compiler
 
 Point Grane at the folder. You should not have to redefine Revenue.
 
+Grane consumes provider semantics. It does not replace the semantic layer.
+
+| Path | Maturity |
+| --- | --- |
+| **dbt / MetricFlow** | Strongest, currently best-tested import path. Coverage and skip reasons are documented below and in [metricflow-support.md](metricflow-support.md). |
+| **Cube, LookML, Ossie, Malloy, fragment** | Supported importers. Coverage is thinner; unsupported constructs are skipped with a reason, never guessed. |
+| **Native YAML** | Always available as a peer source for definitions the upstream project does not govern. |
+
+This table describes import coverage, not a certification of every upstream feature.
+
 ## Already have dbt / MetricFlow?
 
 Keep your definitions where they are. Five steps:

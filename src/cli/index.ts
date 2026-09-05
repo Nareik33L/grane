@@ -8,8 +8,6 @@ import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
 import { registerMcpCommands } from "./mcp.js";
-import { GraneError } from "../errors.js";
-import type { SemanticQueryInput } from "../query/model.js";
 import { trustHeadline } from "../query/trust.js";
 import { listExplorableColumns } from "../explore/raw.js";
 import { explorationPolicy } from "../explore/policy.js";
@@ -18,7 +16,9 @@ import { usageRanked } from "../explore/usage.js";
 import { graneYml, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
-import { parseFilterSpec } from "./args.js";
+import { buildCliQuery } from "./args.js";
+import { fail } from "./fail.js";
+import { assertInitProviderPath } from "./init-provider.js";
 
 const program = new Command();
 
@@ -40,18 +40,6 @@ function loadKernel(): GraneKernel {
   });
 }
 
-function fail(err: unknown): never {
-  if (err instanceof GraneError) {
-    console.error(`ERROR (${err.refusal.status}): ${err.refusal.message}`);
-    if (err.refusal.similar?.length) {
-      console.error(`Similar: ${err.refusal.similar.join(", ")}`);
-    }
-  } else {
-    console.error(`ERROR: ${(err as Error).message}`);
-  }
-  process.exit(1);
-}
-
 // ---------------------------------------------------------------- init
 program
   .command("init")
@@ -63,6 +51,11 @@ program
   )
   .action((options: { dir: string; provider?: string }) => {
     const dir = resolve(options.dir);
+    try {
+      if (options.provider) assertInitProviderPath(dir, options.provider);
+    } catch (err) {
+      fail(err);
+    }
     mkdirSync(dir, { recursive: true });
     const files: [string, string][] = [
       ["grane.yml", graneYml(options.provider)],
@@ -256,6 +249,7 @@ program
   .option("--from <date>", "start date (YYYY-MM-DD)")
   .option("--to <date>", "end date (YYYY-MM-DD), inclusive")
   .option("--grain <grain>", "time grain: day|week|month|quarter|year")
+  .option("--time-dimension <name>", "Query Model time.dimension (dimension name or table.column)")
   .option("--limit <n>", "row limit")
   .option("--sql", "print the compiled SQL without executing")
   .option("--json", "print the full JSON result including provenance")
@@ -271,6 +265,7 @@ program
         from?: string;
         to?: string;
         grain?: string;
+        timeDimension?: string;
         limit?: string;
         sql?: boolean;
         json?: boolean;
@@ -278,40 +273,7 @@ program
     ) => {
       const kernel = loadKernel();
       try {
-        const query: SemanticQueryInput = { metrics: metrics ?? [] };
-        if (options.dimension) query.dimensions = options.dimension;
-        if (options.rawDimension) query.raw_dimensions = options.rawDimension;
-        if (options.rawMetric) {
-          query.raw_metrics = options.rawMetric.map(parseRawMetricSpec);
-        }
-        if (options.filter) {
-          query.filters = options.filter.map(parseFilterSpec);
-        }
-        if (options.last || options.from || options.to) {
-          if (options.last) {
-            if (options.from || options.to) {
-              throw new Error("Provide either --last, or both --from and --to.");
-            }
-            query.time = {
-              period: options.last,
-              ...(options.grain ? { grain: options.grain as never } : {}),
-            };
-          } else {
-            if (!options.from || !options.to) {
-              throw new Error("Provide either --last, or both --from and --to.");
-            }
-            query.time = {
-              from: options.from,
-              to: options.to,
-              ...(options.grain ? { grain: options.grain as never } : {}),
-            };
-          }
-        } else if (options.grain) {
-          throw new Error("--grain requires --last or --from/--to.");
-        } else if (options.grain) {
-          throw new Error("--grain requires a time range (--last or --from/--to).");
-        }
-        if (options.limit) query.limit = Number(options.limit);
+        const query = buildCliQuery(metrics, options);
 
         if (options.sql) {
           const explained = await kernel.explain(query);
@@ -334,11 +296,11 @@ program
         if (result.warning) console.error(`warning: ${result.warning}`);
         printTable(result.columns, result.rows);
         if (result.completeness.status === "truncated") {
-          console.error(
+          console.log(
             `Showing ${result.provenance.row_count} rows; result truncated by execution limit ${result.completeness.limit}.`,
           );
         }
-        console.error(
+        console.log(
           `\n${result.provenance.row_count} rows | trust: ${result.trust} | completeness: ${result.completeness.status} | query ${result.provenance.query_id} | ${result.provenance.duration_ms}ms`,
         );
       } catch (err) {
@@ -443,16 +405,6 @@ program
       console.log(`${row.column.padEnd(width)}  ${String(row.count).padStart(4)}  ${row.last_used}`);
     }
   });
-
-function parseRawMetricSpec(spec: string): { field: string; type: "sum" | "count" | "count_distinct" | "avg" | "min" | "max" } {
-  const types = ["count_distinct", "count", "sum", "avg", "min", "max"] as const;
-  for (const type of types) {
-    if (spec.startsWith(`${type}:`)) {
-      return { field: spec.slice(type.length + 1), type };
-    }
-  }
-  return { field: spec, type: "count" };
-}
 
 function printTable(columns: string[], rows: Record<string, unknown>[]): void {
   if (rows.length === 0) {

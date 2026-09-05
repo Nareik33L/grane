@@ -3,7 +3,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../../config/schema
 import { configError } from "../../errors.js";
 import { postgresDialect, redshiftDialect, type WarehouseType } from "../dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../types.js";
-import { unsafeQuery } from "../../errors.js";
+import { unsafeQuery, warehouseUnreachable, wrapIfUnreachable } from "../../errors.js";
 
 const { Pool } = pg;
 
@@ -56,7 +56,12 @@ export class PostgresConnector implements WarehouseConnector {
     if (WRITE_KEYWORDS.test(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
-    const client = await this.pool.connect();
+    let client: pg.PoolClient;
+    try {
+      client = await this.pool.connect();
+    } catch (err) {
+      throw warehouseUnreachable("PostgreSQL", err);
+    }
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
       await client.query(`SET LOCAL statement_timeout = ${Math.floor(limits.timeout_ms)}`);
@@ -73,14 +78,18 @@ export class PostgresConnector implements WarehouseConnector {
       } catch {
         // ignore
       }
-      throw err;
+      wrapIfUnreachable("PostgreSQL", err);
     } finally {
       client.release();
     }
   }
 
   async introspect(): Promise<DatabaseSchema> {
-    return introspectPostgres(this.pool, this.schemaName);
+    try {
+      return await introspectPostgres(this.pool, this.schemaName);
+    } catch (err) {
+      wrapIfUnreachable("PostgreSQL", err);
+    }
   }
 
   async close(): Promise<void> {

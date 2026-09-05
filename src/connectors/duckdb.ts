@@ -2,7 +2,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { duckdbDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import { loadOptionalModule } from "./types.js";
-import { unsafeQuery } from "../errors.js";
+import { unsafeQuery, warehouseUnreachable } from "../errors.js";
 
 type DuckDbReader = {
   columnNames?: () => string[];
@@ -58,14 +58,18 @@ export class DuckDbConnector implements WarehouseConnector {
     // the host TZ. Postgres already does SET LOCAL TIME ZONE 'UTC'.
     const withTz = { ...opts, TimeZone: "UTC" };
     try {
-      this.instance = await mod.DuckDBInstance.create(this.path, withTz);
-    } catch {
-      this.instance = await mod.DuckDBInstance.create(
-        this.path,
-        Object.keys(opts).length > 0 ? opts : undefined,
-      );
+      try {
+        this.instance = await mod.DuckDBInstance.create(this.path, withTz);
+      } catch {
+        this.instance = await mod.DuckDBInstance.create(
+          this.path,
+          Object.keys(opts).length > 0 ? opts : undefined,
+        );
+      }
+      this.conn = await this.instance.connect();
+    } catch (err) {
+      throw warehouseUnreachable("DuckDB", err);
     }
-    this.conn = await this.instance.connect();
     try {
       // Session setting; may be rejected on some read-only attachments.
       await this.conn.runAndReadAll("SET TimeZone = 'UTC'");

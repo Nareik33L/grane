@@ -18,6 +18,8 @@ Agent → MCP → Grane → Warehouse
 - No LLM inside Grane
 - Fully self-hosted
 
+Grane is currently an early public alpha. APIs and features may still evolve.
+
 ![Why did revenue fall last month?](demo/why-revenue-fell.gif)
 
 ## Try it
@@ -144,7 +146,13 @@ Methodology: [`tests/benchmark/README.md`](tests/benchmark/README.md).
 
 ## Warehouses and semantic providers
 
-Postgres is bundled. Other engines are optional installs. Already have dbt/MetricFlow, Cube, LookML, Ossie, or Malloy? `grane init --provider ../your_project` imports those definitions instead of copying YAML; what Grane cannot compile faithfully is skipped with a reason, never guessed. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
+Grane consumes provider semantics. It does not replace the semantic layer.
+
+Runtime-tested warehouses today are **DuckDB** and **PostgreSQL**. Other implemented dialects compile and are inspected; that is not runtime certification.
+
+The strongest, currently best-tested semantic import path is **dbt / MetricFlow**. Cube, LookML, Ossie, and Malloy are supported importers with thinner coverage. Unsupported constructs are skipped with a reason, never guessed.
+
+Postgres is bundled. Other engines are optional installs. Point Grane at an existing project with `grane init --provider ../your_project` instead of copying YAML. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
 
 Production HTTP (Docker, TLS, agent tokens, audit log): [docs/production.md](docs/production.md).
 

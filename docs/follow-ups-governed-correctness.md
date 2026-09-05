@@ -1,4 +1,9 @@
-# Follow-ups from the post-GAUNTLET governed-correctness review
+# Governed-correctness follow-ups (contributor record)
+
+Historical record of governed-correctness reviews: what was refused,
+what was fixed, and which remainders are intentional support boundaries.
+This is contributor context, not a product roadmap or a certification claim.
+Do not reopen a listed item as a new campaign without a new counterexample.
 
 Recorded during the DATE / pre-aggregation / untimed-metric fix. Item 3
 (`contains` LIKE wildcards) and item 1 (`project.week.starts`) were later

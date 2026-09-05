@@ -8,11 +8,15 @@ not be accepted.
 
 ```bash
 npm install
+npm run build
+npx tsc --noEmit
 npm run demo
 npm run test:unit
 docker compose up -d postgres --wait
 npm test
 ```
+
+`npm run build` is the TypeScript compile CI runs (`tsc`). `npx tsc --noEmit` typechecks without writing `dist/`.
 
 Warehouse SDKs (MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Databricks)
 are not installed with the repo. Add the driver you are working on, e.g.
