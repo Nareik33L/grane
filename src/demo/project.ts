@@ -1,6 +1,6 @@
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   bundledDuckdbProject,
   bundledPostgresProject,
@@ -14,6 +14,7 @@ export interface ResolveDemoProjectOptions {
   dir?: string;
   postgres?: boolean;
   root?: string;
+  cwd?: string;
 }
 
 export interface ResolvedDemoProject {
@@ -55,11 +56,28 @@ export function resolveDemoProject(options: ResolveDemoProjectOptions = {}): Res
     };
   }
 
-  if (isWritableDir(bundled) || isWritableDir(join(bundled, ".."))) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  // Clone / repo root: keep the bundled project so ` -p demo/analytics` works.
+  if (cwd === resolve(root) && (isWritableDir(bundled) || isWritableDir(join(bundled, "..")))) {
     return {
       projectDir: bundled,
       warehousePath: join(bundled, "warehouse.duckdb"),
       copied: false,
+      postgres: false,
+      demoMarkdown,
+    };
+  }
+
+  // npx / global install / arbitrary CWD: materialise ./demo/analytics here
+  // so the documented follow-up path does not point into the package cache.
+  const localDest = join(cwd, "demo", "analytics");
+  if (isWritableDir(cwd) || isWritableDir(localDest)) {
+    mkdirSync(localDest, { recursive: true });
+    const copied = syncDemoYaml(bundled, localDest);
+    return {
+      projectDir: localDest,
+      warehousePath: join(localDest, "warehouse.duckdb"),
+      copied,
       postgres: false,
       demoMarkdown,
     };
@@ -86,4 +104,36 @@ export function syncDemoYaml(from: string, to: string): boolean {
     copied = true;
   }
   return copied;
+}
+
+/** Warehouse path stored in grane.yml: relative when the file lives in the project. */
+export function demoWarehouseConfigPath(projectDir: string, warehousePath: string): string {
+  const absProject = resolve(projectDir);
+  const absWarehouse = resolve(warehousePath);
+  if (dirname(absWarehouse) === absProject) {
+    return absWarehouse.slice(absProject.length + 1).replaceAll("\\", "/") || "warehouse.duckdb";
+  }
+  if (!isAbsolute(warehousePath)) return warehousePath.replaceAll("\\", "/");
+  const rel = relative(absProject, absWarehouse).replaceAll("\\", "/");
+  if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
+  return absWarehouse;
+}
+
+/**
+ * Write the DuckDB warehouse the demo just built into grane.yml so later
+ * `grane query` / `validate` / MCP launches do not read the Postgres template.
+ */
+export function persistDuckdbConnection(projectDir: string, warehousePath: string): void {
+  const file = join(projectDir, "grane.yml");
+  if (!existsSync(file)) {
+    throw new Error(`Cannot persist the demo DuckDB connection: ${file} was not found.`);
+  }
+  const stored = demoWarehouseConfigPath(projectDir, warehousePath);
+  const block = ["connection:", "  type: duckdb", `  path: ${stored}`, "  schema: main", ""].join("\n");
+  const raw = readFileSync(file, "utf8");
+  const next = raw.replace(/connection:\n(?:[ \t]+.+\n)*/, block);
+  if (next === raw && !/type:\s*duckdb/.test(raw)) {
+    throw new Error(`Cannot persist the demo DuckDB connection: ${file} has no connection: block.`);
+  }
+  if (next !== raw) writeFileSync(file, next);
 }

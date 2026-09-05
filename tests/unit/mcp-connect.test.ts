@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,20 @@ describe("launch resolution", () => {
     expect(resolved.source).toBe("dist");
     expect(resolved.command).toBe("/usr/bin/node");
     expect(resolved.prefixArgs[0]).toBe(join(dir, "dist", "cli", "index.js"));
+  });
+
+  it("follows an npm bin symlink to the packaged CLI", () => {
+    const dir = tempDir();
+    const script = join(dir, "dist", "cli", "index.js");
+    const bin = join(dir, "node_modules", ".bin", "grane-analytics");
+    mkdirSync(dirname(script), { recursive: true });
+    mkdirSync(dirname(bin), { recursive: true });
+    writeFileSync(script, "");
+    symlinkSync(script, bin);
+    const resolved = resolveGraneLaunch({ argv: ["node", bin], execPath: "/usr/bin/node" });
+    expect(resolved.source).toBe("argv");
+    expect(resolved.command).toBe("/usr/bin/node");
+    expect(resolved.prefixArgs).toEqual([script]);
   });
 
   it("uses node + argv script for a built CLI", () => {

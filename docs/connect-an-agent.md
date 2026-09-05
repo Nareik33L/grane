@@ -43,6 +43,9 @@ npx grane-analytics demo
 npx grane-analytics -p demo/analytics mcp connect cursor
 ```
 
+`npx grane-analytics demo` requires `grane-analytics@0.6.5` or later on npm.
+From a clone of this repository, use `npm install && npm run demo` instead.
+
 Ask: *Why did revenue fall last month?* Script: [demo/README.md](../demo/README.md).
 ChatGPT (HTTPS only) is not this path.
 

@@ -114,8 +114,11 @@ Queries, refusals, and HTTP authentication denials are appended to
 
 ```bash
 npx grane-analytics demo
-grane -p demo/analytics mcp connect cursor
+npx grane-analytics -p demo/analytics mcp connect cursor
 ```
+
+Requires `grane-analytics@0.6.5+`. From a clone: `npm install && npm run demo`, then
+`npx tsx src/cli/index.ts -p demo/analytics mcp connect cursor` (or `node dist/cli/index.js` after `npm run build`).
 
 Ask: *"Why did revenue fall last month?"* See [demo/README.md](../demo/README.md).
 

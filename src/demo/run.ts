@@ -12,7 +12,7 @@ import {
 import { serveHttp } from "../mcp/transport.js";
 import { buildDemoWarehouse } from "./warehouse.js";
 import { demoRoot } from "./paths.js";
-import { resolveDemoProject, type ResolveDemoProjectOptions } from "./project.js";
+import { persistDuckdbConnection, resolveDemoProject, type ResolveDemoProjectOptions } from "./project.js";
 import { runInvestigation, type Investigation } from "./investigate.js";
 import { join } from "node:path";
 
@@ -57,6 +57,7 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
   if (!resolved.postgres && resolved.warehousePath) {
     io.error("Building the local DuckDB demo warehouse from demo/seed/duckdb.sql...");
     await buildDemoWarehouse(resolved.warehousePath);
+    persistDuckdbConnection(resolved.projectDir, resolved.warehousePath);
     io.error(`Wrote ${resolved.warehousePath}`);
     io.error("");
   } else if (resolved.postgres) {
@@ -71,12 +72,6 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
       type: "postgres",
       url: DEMO_POSTGRES,
       schema: "public",
-    };
-  } else if (resolved.warehousePath) {
-    loaded.config.connection = {
-      type: "duckdb",
-      path: resolved.warehousePath,
-      schema: "main",
     };
   }
 

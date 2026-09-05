@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.6.5
+
+- Public-alpha front door: the package exposes both `grane` and
+  `grane-analytics` binaries so `npx grane-analytics demo` resolves after
+  this version is published (0.6.4 on npm has neither `demo` nor that
+  alias). The default DuckDB demo writes `connection.type: duckdb` and
+  `path: warehouse.duckdb` into the project it just built, so later
+  `query` / `validate` / MCP commands use that warehouse without Postgres
+  or Docker. `--postgres` is unchanged. `mcp connect` follows the npm bin
+  symlink so client configs launch `node …/dist/cli/index.js` instead of
+  assuming `grane` is on PATH. See `tests/unit/demo.test.ts`.
+
 - Unique multi-hop pre-aggregation reach/cardinality CTEs walk every hop in
   the selected path, including intermediate `one_to_many` hops that are not
   uniqueness-guarded. Previously those hops were skipped, so a later
@@ -267,8 +279,6 @@
   filters, blocked `customers.email` on every access path, grain traps on
   tickets / checkout events / payment failure codes).
 - README opening shortened around the demo.
-
-## 0.6.5
 
 - Deterministic kernel capabilities used by the Gauntlet:
   - Semi-additive metrics (`additive: semi`) take last-as-of per entity key

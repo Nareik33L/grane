@@ -1,0 +1,5 @@
+.grane
+.grane/**
+warehouse.duckdb
+*.duckdb
+*.duckdb.wal

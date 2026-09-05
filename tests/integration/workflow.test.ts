@@ -36,7 +36,9 @@ const dbUp = await databaseUp();
 
 function loadKernel(): GraneKernel {
   const { config } = loadConfig(exampleDir);
+  config.connection.type = "postgres";
   config.connection.url = DB_URL;
+  config.connection.schema = "public";
   // Pin UTC so expected values computed here match exactly.
   config.project.timezone = "UTC";
   return new GraneKernel(config);

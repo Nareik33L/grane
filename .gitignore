@@ -8,3 +8,4 @@ dist/
 .grane/
 *.duckdb
 *.duckdb.wal
+*.tgz

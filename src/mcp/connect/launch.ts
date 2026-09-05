@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ResolvedLaunch } from "./types.js";
 
@@ -23,17 +23,23 @@ export function resolveGraneLaunch(opts: {
   }
 
   const resolved = resolve(script);
-  const distFromSrc = distCliFromSource(resolved);
+  let real = resolved;
+  try {
+    if (existsSync(resolved)) real = realpathSync(resolved);
+  } catch {
+    real = resolved;
+  }
+  const distFromSrc = distCliFromSource(real) ?? distCliFromSource(resolved);
   if (distFromSrc && existsSync(distFromSrc)) {
     return { command: execPath, prefixArgs: [distFromSrc], source: "dist" };
   }
 
-  if (existsSync(resolved) && isJsEntry(resolved)) {
-    return { command: execPath, prefixArgs: [resolved], source: "argv" };
+  if (existsSync(real) && isJsEntry(real)) {
+    return { command: execPath, prefixArgs: [real], source: "argv" };
   }
 
-  if (existsSync(resolved) && resolved.endsWith(".ts")) {
-    return { command: execPath, prefixArgs: [resolved], source: "argv" };
+  if (existsSync(real) && real.endsWith(".ts")) {
+    return { command: execPath, prefixArgs: [real], source: "argv" };
   }
 
   return { command: "grane", prefixArgs: [], source: "path" };

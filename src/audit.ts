@@ -6,7 +6,7 @@ import type { SemanticQueryInput, TrustLevel } from "./query/model.js";
 
 /**
  * Query / explain audit record. `query` stays required so existing JSONL
- * readers and the public TypeScript type keep the 0.6.4 contract.
+ * readers and the public TypeScript type keep the 0.6.5 contract.
  */
 export interface SemanticAuditEvent {
   ts: string;
