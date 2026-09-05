@@ -638,7 +638,8 @@ relationships:
     expect(sql.stdout).toMatch(/__grane_card/);
     const execDup = await run(["query", "revenue", "--dimension", "account", "--json"]);
     expect(execDup.code).not.toBe(0);
-    expect(execDup.stderr + execDup.stdout).toMatch(/ERROR \(unsafe_query\)/);
+    const refused = JSON.parse(execDup.stdout) as { ok: false; status: string };
+    expect(refused).toMatchObject({ ok: false, status: "unsafe_query" });
     const ok = await run(["query", "revenue", "--dimension", "account", "--filter", "account=Acme", "--json"]);
     expect(ok.code).toBe(0);
     const payload = JSON.parse(ok.stdout) as { rows: { revenue: number }[]; trust: string };
