@@ -6,7 +6,7 @@
 process.env.TZ = "UTC";
 
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../../src/config/load.js";
@@ -29,6 +29,27 @@ const duckdb = await (async () => {
 describe("demo warehouse config path", () => {
   it("stores a project-local warehouse as a relative path", () => {
     expect(demoWarehouseConfigPath("/tmp/shop", "/tmp/shop/warehouse.duckdb")).toBe("warehouse.duckdb");
+  });
+});
+
+describe("demo project destination", () => {
+  it("uses the bundled project when cwd is the package root", async () => {
+    const { resolveDemoProject } = await import("../../src/demo/project.js");
+    const { packageRoot, bundledDuckdbProject } = await import("../../src/demo/paths.js");
+    const root = packageRoot();
+    const resolved = resolveDemoProject({ root, cwd: root });
+    expect(resolved.projectDir).toBe(bundledDuckdbProject(root));
+    expect(resolved.copied).toBe(false);
+  });
+
+  it("copies into ./demo/analytics when cwd is not the package root", async () => {
+    const { resolveDemoProject } = await import("../../src/demo/project.js");
+    const cwd = mkdtempSync(join(tmpdir(), "grane-cwd-"));
+    const resolved = resolveDemoProject({ cwd });
+    expect(resolved.projectDir).toBe(join(cwd, "demo", "analytics"));
+    expect(resolved.copied).toBe(true);
+    expect(existsSync(join(resolved.projectDir, "grane.yml"))).toBe(true);
+    rmSync(cwd, { recursive: true, force: true });
   });
 });
 

@@ -14,6 +14,7 @@ export interface ResolveDemoProjectOptions {
   dir?: string;
   postgres?: boolean;
   root?: string;
+  cwd?: string;
 }
 
 export interface ResolvedDemoProject {
@@ -55,11 +56,28 @@ export function resolveDemoProject(options: ResolveDemoProjectOptions = {}): Res
     };
   }
 
-  if (isWritableDir(bundled) || isWritableDir(join(bundled, ".."))) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  // Clone / repo root: keep the bundled project so ` -p demo/analytics` works.
+  if (cwd === resolve(root) && (isWritableDir(bundled) || isWritableDir(join(bundled, "..")))) {
     return {
       projectDir: bundled,
       warehousePath: join(bundled, "warehouse.duckdb"),
       copied: false,
+      postgres: false,
+      demoMarkdown,
+    };
+  }
+
+  // npx / global install / arbitrary CWD: materialise ./demo/analytics here
+  // so the documented follow-up path does not point into the package cache.
+  const localDest = join(cwd, "demo", "analytics");
+  if (isWritableDir(cwd) || isWritableDir(localDest)) {
+    mkdirSync(localDest, { recursive: true });
+    const copied = syncDemoYaml(bundled, localDest);
+    return {
+      projectDir: localDest,
+      warehousePath: join(localDest, "warehouse.duckdb"),
+      copied,
       postgres: false,
       demoMarkdown,
     };
