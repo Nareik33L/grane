@@ -10,7 +10,9 @@
   alias). The default DuckDB demo writes `connection.type: duckdb` and
   `path: warehouse.duckdb` into the project it just built, so later
   `query` / `validate` / MCP commands use that warehouse without Postgres
-  or Docker. `--postgres` is unchanged. See `tests/unit/demo.test.ts`.
+  or Docker. `--postgres` is unchanged. `mcp connect` follows the npm bin
+  symlink so client configs launch `node …/dist/cli/index.js` instead of
+  assuming `grane` is on PATH. See `tests/unit/demo.test.ts`.
 
 - Unique multi-hop pre-aggregation reach/cardinality CTEs walk every hop in
   the selected path, including intermediate `one_to_many` hops that are not
