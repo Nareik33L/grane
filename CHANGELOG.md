@@ -8,6 +8,8 @@
   Cloud engines stay `self_certifiable`.
 - Gauntlet CI fails when any scenario scores `SECURITY CRITICAL` or
   `CRITICAL FAIL`. Ordinary `FAIL` stays report-only.
+- Certification map / README / docs label MySQL 8 only. MariaDB is not
+  CI-certified (`mysql:8.4` is the CI engine).
 
 ## 0.7.0
 
