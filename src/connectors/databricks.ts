@@ -3,6 +3,7 @@ import { configError } from "../errors.js";
 import { databricksDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
+import { executedRowsFromDatabricks } from "./result-meta.js";
 import { unsafeQuery } from "../errors.js";
 
 type DatabricksSession = {
@@ -11,6 +12,7 @@ type DatabricksSession = {
     opts?: Record<string, unknown>,
   ) => Promise<{
     fetchAll: () => Promise<Record<string, unknown>[]>;
+    getSchema?: () => Promise<unknown>;
     close: () => Promise<void>;
   }>;
   close: () => Promise<void>;
@@ -98,8 +100,22 @@ export class DatabricksConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    const rows = (await this.exec(sql, params, limits.timeout_ms)).slice(0, limits.max_rows);
-    return { columns: Object.keys(rows[0] ?? {}), rows };
+    if (isWriteSql(sql)) {
+      throw unsafeQuery("Refusing to execute a non-SELECT statement.");
+    }
+    const session = await this.getSession();
+    const operation = await session.executeStatement(sql, {
+      runAsync: true,
+      ordinalParameters: params.length > 0 ? params : undefined,
+      queryTimeout: timeoutSeconds(limits.timeout_ms),
+    });
+    try {
+      const rows = (await operation.fetchAll()) ?? [];
+      const schema = operation.getSchema ? await operation.getSchema() : null;
+      return executedRowsFromDatabricks(rows, schema, limits.max_rows);
+    } finally {
+      await operation.close();
+    }
   }
 
   async introspect(): Promise<DatabaseSchema> {

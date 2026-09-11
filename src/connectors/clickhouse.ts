@@ -3,6 +3,7 @@ import { configError } from "../errors.js";
 import { clickhouseDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
+import { executedRowsFromClickHouseJson } from "./result-meta.js";
 import { unsafeQuery } from "../errors.js";
 
 type ClickHouseMod = {
@@ -54,12 +55,12 @@ export class ClickHouseConnector implements WarehouseConnector {
     const result = await client.query({
       query: sql,
       query_params,
-      format: "JSONEachRow",
+      format: "JSON",
       abort_signal: AbortSignal.timeout(limits.timeout_ms),
       clickhouse_settings: { max_execution_time: timeoutSeconds(limits.timeout_ms) },
     });
-    const rows = (await result.json<Record<string, unknown>[]>()).slice(0, limits.max_rows);
-    return { columns: Object.keys(rows[0] ?? {}), rows };
+    const payload = await result.json<unknown>();
+    return executedRowsFromClickHouseJson(payload, limits.max_rows);
   }
 
   async introspect(): Promise<DatabaseSchema> {

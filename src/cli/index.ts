@@ -20,6 +20,13 @@ import { graneYml, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./temp
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
 import { parseFilterSpec } from "./args.js";
+import { formatProductionLint, lintProduction } from "./production-lint.js";
+import {
+  defaultUserTestTargets,
+  formatUserTestReport,
+  loadUserTestCases,
+  runUserTests,
+} from "./user-tests.js";
 
 const program = new Command();
 
@@ -200,7 +207,8 @@ program
   .command("validate")
   .description("Validate the semantic model (structure, references, join safety)")
   .option("--offline", "skip live database schema checks")
-  .action(async (options: { offline?: boolean }) => {
+  .option("--production", "also fail on production fail-open conditions")
+  .action(async (options: { offline?: boolean; production?: boolean }) => {
     const kernel = loadKernel();
     try {
       const schema = options.offline ? undefined : await kernel.introspectSchema();
@@ -236,6 +244,79 @@ program
         }
       }
       if (!options.offline) console.log(`schema checks: live`);
+      let productionOk = true;
+      if (options.production) {
+        const lint = lintProduction(kernel.config, kernel.projectDir);
+        console.log("");
+        console.log(formatProductionLint(lint));
+        productionOk = lint.ok;
+      }
+      if (!report.ok || !productionOk) process.exit(1);
+    } catch (err) {
+      fail(err);
+    } finally {
+      await kernel.close();
+    }
+  });
+
+// ---------------------------------------------------------------- doctor (production lint)
+program
+  .command("doctor")
+  .description("Fail-open production lint (auth, TLS, audit path, limits, experimental metrics)")
+  .option("--production", "accepted for the documented form; this command always runs the production lint")
+  .option("--json", "print JSON")
+  .action((options: { production?: boolean; json?: boolean }) => {
+    void options.production;
+    let loaded;
+    try {
+      loaded = loadConfig(projectDir());
+    } catch (err) {
+      fail(err);
+    }
+    const lint = lintProduction(loaded.config, loaded.projectDir);
+    if (options.json) {
+      console.log(JSON.stringify(lint, null, 2));
+    } else {
+      console.log("Grane production doctor\n");
+      console.log(formatProductionLint(lint));
+    }
+    if (!lint.ok) process.exit(1);
+  });
+
+// ---------------------------------------------------------------- test
+program
+  .command("test")
+  .description("Run user-authored YAML query scenarios (query + expected disposition/status/gold)")
+  .argument("[path]", "file or directory of YAML scenarios (default: grane-tests.yml / grane-tests/)")
+  .option("--json", "print JSON")
+  .action(async (path: string | undefined, options: { json?: boolean }) => {
+    let loaded;
+    try {
+      loaded = loadConfig(projectDir());
+    } catch (err) {
+      fail(err);
+    }
+    const targets = path ? [resolve(path)] : defaultUserTestTargets(loaded.projectDir);
+    if (targets.length === 0) {
+      console.error(`No test files. Add ${join(loaded.projectDir, "grane-tests.yml")} or pass a path.`);
+      process.exit(2);
+    }
+    const kernel = new GraneKernel(loaded.config, {
+      projectDir: loaded.projectDir,
+      providerWarnings: loaded.warnings,
+    });
+    try {
+      const cases = loadUserTestCases(targets);
+      if (cases.length === 0) {
+        console.error("No scenarios found in the given YAML.");
+        process.exit(2);
+      }
+      const report = await runUserTests(kernel, cases);
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(formatUserTestReport(report));
+      }
       if (!report.ok) process.exit(1);
     } catch (err) {
       fail(err);
@@ -485,6 +566,7 @@ function parseRawMetricSpec(spec: string): { field: string; type: "sum" | "count
 
 function printTable(columns: string[], rows: Record<string, unknown>[]): void {
   if (rows.length === 0) {
+    if (columns.length > 0) console.log(columns.join("  "));
     console.log("(no rows)");
     return;
   }

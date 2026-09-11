@@ -37,6 +37,17 @@
   `/* grane query_id=q_… agent=finance */` for warehouse-side attribution.
 - `auth.agents[].token_sha256` is an alternative to plaintext `token:` so
   `grane.yml` need not hold a secret.
+- ClickHouse and Databricks take column names from result metadata, so an
+  empty governed result still has its columns.
+- `grane validate --production` / `grane doctor --production` fail on
+  production fail-open conditions (no agents, agent `exploration: true`,
+  TLS verify off, audit path not writable, limits above ceilings,
+  `status: experimental` metrics).
+- `grane test` runs user-authored YAML scenarios (query + disposition /
+  status / gold) against the project warehouse.
+- Docker publish records provenance and an SBOM; `node:22-alpine` is pinned
+  by digest; Dependabot covers npm, Actions, and Docker; `SECURITY.md`
+  points at GitHub private vulnerability reporting.
 
 ## 0.6.5
 
