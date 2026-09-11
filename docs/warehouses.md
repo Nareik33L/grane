@@ -94,7 +94,7 @@ npm install @google-cloud/bigquery
 ```
 
 Application Default Credentials work if `credentials` is omitted.
-Empty results keep column names from the job schema. `jobTimeoutMs` is `limits.timeout_ms`.
+Empty results keep column names from the getQueryResults schema. `jobTimeoutMs` is `limits.timeout_ms`.
 
 ## DuckDB
 

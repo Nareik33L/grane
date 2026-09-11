@@ -57,8 +57,8 @@ export function executedRowsFromDatabricks(
 }
 
 /**
- * BigQuery job `metadata.schema` (or `getQueryResults` apiResponse.schema).
- * Column names survive `LIMIT 0` / empty `rows`.
+ * BigQuery TableSchema (`{ fields: [{ name }] }`). Column names survive
+ * `LIMIT 0` / empty `rows`.
  */
 export function columnsFromBigQuerySchema(schema: unknown): string[] {
   if (!schema || typeof schema !== "object") return [];
@@ -71,6 +71,29 @@ export function columnsFromBigQuerySchema(schema: unknown): string[] {
       return name == null ? "" : String(name);
     })
     .filter(Boolean);
+}
+
+/**
+ * Result schema for an executed query lives on the getQueryResults
+ * apiResponse (`schema.fields`). Job `metadata` has no `schema`;
+ * `statistics.query.schema` is dry-run only.
+ */
+export function schemaFromBigQueryResults(
+  apiResponse: unknown,
+  job?: { metadata?: unknown },
+): unknown {
+  if (apiResponse && typeof apiResponse === "object") {
+    const schema = (apiResponse as { schema?: unknown }).schema;
+    if (schema) return schema;
+  }
+  const metadata =
+    job?.metadata && typeof job.metadata === "object" ? (job.metadata as Record<string, unknown>) : undefined;
+  const stats = metadata?.statistics;
+  if (stats && typeof stats === "object") {
+    const query = (stats as { query?: { schema?: unknown } }).query;
+    if (query?.schema) return query.schema;
+  }
+  return undefined;
 }
 
 export function executedRowsFromBigQuery(

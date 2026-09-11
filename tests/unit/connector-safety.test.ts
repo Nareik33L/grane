@@ -26,6 +26,7 @@ import {
 import { clickhouseQuerySettings } from "../../src/connectors/clickhouse.js";
 import { snowflakeSessionSetupSql } from "../../src/connectors/snowflake.js";
 import { DATABRICKS_SESSION_UTC } from "../../src/connectors/databricks.js";
+import { BigQueryConnector } from "../../src/connectors/bigquery.js";
 import { duckdbDialect, isNumericType, isTemporalType, WAREHOUSE_TYPES, type WarehouseType } from "../../src/connectors/dialect.js";
 import {
   isWriteSql,
@@ -228,6 +229,33 @@ describe("executed SQL attribution comment", () => {
       GraneError,
     );
     expect(connector.lastSql).toBe("");
+  });
+});
+
+describe("BigQuery empty-result columns", () => {
+  it("reads column names from getQueryResults apiResponse, not job.metadata", async () => {
+    const job = {
+      metadata: {},
+      getQueryResults: async () =>
+        [
+          [],
+          null,
+          { schema: { fields: [{ name: "revenue" }, { name: "country" }] } },
+        ] as [Record<string, unknown>[], unknown, { schema: { fields: { name: string }[] } }],
+    };
+    const client = {
+      createQueryJob: async () => [job],
+      query: async () => {
+        throw new Error("query() must not be used when createQueryJob exists");
+      },
+    };
+    const connector = new BigQueryConnector(
+      { type: "bigquery", project: "acme", dataset: "analytics" },
+      client,
+    );
+    const result = await connector.query("SELECT 1 AS revenue, 'x' AS country LIMIT 0", [], LIMITS);
+    expect(result.rows).toEqual([]);
+    expect(result.columns).toEqual(["revenue", "country"]);
   });
 });
 

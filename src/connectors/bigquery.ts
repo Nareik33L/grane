@@ -3,31 +3,38 @@ import { configError } from "../errors.js";
 import { bigqueryDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import { loadOptionalModule, isWriteSql } from "./types.js";
-import { executedRowsFromBigQuery } from "./result-meta.js";
+import { executedRowsFromBigQuery, schemaFromBigQueryResults } from "./result-meta.js";
 import { unsafeQuery } from "../errors.js";
 
 type BqJob = {
-  getQueryResults: (opts?: Record<string, unknown>) => Promise<[Record<string, unknown>[]]>;
-  metadata?: { schema?: unknown };
+  getQueryResults: (
+    opts?: Record<string, unknown>,
+  ) => Promise<[Record<string, unknown>[], unknown?, { schema?: unknown }?]>;
+  metadata?: { statistics?: { query?: { schema?: unknown } } };
 };
 
-type BigQueryCtor = new (opts?: Record<string, unknown>) => {
-  createQueryJob: (opts: Record<string, unknown>) => Promise<[BqJob]>;
-  query: (opts: Record<string, unknown>) => Promise<[Record<string, unknown>[], { schema?: unknown }?]>;
+type BigQueryClient = {
+  createQueryJob?: (opts: Record<string, unknown>) => Promise<[BqJob]>;
+  query: (
+    opts: Record<string, unknown>,
+  ) => Promise<[Record<string, unknown>[], unknown?, { schema?: unknown }?]>;
 };
+
+type BigQueryCtor = new (opts?: Record<string, unknown>) => BigQueryClient;
 
 export class BigQueryConnector implements WarehouseConnector {
   readonly type = "bigquery" as const;
   readonly dialect = bigqueryDialect;
-  private client: InstanceType<BigQueryCtor> | null = null;
+  private client: BigQueryClient | null = null;
   private readonly connection: ConnectionConfig;
   private readonly dataset: string;
   private readonly project?: string;
 
-  constructor(connection: ConnectionConfig) {
+  constructor(connection: ConnectionConfig, client?: BigQueryClient | null) {
     this.connection = connection;
     this.dataset = connection.dataset || connection.schema || "";
     this.project = connection.project || connection.database;
+    this.client = client ?? null;
   }
 
   private namespace(): string {
@@ -63,11 +70,11 @@ export class BigQueryConnector implements WarehouseConnector {
     };
     if (typeof bq.createQueryJob === "function") {
       const [job] = await bq.createQueryJob(jobOpts);
-      const [rows] = await job.getQueryResults({ maxResults: limits.max_rows });
-      return executedRowsFromBigQuery(rows, job.metadata?.schema, limits.max_rows);
+      const [rows, , apiResponse] = await job.getQueryResults({ maxResults: limits.max_rows });
+      return executedRowsFromBigQuery(rows, schemaFromBigQueryResults(apiResponse, job), limits.max_rows);
     }
-    const [rows, meta] = await bq.query(jobOpts);
-    return executedRowsFromBigQuery(rows, meta?.schema, limits.max_rows);
+    const [rows, , apiResponse] = await bq.query(jobOpts);
+    return executedRowsFromBigQuery(rows, schemaFromBigQueryResults(apiResponse), limits.max_rows);
   }
 
   async introspect(): Promise<DatabaseSchema> {
