@@ -69,13 +69,31 @@ limits:
   # rate_limit_rps: 20        # optional process-wide HTTP token bucket
 
 # Append-only query audit (JSONL). Queries, refusals, HTTP auth denials.
-# No row payloads, no agent tokens.
+# No row payloads, no agent tokens. HTTP events also carry request_id,
+# client_ip, and user_agent. Compiled SQL sent to the warehouse starts with
+# a comment: query_id and agent, so warehouse history correlates without
+# this file.
 # Relative path is resolved from this project directory. Override in Docker
 # with GRANE_AUDIT_PATH=/var/log/grane/audit.jsonl
 audit:
   enabled: true
   path: \${GRANE_AUDIT_PATH:-.grane/audit.jsonl}
-  # stdout: true   # also emit JSON lines on stderr (container logs; MCP-safe)
+  # stdout: true        # also emit JSON lines on stderr (container logs; MCP-safe)
+  # fail_closed: true   # refuse the query if the audit append fails (regulated)
+
+# HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
+# Required for production HTTP. stdio (local Cursor/Claude) stays trusted.
+# Prefer token_sha256 so this file never holds a secret if committed:
+#   printf '%s' "$FINANCE_AGENT_TOKEN" | sha256sum
+# auth:
+#   agents:
+#     - id: finance
+#       token_sha256: \${FINANCE_AGENT_TOKEN_SHA256}
+#       # token: \${FINANCE_AGENT_TOKEN}   # plaintext alternative; set exactly one
+#       metrics: [revenue, orders]
+#       exploration: false
+#       exploration_exclude:
+#         - customers.*
 
 # Controlled exploration: agents may query warehouse columns that are not
 # governed metrics or dimensions. Results are marked trust: mixed or exploratory.
@@ -92,17 +110,6 @@ audit:
 #     - customers.ssn
 #     - "*.email"             # quote globs that start with *
 #     - "*_ssn"
-
-# HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
-# Required for production HTTP. stdio (local Cursor/Claude) stays trusted.
-# auth:
-#   agents:
-#     - id: finance
-#       token: \${FINANCE_AGENT_TOKEN}
-#       metrics: [revenue, orders]
-#       exploration: false
-#       exploration_exclude:
-#         - customers.*
 
 # Extra governed definitions you already maintain. Omit type to auto-detect.
 # providers:

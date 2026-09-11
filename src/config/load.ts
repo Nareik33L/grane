@@ -54,6 +54,9 @@ function applyAuditEnvOverrides(config: GraneConfig): void {
   if (/^(1|true|yes)$/i.test(process.env.GRANE_AUDIT_STDOUT ?? "")) {
     config.audit.stdout = true;
   }
+  if (/^(1|true|yes)$/i.test(process.env.GRANE_AUDIT_FAIL_CLOSED ?? "")) {
+    config.audit.fail_closed = true;
+  }
 }
 
 /** Interpolates ${VAR} and ${VAR:-default} in connection settings. */
@@ -165,9 +168,10 @@ export function loadConfig(projectDir: string): LoadedConfig {
   const auth = merged["auth"] as Record<string, unknown> | undefined;
   const agents = auth && Array.isArray(auth.agents) ? auth.agents : [];
   for (const agent of agents) {
-    if (agent && typeof agent === "object" && !Array.isArray(agent) && "token" in agent) {
+    if (agent && typeof agent === "object" && !Array.isArray(agent)) {
       const record = agent as Record<string, unknown>;
-      record.token = interpolateEnv(record.token);
+      if ("token" in record) record.token = interpolateEnv(record.token);
+      if ("token_sha256" in record) record.token_sha256 = interpolateEnv(record.token_sha256);
     }
   }
 

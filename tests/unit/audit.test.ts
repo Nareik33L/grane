@@ -9,6 +9,7 @@ import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneError } from "../../src/errors.js";
 import { loadConfig } from "../../src/config/load.js";
 import { recordAudit } from "../../src/audit.js";
+import { attributeCompiledSql } from "../../src/execute/executor.js";
 
 const secretRow = "SECRET_ROW_PAYLOAD";
 const dirs: string[] = [];
@@ -88,7 +89,14 @@ describe("query audit log", () => {
     });
     expect(event).not.toHaveProperty("reason");
     expect(event.query_id).toBe(result.provenance.query_id);
-    expect(String(event.sql)).toContain("SELECT");
+    expect(String(event.sql)).toBe(result.provenance.generated_sql);
+    expect(String(event.sql)).toMatch(
+      new RegExp(`^/\\* grane query_id=${result.provenance.query_id} agent=finance \\*/\\n`),
+    );
+    expect(result.provenance.generated_sql).toContain("SELECT");
+    expect(event).not.toHaveProperty("request_id");
+    expect(event).not.toHaveProperty("client_ip");
+    expect(event).not.toHaveProperty("user_agent");
     expect(event.row_count).toBe(1);
     expect(typeof event.duration_ms).toBe("number");
     expect(JSON.stringify(event)).not.toContain(secretRow);
@@ -189,6 +197,86 @@ describe("query audit log", () => {
     });
     expect(events[0]!).not.toHaveProperty("query");
   });
+
+  it("stamps HTTP correlation onto query events when the kernel is bound", async () => {
+    const dir = tempProject();
+    const kernel = kernelWithAudit(dir, {}, { id: "finance" }).bindHttp({
+      request_id: "req-from-proxy",
+      client_ip: "203.0.113.10",
+      user_agent: "Cursor/1.0",
+    });
+    await kernel.query({ metrics: ["revenue"] });
+    const event = readJsonl(join(dir, ".grane", "audit.jsonl"))[0]!;
+    expect(event.request_id).toBe("req-from-proxy");
+    expect(event.client_ip).toBe("203.0.113.10");
+    expect(event.user_agent).toBe("Cursor/1.0");
+    expect(event.kind).toBe("query");
+  });
+
+  it("stamps HTTP correlation onto refusals", async () => {
+    const dir = tempProject();
+    const kernel = kernelWithAudit(dir).bindHttp({
+      request_id: "r-1",
+      client_ip: "127.0.0.1",
+      user_agent: null,
+    });
+    try {
+      await kernel.query({ metrics: ["not_a_metric"] });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+    }
+    const event = readJsonl(join(dir, ".grane", "audit.jsonl"))[0]!;
+    expect(event.kind).toBe("refusal");
+    expect(event.request_id).toBe("r-1");
+    expect(event.client_ip).toBe("127.0.0.1");
+    expect(event.user_agent).toBeNull();
+  });
+
+  it("uses agent=- in the warehouse comment when no agent is bound", async () => {
+    const dir = tempProject();
+    const kernel = kernelWithAudit(dir);
+    const result = await kernel.query({ metrics: ["revenue"] });
+    expect(result.provenance.generated_sql).toMatch(
+      new RegExp(`^/\\* grane query_id=${result.provenance.query_id} agent=- \\*/\\n`),
+    );
+  });
+
+  it("does not prefix compile() SQL; only executed SQL is attributed", () => {
+    const dir = tempProject();
+    const kernel = kernelWithAudit(dir, {}, { id: "finance" });
+    const compiled = kernel.compile({ metrics: ["revenue"] }).compiled.sql;
+    expect(compiled).not.toMatch(/^\/\* grane /);
+    expect(compiled).toContain("SELECT");
+  });
+
+  it("sanitizes agent ids that would break out of the SQL comment", () => {
+    const sql = attributeCompiledSql("SELECT 1", "q_abc", "finance */ DROP TABLE t --");
+    expect(sql).toBe("/* grane query_id=q_abc agent=finance_DROP_TABLE_t */\nSELECT 1");
+  });
+
+  it("swallows a failed audit append by default", async () => {
+    const dir = tempProject();
+    writeFileSync(join(dir, "blocked"), "not a directory");
+    const kernel = kernelWithAudit(dir, { path: "blocked/audit.jsonl" });
+    await expect(kernel.query({ metrics: ["revenue"] })).resolves.toMatchObject({
+      provenance: { row_count: 1 },
+    });
+  });
+
+  it("refuses the query when fail_closed and the audit append fails", async () => {
+    const dir = tempProject();
+    writeFileSync(join(dir, "blocked"), "not a directory");
+    const kernel = kernelWithAudit(dir, { path: "blocked/audit.jsonl", fail_closed: true });
+    try {
+      await kernel.query({ metrics: ["revenue"] });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).refusal.status).toBe("config_error");
+      expect((err as GraneError).message).toMatch(/fail_closed/);
+    }
+  });
 });
 
 describe("audit config", () => {
@@ -206,6 +294,7 @@ audit:
     expect(loaded.config.audit.enabled).toBe(true);
     expect(loaded.config.audit.path).toBe(".grane/custom.jsonl");
     expect(loaded.config.audit.stdout).toBe(false);
+    expect(loaded.config.audit.fail_closed).toBe(false);
   });
 
   it("applies GRANE_AUDIT_PATH and GRANE_AUDIT_STDOUT from the environment", () => {
@@ -213,17 +302,22 @@ audit:
     writeFileSync(join(dir, "grane.yml"), "connection: { type: postgres }\n");
     const prevPath = process.env.GRANE_AUDIT_PATH;
     const prevStdout = process.env.GRANE_AUDIT_STDOUT;
+    const prevFail = process.env.GRANE_AUDIT_FAIL_CLOSED;
     process.env.GRANE_AUDIT_PATH = "/var/log/grane/audit.jsonl";
     process.env.GRANE_AUDIT_STDOUT = "1";
+    process.env.GRANE_AUDIT_FAIL_CLOSED = "1";
     try {
       const loaded = loadConfig(dir);
       expect(loaded.config.audit.path).toBe("/var/log/grane/audit.jsonl");
       expect(loaded.config.audit.stdout).toBe(true);
+      expect(loaded.config.audit.fail_closed).toBe(true);
     } finally {
       if (prevPath === undefined) delete process.env.GRANE_AUDIT_PATH;
       else process.env.GRANE_AUDIT_PATH = prevPath;
       if (prevStdout === undefined) delete process.env.GRANE_AUDIT_STDOUT;
       else process.env.GRANE_AUDIT_STDOUT = prevStdout;
+      if (prevFail === undefined) delete process.env.GRANE_AUDIT_FAIL_CLOSED;
+      else process.env.GRANE_AUDIT_FAIL_CLOSED = prevFail;
     }
   });
 });

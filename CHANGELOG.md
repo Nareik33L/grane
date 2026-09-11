@@ -29,6 +29,14 @@
   `exploration_exclude`. Empty allowlist include permits nothing. The gauntlet
   mutation-checks an opened allowlist the same way it checks an emptied
   denylist.
+- HTTP-originated audit events include `request_id` (honours `X-Request-Id`,
+  else generated), `client_ip`, and `user_agent`.
+- `audit.fail_closed: true` (or `GRANE_AUDIT_FAIL_CLOSED=1`) refuses the query
+  with `config_error` when the audit append fails. Default stays best-effort.
+- Every executed statement is prefixed with
+  `/* grane query_id=q_… agent=finance */` for warehouse-side attribution.
+- `auth.agents[].token_sha256` is an alternative to plaintext `token:` so
+  `grane.yml` need not hold a secret.
 
 ## 0.6.5
 

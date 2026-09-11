@@ -71,16 +71,20 @@ When `auth.agents` is non-empty, `/mcp` requires `Authorization: Bearer <token>`
 auth:
   agents:
     - id: finance
-      token: ${FINANCE_AGENT_TOKEN}
+      token_sha256: ${FINANCE_AGENT_TOKEN_SHA256}   # printf '%s' "$TOKEN" | sha256sum
       metrics: [revenue, orders]
       dimensions: [country]
       exploration: false
     - id: analyst
-      token: ${ANALYST_AGENT_TOKEN}
+      token: ${ANALYST_AGENT_TOKEN}                 # plaintext alternative; set exactly one
       # omit metrics/dimensions to grant the full governed catalog
       # exploration defaults to false; set true (and enable it globally) for raw columns
       # exploration_exclude: [customers.*]   # extra deny globs for this agent
 ```
+
+`token_sha256` is a 64-character hex digest of the bearer token. The config
+file then holds no secret even if it is committed. `token:` still works.
+Each agent sets exactly one of the two.
 
 stdio (Cursor, Claude Desktop launching `grane serve --stdio`) does not use
 these tokens — the agent is a local child process.
@@ -135,6 +139,8 @@ server {
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header Authorization $http_authorization;
+    proxy_set_header X-Request-Id $http_x_request_id;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_pass http://grane:8080;
   }
 }
@@ -168,6 +174,12 @@ Every `query` (and every `explain`/`query` refusal) appends one JSON line.
 `kind: "query"` and `kind: "refusal"` always include the semantic `query`
 object — that field is not optional on those lines.
 
+HTTP-originated events (query, refusal, and auth denials) also carry
+`request_id`, `client_ip`, and `user_agent`. `request_id` honours incoming
+`X-Request-Id` when present, otherwise Grane generates one and echoes it on
+the response. `client_ip` is the first `X-Forwarded-For` hop when the reverse
+proxy sets that header, otherwise the TCP peer.
+
 ```json
 {
   "ts": "2026-08-26T12:00:00.000Z",
@@ -177,11 +189,19 @@ object — that field is not optional on those lines.
   "trust": "governed",
   "query": { "metrics": ["revenue"], "dimensions": ["country"], "time": { "period": "last_month" } },
   "query_id": "q_1faea438cc34",
-  "sql": "SELECT ...",
+  "sql": "/* grane query_id=q_1faea438cc34 agent=finance */\nSELECT ...",
   "row_count": 12,
-  "duration_ms": 18
+  "duration_ms": 18,
+  "request_id": "req-from-proxy",
+  "client_ip": "203.0.113.10",
+  "user_agent": "Cursor/1.0"
 }
 ```
+
+Every compiled statement sent to the warehouse is prefixed with
+`/* grane query_id=q_… agent=finance */` so `pg_stat_statements`, Snowflake
+`QUERY_HISTORY`, BigQuery jobs, and the rest show the same ids without
+reading this file. stdio / unbound agents use `agent=-`.
 
 Refusals use `"kind": "refusal"` with `refusal.status` / `message` / `requested`.
 
@@ -195,7 +215,10 @@ and never include the token.
   "kind": "auth",
   "operation": "http",
   "agent": null,
-  "reason": "missing"
+  "reason": "missing",
+  "request_id": "req-from-proxy",
+  "client_ip": "203.0.113.10",
+  "user_agent": "Cursor/1.0"
 }
 ```
 
@@ -203,7 +226,11 @@ and never include the token.
 agent). Row payloads and agent tokens are never written. Compiled SQL uses
 placeholders; bind values are not logged.
 
-Defaults: `audit.enabled: true`, path `.grane/audit.jsonl`. On a read-only
+Defaults: `audit.enabled: true`, path `.grane/audit.jsonl`,
+`audit.fail_closed: false` (a full disk does not take the query path down).
+Set `audit.fail_closed: true` (or `GRANE_AUDIT_FAIL_CLOSED=1`) so a failed
+append refuses the query with `config_error`. The warehouse statement may
+already have run; the client does not receive those rows. On a read-only
 project mount, set `GRANE_AUDIT_PATH` (or `audit.path`) to a writable volume.
 `audit.stdout: true` (or `GRANE_AUDIT_STDOUT=1`) also writes JSON lines to
 **stderr**, which Docker collects without corrupting MCP stdio.

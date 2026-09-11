@@ -3,9 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { GraneKernel } from "../kernel.js";
 import { buildMcpServer } from "./server.js";
+import { recordAudit, httpFields } from "../audit.js";
 import { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "../auth/agents.js";
-import { recordAudit } from "../audit.js";
 import { anonymousHttpWarning, assertAnonymousHttpBind } from "./http-bind.js";
+import { httpAuditContext } from "./http-audit.js";
 import { connectionPoolSize } from "../connectors/types.js";
 import {
   BodyLimitError,
@@ -148,6 +149,12 @@ export async function serveHttp(
       return;
     }
 
+    const httpCtx = httpAuditContext(req);
+    const withRequestId = (extra?: Record<string, string>): Record<string, string> => ({
+      "x-request-id": httpCtx.request_id,
+      ...extra,
+    });
+
     if (req.method !== "POST") {
       writeJson(
         res,
@@ -157,15 +164,15 @@ export async function serveHttp(
           error: { code: -32000, message: "Method not allowed. Grane serves stateless MCP over POST." },
           id: null,
         },
-        { allow: "POST" },
+        withRequestId({ allow: "POST" }),
       );
       return;
     }
 
     if (shuttingDown) {
-      dropRequest(req, res, 503, { error: "shutting_down", message: "Grane HTTP MCP is draining." }, {
+      dropRequest(req, res, 503, { error: "shutting_down", message: "Grane HTTP MCP is draining." }, withRequestId({
         "retry-after": "1",
-      });
+      }));
       return;
     }
 
@@ -175,7 +182,7 @@ export async function serveHttp(
         res,
         429,
         { error: "rate_limited", message: "Global HTTP rate limit exceeded." },
-        { "retry-after": "1" },
+        withRequestId({ "retry-after": "1" }),
       );
       return;
     }
@@ -189,14 +196,14 @@ export async function serveHttp(
           error: "overloaded",
           message: `Too many in-flight HTTP requests (max_concurrency=${maxConcurrency}).`,
         },
-        { "retry-after": "1" },
+        withRequestId({ "retry-after": "1" }),
       );
       return;
     }
 
     inFlight += 1;
     try {
-      let bound = kernel;
+      let bound = kernel.bindHttp(httpCtx);
       if (requireAuth) {
         const result = authenticateAgent(kernel.config, bearerTokenFromHeaders(req.headers));
         if (result === "missing" || result === "invalid") {
@@ -206,6 +213,7 @@ export async function serveHttp(
             operation: "http",
             agent: null,
             reason: result,
+            ...httpFields(httpCtx),
           });
           await drainRequest(req);
           writeJson(
@@ -215,11 +223,11 @@ export async function serveHttp(
               error: "unauthorized",
               message: "Grane HTTP MCP requires a bearer token (Authorization: Bearer <agent token>).",
             },
-            { "www-authenticate": 'Bearer realm="grane"' },
+            withRequestId({ "www-authenticate": 'Bearer realm="grane"' }),
           );
           return;
         }
-        bound = kernel.bindAgent(result);
+        bound = bound.bindAgent(result);
       }
 
       const body = await readJsonBody(req);
@@ -228,6 +236,7 @@ export async function serveHttp(
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
+      res.setHeader("x-request-id", httpCtx.request_id);
       res.on("close", () => {
         void transport.close();
         void server.close();
@@ -236,7 +245,7 @@ export async function serveHttp(
       await transport.handleRequest(req, res, body);
     } catch (err) {
       if (err instanceof BodyLimitError) {
-        writeJson(res, 413, { error: "payload_too_large", message: err.message });
+        writeJson(res, 413, { error: "payload_too_large", message: err.message }, withRequestId());
         req.destroy();
         return;
       }
@@ -244,7 +253,7 @@ export async function serveHttp(
         jsonrpc: "2.0",
         error: { code: -32603, message: (err as Error).message },
         id: null,
-      });
+      }, withRequestId());
     } finally {
       release();
     }

@@ -33,6 +33,7 @@ export { compileQuery, type CompiledQuery, isHiddenResultColumn } from "./compil
 export { isReservedInternalIdent, INTERNAL_IDENT_PREFIX } from "./compile/internal-namespace.js";
 export {
   executeCompiled,
+  attributeCompiledSql,
   resultCompleteness,
   type QueryResult,
   type Provenance,
@@ -59,6 +60,6 @@ export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";
 export { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "./auth/agents.js";
 export type { AgentGrant } from "./auth/agents.js";
-export { recordAudit, type AuditEvent } from "./audit.js";
+export { recordAudit, type AuditEvent, type HttpAuditContext } from "./audit.js";
 export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";
