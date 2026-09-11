@@ -20,7 +20,7 @@ Desktop, Cursor, Gemini CLI, VS Code, Windsurf, Claude Code, or a generic
 ## Transports
 
 - **stdio** — `grane serve --stdio` (agent launches Grane as a subprocess)
-- **Streamable HTTP** — `grane serve` → `http://host:8080/mcp`
+- **Streamable HTTP** — `grane serve` binds `127.0.0.1:8080` (`http://127.0.0.1:8080/mcp`). Use `--host` to change. Unauthenticated HTTP off loopback requires `--allow-anonymous`.
 
 ## Config patterns
 
@@ -99,13 +99,15 @@ auth:
       exploration: false
     - id: analyst
       token: ${ANALYST_AGENT_TOKEN}
+      exploration: true
 ```
 
-Omit `metrics` / `dimensions` to grant the full governed catalog. Allow-lists
-apply to the catalog (including each metric's `available_dimensions`), grouping
-dimensions, governed filters, and `time.dimension`. Unknown names suggest only
-granted fields. An agent's `exploration: false` cannot turn exploration on if
-it is globally disabled.
+Omit `metrics` / `dimensions` to grant the full governed catalog. Per-agent
+`exploration` defaults to `false`; set `true` (and enable it globally) to allow
+raw columns. Allow-lists apply to the catalog (including each metric's
+`available_dimensions`), grouping dimensions, governed filters, and
+`time.dimension`. Unknown names suggest only granted fields. An agent's
+`exploration: true` cannot turn exploration on if it is globally disabled.
 
 Queries, refusals, and HTTP authentication denials are appended to
 `.grane/audit.jsonl` (see [production.md](production.md#audit-log)).

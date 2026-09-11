@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- HTTP MCP binds `127.0.0.1` by default (`--host` to change). Unauthenticated
+  HTTP on a non-loopback address requires `--allow-anonymous`. A warning is
+  printed whenever `auth.agents` is empty. The Docker image still listens on
+  `0.0.0.0:8080` so published ports work; the demo compose file passes
+  `--allow-anonymous`. Production HTTP without agents fails closed.
+- Per-agent `exploration` defaults to `false` (global `exploration.enabled`
+  already did).
+- Postgres and MySQL verify TLS certificates when `connection.ssl` is true.
+  Set `connection.ssl_verify: false` to opt out.
+- `limits.timeout_ms` is honoured on ClickHouse, Snowflake, Databricks, and
+  DuckDB, not only Postgres, MySQL, and BigQuery.
+- One write-keyword list in `src/connectors/types.ts` for the kernel and every
+  connector.
+- Docs no longer claim every warehouse wraps queries in a Postgres `READ ONLY`
+  transaction. The database role remains the real control.
+
 ## 0.6.5
 
 - Public-alpha front door: the package exposes both `grane` and

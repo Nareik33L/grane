@@ -1,7 +1,7 @@
 import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js";
 import { duckdbDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule } from "./types.js";
+import { loadOptionalModule, isWriteSql, runWithTimeout } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 type DuckDbReader = {
@@ -12,6 +12,7 @@ type DuckDbReader = {
 
 type DuckDbConnection = {
   runAndReadAll: (sql: string, values?: unknown[]) => Promise<DuckDbReader>;
+  interrupt?: () => void;
   closeSync?: () => void;
   disconnectSync?: () => void;
 };
@@ -76,11 +77,16 @@ export class DuckDbConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (/^\s*(insert|update|delete|drop|alter|create|truncate|copy)/i.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const conn = await this.getConn();
-    const reader = await conn.runAndReadAll(sql, params.length > 0 ? params : undefined);
+    const reader = await runWithTimeout(
+      conn.runAndReadAll(sql, params.length > 0 ? params : undefined),
+      limits.timeout_ms,
+      () => conn.interrupt?.(),
+      "DuckDB query",
+    );
     const rows = (reader.getRowObjectsJS?.() ?? reader.getRowObjects?.() ?? []).slice(0, limits.max_rows);
     const columns = reader.columnNames?.() ?? Object.keys(rows[0] ?? {});
     return { columns, rows };

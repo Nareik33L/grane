@@ -3,14 +3,13 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../../config/schema
 import { configError } from "../../errors.js";
 import { postgresDialect, redshiftDialect, type WarehouseType } from "../dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../types.js";
+import { isWriteSql, warehouseSslOptions } from "../types.js";
 import { unsafeQuery } from "../../errors.js";
 
 const { Pool } = pg;
 
-const WRITE_KEYWORDS =
-  /^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do)\b/i;
-
 export function createPgPool(connection: ConnectionConfig): pg.Pool {
+  const ssl = warehouseSslOptions(connection);
   if (connection.url) {
     if (connection.url.includes("${")) {
       throw configError(
@@ -19,7 +18,7 @@ export function createPgPool(connection: ConnectionConfig): pg.Pool {
     }
     return new Pool({
       connectionString: connection.url,
-      ssl: connection.ssl ? { rejectUnauthorized: false } : undefined,
+      ssl,
       max: 5,
     });
   }
@@ -34,7 +33,7 @@ export function createPgPool(connection: ConnectionConfig): pg.Pool {
     database: connection.database,
     user: connection.user,
     password: connection.password,
-    ssl: connection.ssl ? { rejectUnauthorized: false } : undefined,
+    ssl,
     max: 5,
   });
 }
@@ -53,7 +52,7 @@ export class PostgresConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (WRITE_KEYWORDS.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const client = await this.pool.connect();

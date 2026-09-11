@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Scalar, LimitsConfig } from "../config/schema.js";
 import { RESULT_ROW_COLUMN, RESULT_TOTAL_COLUMN, isHiddenResultColumn, type CompiledQuery } from "../compile/compiler.js";
 import type { WarehouseConnector } from "../connectors/types.js";
+import { isWriteSql } from "../connectors/types.js";
 import { unsafeQuery } from "../errors.js";
 import type { TrustLevel } from "../query/model.js";
 import type { RowLimitSource } from "../query/resolve.js";
@@ -49,9 +50,6 @@ export interface QueryResult {
   completeness: ResultCompleteness;
   provenance: Provenance;
 }
-
-const WRITE_KEYWORDS =
-  /^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do)\b/i;
 
 export function newQueryId(): string {
   return `q_${randomBytes(6).toString("hex")}`;
@@ -122,7 +120,7 @@ export async function executeCompiled(
   compiled: CompiledQuery,
   limits: LimitsConfig,
 ): Promise<QueryResult> {
-  if (WRITE_KEYWORDS.test(compiled.sql)) {
+  if (isWriteSql(compiled.sql)) {
     throw unsafeQuery("Refusing to execute a non-SELECT statement.");
   }
   const startedAt = Date.now();

@@ -104,8 +104,9 @@ connection:
   schema: public
 ```
 
-Use a **read-only** database user. Grane also wraps every query in a
-`READ ONLY` transaction, but the database remains the final security boundary.
+Use a **read-only** database user. Grane refuses write-headed SQL everywhere
+and, on Postgres, wraps queries in a `READ ONLY` transaction. The database
+role remains the final security boundary.
 
 Define your metrics in `metrics.yml`, dimensions in `dimensions.yml`, and
 relationships in `relationships.yml`. Then:
@@ -137,9 +138,13 @@ two transports:
 
 ```bash
 grane serve
-# MCP endpoint: http://localhost:8080/mcp
-# Health check: http://localhost:8080/health
+# binds 127.0.0.1:8080 (loopback)
+# MCP endpoint: http://127.0.0.1:8080/mcp
+# Health check: http://127.0.0.1:8080/health
 ```
+
+If `auth.agents` is empty, Grane prints a warning and still serves on loopback.
+A non-loopback bind (`--host 0.0.0.0`) without agents requires `--allow-anonymous`.
 
 **Production HTTP:** deploy Grane in your VPC behind HTTPS. Use the published
 image `ghcr.io/nareik33l/grane`, a read-only database user, and
@@ -229,11 +234,13 @@ It cannot launch a local stdio process the way Claude Desktop or Cursor can.
 1. Deploy Grane with HTTP transport:
 
    ```bash
-   grane serve --port 8080
+   grane serve --port 8080 --host 0.0.0.0
    ```
 
-   Put it behind HTTPS (load balancer, Cloud Run, Fly.io, etc.). The MCP
-   endpoint must be `https://your-host/mcp`.
+   Configure `auth.agents`. Without tokens, a non-loopback bind requires
+   `--allow-anonymous` — do not do that on a public URL. Put the process
+   behind HTTPS (load balancer, Cloud Run, Fly.io, etc.). The MCP endpoint
+   must be `https://your-host/mcp`.
 
 2. In ChatGPT: **Settings → Apps & Connectors** (or **Connectors**), enable
    **Developer Mode** if prompted.

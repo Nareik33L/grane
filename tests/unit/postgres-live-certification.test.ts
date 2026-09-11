@@ -919,7 +919,7 @@ describe.skipIf(!env)("PostgreSQL live certification (#36)", () => {
   describe("MCP and CLI against live PostgreSQL", () => {
     it("MCP query matches kernel for governed, guarded, refused, #35, top-N", async () => {
       const k = kernel();
-      const handle = await serveHttp(k, 0);
+      const handle = await serveHttp(k, 0, { onWarning: () => undefined });
       const client = new Client({ name: "pg-cert", version: "0.0.1" });
       try {
         const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${handle.port}/mcp`));

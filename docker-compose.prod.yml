@@ -8,6 +8,8 @@
 # Guide: docs/production.md
 #
 # The default docker-compose.yml in this repo is the self-contained demo shop.
+# Image CMD binds 0.0.0.0:8080. Configure auth.agents in ./analytics or the
+# process refuses to start (anonymous HTTP is not exposed off loopback).
 
 services:
   grane:

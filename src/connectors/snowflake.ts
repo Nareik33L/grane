@@ -2,7 +2,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { configError } from "../errors.js";
 import { snowflakeDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule } from "./types.js";
+import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 // snowflake-sdk is CommonJS; we load it dynamically so Postgres-only installs stay light.
@@ -58,8 +58,19 @@ export class SnowflakeConnector implements WarehouseConnector {
     return conn;
   }
 
+  private sessionSql(sql: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      void this.getConn().then((conn) => {
+        conn.execute({
+          sqlText: sql,
+          complete: (err) => (err ? reject(err) : resolve()),
+        });
+      }, reject);
+    });
+  }
+
   private exec(sql: string, binds: unknown[] = []): Promise<{ rows: Record<string, unknown>[]; columns: string[] }> {
-    if (/^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|merge)/i.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     return new Promise((resolve, reject) => {
@@ -78,6 +89,12 @@ export class SnowflakeConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
+    const seconds = timeoutSeconds(limits.timeout_ms);
+    try {
+      await this.sessionSql(`ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}`);
+    } catch {
+      // Best-effort: some roles cannot ALTER SESSION. The query still runs.
+    }
     const { rows, columns } = await this.exec(sql, params);
     return { columns, rows: rows.slice(0, limits.max_rows) };
   }

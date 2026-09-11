@@ -61,6 +61,56 @@ export interface WarehouseConnector {
   close(): Promise<void>;
 }
 
+/**
+ * Non-SELECT statement heads Grane will not execute. One list for the kernel
+ * and every warehouse connector. Compiled SQL is still SELECT; this is a
+ * last-line guard, not the security boundary.
+ */
+export const WRITE_KEYWORDS =
+  /^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|optimize|execute)\b/i;
+
+export function isWriteSql(sql: string): boolean {
+  return WRITE_KEYWORDS.test(sql);
+}
+
+/** TLS options when `connection.ssl` is enabled. Verify certificates by default. */
+export function warehouseSslOptions(connection: {
+  ssl?: boolean;
+  ssl_verify?: boolean;
+}): { rejectUnauthorized: boolean } | undefined {
+  if (!connection.ssl) return undefined;
+  return { rejectUnauthorized: connection.ssl_verify !== false };
+}
+
+export function timeoutSeconds(timeoutMs: number): number {
+  return Math.max(1, Math.ceil(timeoutMs / 1000));
+}
+
+/** Honour limits.timeout_ms when the driver has no native deadline. */
+export async function runWithTimeout<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+  interrupt?: () => void,
+  label = "Warehouse query",
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      try {
+        interrupt?.();
+      } catch {
+        /* interrupt is best-effort */
+      }
+      reject(new Error(`${label} exceeded limits.timeout_ms (${timeoutMs}).`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function inferRelationships(schema: DatabaseSchema): Record<
   string,
   { from: string; to: string; type: "many_to_one" }

@@ -50,6 +50,8 @@ connection:
   # Environment variables are interpolated with \${VAR_NAME}.
   url: \${DATABASE_URL}
   schema: public
+  # ssl: true                 # TLS; certificates are verified
+  # ssl_verify: false         # only if you cannot fix the chain yet
   # Snowflake:  account, warehouse, database, schema, user, password, role
   # BigQuery:   project, dataset, location, credentials (keyfile path)
   # DuckDB:     path (file or :memory:)

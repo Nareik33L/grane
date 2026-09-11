@@ -347,7 +347,7 @@ describe.skipIf(!available)("mf-temporal vs MetricFlow oracles", () => {
   });
 
   it("MCP catalog lists skips and query refuses them with a Grane-owned reason", async () => {
-    const handle = await serveHttp(kernel, 0);
+    const handle = await serveHttp(kernel, 0, { onWarning: () => undefined });
     const client = new Client({ name: "grane-mf-temporal", version: "0.0.1" });
     try {
       const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${handle.port}/mcp`));

@@ -41,7 +41,7 @@ describe.skipIf(!dbUp)("MCP over streamable HTTP (integration)", () => {
     config.connection.url = DB_URL;
     config.connection.schema = "public";
     kernel = new GraneKernel(config);
-    await serveHttp(kernel, PORT);
+    await serveHttp(kernel, PORT, { onWarning: () => undefined });
 
     client = new Client({ name: "grane-test-client", version: "0.0.1" });
     const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));

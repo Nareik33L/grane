@@ -8,7 +8,13 @@
 
 import type { ConnectionConfig, LimitsConfig, Scalar } from "../../src/config/schema.js";
 import { duckdbDialect } from "../../src/connectors/dialect.js";
-import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../../src/connectors/types.js";
+import {
+  isWriteSql,
+  type DatabaseSchema,
+  type ExecutedRows,
+  type TableInfo,
+  type WarehouseConnector,
+} from "../../src/connectors/types.js";
 import { unsafeQuery } from "../../src/errors.js";
 import {
   ACCOUNT_MEMBERS,
@@ -74,9 +80,6 @@ type DuckDbMod = {
     create: (path?: string, opts?: Record<string, string>) => Promise<DuckDbInstance>;
   };
 };
-
-const WRITE_HEAD =
-  /^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|execute)\b/i;
 
 function sqlLiteral(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
@@ -236,7 +239,7 @@ export class GauntletWarehouse implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (WRITE_HEAD.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     return this.enqueue(async () => {
