@@ -16,12 +16,31 @@ the one you need.
 | Databricks | `databricks` | `npm install @databricks/sql` |
 
 Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
-Every pull request executes the certification corpus against live PostgreSQL
-(GitHub Actions `postgres:16` service, restricted `grane_readonly` role) and,
-where the driver is installed, DuckDB. Gold values are TypeScript reductions
-over the shared seed, not SQL on the engine under test. Compile inspection of
-other dialects is not runtime certification. Reports are written to
+
+## Certification
+
+The map in `src/connectors/certification.ts` is the source of truth. `catalog.server.warehouse`
+exposes `{ type, certification, certified_version }`. Gold values for the shared corpus are
+TypeScript reductions over the seed, not SQL on the engine under test. Reports write to
 `certification/<engine>.json` (see `certification/README.md`).
+
+| State | Meaning |
+| --- | --- |
+| `certified` | Shared corpus runs in Grane CI. |
+| `self_certifiable` | Connector ships; Grane CI does not run the corpus. Verify against your warehouse. |
+| `compile_only` | SQL is compiled for this dialect; live execution is not a Grane-certified path. |
+
+| Warehouse | `connection.type` | State | Minimum certified version |
+| --- | --- | --- | --- |
+| PostgreSQL | `postgres` | `certified` | 16 |
+| MySQL / MariaDB | `mysql` | `self_certifiable` | — |
+| Snowflake | `snowflake` | `self_certifiable` | — |
+| BigQuery | `bigquery` | `self_certifiable` | — |
+| DuckDB | `duckdb` | `certified` | 1.5 |
+| ClickHouse | `clickhouse` | `self_certifiable` | — |
+| Amazon Redshift | `redshift` | `self_certifiable` | — |
+| Databricks | `databricks` | `self_certifiable` | — |
+
 First week on Postgres: [first-week.md](first-week.md). Production Docker:
 [production.md](production.md).
 
