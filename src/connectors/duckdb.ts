@@ -81,6 +81,11 @@ export class DuckDbConnector implements WarehouseConnector {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const conn = await this.getConn();
+    try {
+      await conn.runAndReadAll("SET TimeZone = 'UTC'");
+    } catch {
+      // Keep the instance-level TimeZone pin when SET is unavailable.
+    }
     const reader = await runWithTimeout(
       conn.runAndReadAll(sql, params.length > 0 ? params : undefined),
       limits.timeout_ms,

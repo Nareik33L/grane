@@ -39,6 +39,8 @@ export function databricksSchemaNamespace(connection: ConnectionConfig): string 
   return catalog ? `${catalog}.${schema}` : schema;
 }
 
+export const DATABRICKS_SESSION_UTC = "SET TIME ZONE 'UTC'";
+
 export class DatabricksConnector implements WarehouseConnector {
   readonly type = "databricks" as const;
   readonly dialect = databricksDialect;
@@ -79,7 +81,21 @@ export class DatabricksConnector implements WarehouseConnector {
       initialCatalog: this.catalog,
       initialSchema: this.schemaName,
     });
+    await this.pinUtc(this.session);
     return this.session;
+  }
+
+  private async pinUtc(session: DatabricksSession): Promise<void> {
+    try {
+      const operation = await session.executeStatement(DATABRICKS_SESSION_UTC, { runAsync: true });
+      try {
+        await operation.fetchAll().catch(() => undefined);
+      } finally {
+        await operation.close();
+      }
+    } catch {
+      // Live tests skip when the warehouse is unreachable; SET may be blocked on some warehouses.
+    }
   }
 
   private async exec(sql: string, params: Scalar[] = [], timeoutMs?: number): Promise<Record<string, unknown>[]> {
@@ -104,6 +120,7 @@ export class DatabricksConnector implements WarehouseConnector {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const session = await this.getSession();
+    await this.pinUtc(session);
     const operation = await session.executeStatement(sql, {
       runAsync: true,
       ordinalParameters: params.length > 0 ? params : undefined,

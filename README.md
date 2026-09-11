@@ -88,7 +88,7 @@ grane validate --production
 grane mcp connect cursor
 ```
 
-Use a **read-only database user** — that role is the real control. Grane refuses write-headed SQL on every warehouse and honours `limits.timeout_ms`. Postgres and Redshift also wrap each query in a `READ ONLY` transaction with `statement_timeout`. DuckDB file connections open with `access_mode: READ_ONLY`. MySQL, Snowflake, BigQuery, ClickHouse, and Databricks do not get a read-only transaction wrapper.
+Use a **read-only database user** — that role is the real control. Grane refuses write-headed SQL on every warehouse and honours `limits.timeout_ms`. Postgres and Redshift wrap each query in a `READ ONLY` transaction with `statement_timeout`. DuckDB file connections open with `access_mode: READ_ONLY`. MySQL sets `SESSION TRANSACTION READ ONLY`. ClickHouse sends `readonly=1`. Snowflake, BigQuery, and Databricks rely on the warehouse role plus the write-keyword guard.
 
 ## Architecture
 

@@ -52,6 +52,8 @@ export interface ExecutedRows {
 /**
  * A warehouse connector. Grane compiles SQL using the dialect, then the
  * connector executes it read-only against the customer's database.
+ *
+ * `query` must call {@link isWriteSql} and refuse before touching the driver.
  */
 export interface WarehouseConnector {
   readonly type: WarehouseType;

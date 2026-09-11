@@ -5,6 +5,20 @@ import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from
 import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
+/** Session SQL applied before every Snowflake query. */
+export function snowflakeSessionSetupSql(timeoutMs: number): {
+  combined: string;
+  timeoutOnly: string;
+  timezoneOnly: string;
+} {
+  const seconds = timeoutSeconds(timeoutMs);
+  return {
+    combined: `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}, TIMEZONE = 'UTC'`,
+    timeoutOnly: `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}`,
+    timezoneOnly: `ALTER SESSION SET TIMEZONE = 'UTC'`,
+  };
+}
+
 // snowflake-sdk is CommonJS; we load it dynamically so Postgres-only installs stay light.
 type SnowflakeSdk = {
   createConnection: (opts: Record<string, unknown>) => SnowflakeConnection;
@@ -89,11 +103,20 @@ export class SnowflakeConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    const seconds = timeoutSeconds(limits.timeout_ms);
+    const setup = snowflakeSessionSetupSql(limits.timeout_ms);
     try {
-      await this.sessionSql(`ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}`);
+      await this.sessionSql(setup.combined);
     } catch {
-      // Best-effort: some roles cannot ALTER SESSION. The query still runs.
+      try {
+        await this.sessionSql(setup.timeoutOnly);
+      } catch {
+        // Best-effort: some roles cannot ALTER SESSION. The query still runs.
+      }
+      try {
+        await this.sessionSql(setup.timezoneOnly);
+      } catch {
+        // TIMEZONE pin is best-effort when the role cannot ALTER SESSION.
+      }
     }
     const { rows, columns } = await this.exec(sql, params);
     return { columns, rows: rows.slice(0, limits.max_rows) };
