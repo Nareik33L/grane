@@ -7,7 +7,6 @@ import {
   isWriteSql,
   warehouseSslOptions,
   connectionPoolSize,
-  runWithTimeout,
   timeoutSeconds,
 } from "./types.js";
 import { unsafeQuery } from "../errors.js";
@@ -27,15 +26,46 @@ export function mysqlMaxExecutionTimeSql(timeoutMs: number): string {
   return `SET SESSION max_execution_time = ${Math.max(1, Math.floor(timeoutMs))}`;
 }
 
+/**
+ * Server-side backup is *after* the client deadline. MySQL 8.4
+ * `max_execution_time` can finish SLEEP/BENCHMARK as a successful row
+ * (SLEEP → 1, BENCHMARK → 0) at the same instant as `timeout_ms`, so the
+ * client Promise.race would observe a resolve. Keep the server abort as a
+ * safety net, not the primary cancel.
+ */
+export function mysqlServerBackupTimeoutMs(timeoutMs: number): number {
+  return Math.max(1, Math.floor(timeoutMs)) + 5_000;
+}
+
 /** Hard client deadline. mysql2 `timeout` does not destroy the socket. */
 export async function mysqlQueryWithDeadline<T>(
   work: Promise<T>,
   timeoutMs: number,
   destroy: () => void,
 ): Promise<T> {
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        destroy();
+      } catch {
+        /* destroy is best-effort after the deadline */
+      }
+      reject(new Error(`MySQL query exceeded limits.timeout_ms (${timeoutMs}).`));
+    }, timeoutMs);
+  });
   try {
-    return await runWithTimeout(work, timeoutMs, destroy, "MySQL query");
+    const result = await Promise.race([work, timeout]);
+    // destroy() may cause `work` to settle in the same turn as the timer.
+    // Prefer the deadline over a late successful row.
+    if (timedOut) {
+      throw new Error(`MySQL query exceeded limits.timeout_ms (${timeoutMs}).`);
+    }
+    return result;
   } finally {
+    if (timer) clearTimeout(timer);
     void work.catch(() => undefined);
   }
 }
@@ -106,24 +136,22 @@ export class MysqlConnector implements WarehouseConnector {
       await conn.query(MYSQL_SESSION_READONLY);
       await conn.query(MYSQL_SESSION_UTC);
       try {
-        await conn.query(mysqlMaxExecutionTimeSql(limits.timeout_ms));
+        await conn.query(mysqlMaxExecutionTimeSql(mysqlServerBackupTimeoutMs(limits.timeout_ms)));
       } catch {
         try {
-          await conn.query(`SET SESSION max_statement_time = ${timeoutSeconds(limits.timeout_ms)}`);
+          await conn.query(
+            `SET SESSION max_statement_time = ${timeoutSeconds(mysqlServerBackupTimeoutMs(limits.timeout_ms))}`,
+          );
         } catch {
           // MariaDB / older MySQL: client deadline below still cancels.
         }
       }
       // mysql2 `timeout` is an inactivity timer and does not destroy the
-      // socket. SLEEP() interrupted by max_execution_time returns 1 instead
-      // of erroring (MySQL 8.4). Race a hard deadline and destroy.
+      // socket. Client deadline + destroy is the primary cancel; server
+      // max_execution_time is a later backup (see mysqlServerBackupTimeoutMs).
       const work = conn.query({ sql, values: params, timeout: limits.timeout_ms });
       const [rows, fields] = await mysqlQueryWithDeadline(work, limits.timeout_ms, () => {
-        try {
-          conn.destroy?.();
-        } catch {
-          /* destroy is best-effort after the deadline */
-        }
+        conn.destroy?.();
       });
       const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
       return {

@@ -24,6 +24,7 @@ import {
   MysqlConnector,
   mysqlMaxExecutionTimeSql,
   mysqlQueryWithDeadline,
+  mysqlServerBackupTimeoutMs,
 } from "../../src/connectors/mysql.js";
 import { clickhouseQuerySettings, ClickHouseConnector } from "../../src/connectors/clickhouse.js";
 import { snowflakeSessionSetupSql } from "../../src/connectors/snowflake.js";
@@ -192,6 +193,7 @@ describe("timeout / read-only / UTC session SQL (no cloud creds)", () => {
     expect(MYSQL_SESSION_READONLY).toBe("SET SESSION TRANSACTION READ ONLY");
     expect(MYSQL_SESSION_UTC).toBe("SET time_zone = '+00:00'");
     expect(mysqlMaxExecutionTimeSql(2500)).toBe("SET SESSION max_execution_time = 2500");
+    expect(mysqlServerBackupTimeoutMs(400)).toBe(5_400);
   });
 
   it("MySQL client deadline rejects and destroys when the query hangs", async () => {
@@ -201,6 +203,18 @@ describe("timeout / read-only / UTC session SQL (no cloud creds)", () => {
       destroyed = true;
     })).rejects.toThrow(/timeout_ms/);
     expect(destroyed).toBe(true);
+  });
+
+  it("MySQL client deadline wins if destroy settles the query in the same turn", async () => {
+    let resolveWork: ((value: { s: number }) => void) | undefined;
+    const work = new Promise<{ s: number }>((resolve) => {
+      resolveWork = resolve;
+    });
+    await expect(
+      mysqlQueryWithDeadline(work, 30, () => {
+        resolveWork?.({ s: 0 });
+      }),
+    ).rejects.toThrow(/timeout_ms/);
   });
 
   it("ClickHouse sets timeout, readonly, join_use_nulls, UTC, and empty-agg NULL", () => {
@@ -503,15 +517,10 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
   it("cancels a long-running SELECT via timeout_ms", async () => {
     const c = live();
     const started = Date.now();
-    // SLEEP() interrupted by max_execution_time returns 1 and the statement
-    // succeeds (MySQL 8.4). BENCHMARK is aborted with ER_QUERY_TIMEOUT; the
-    // client deadline also destroys the socket.
-    await expect(
-      c.query("SELECT BENCHMARK(2000000000, SHA2('grane-timeout', 256)) AS s", [], {
-        ...LIMITS,
-        timeout_ms: 400,
-      }),
-    ).rejects.toThrow();
+    // SLEEP(8) cannot finish in 400ms unless cancelled. Server max_execution_time
+    // is a later backup so MySQL cannot return a successful SLEEP/BENCHMARK row
+    // at the client deadline (that race made BENCHMARK resolve with s=0 on main).
+    await expect(c.query("SELECT SLEEP(8) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(3000);
   });
 
