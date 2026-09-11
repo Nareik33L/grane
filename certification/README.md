@@ -34,6 +34,8 @@ Actions `postgres:16`). DuckDB runs whenever `@duckdb/node-api` is installed
 timezone tables are loaded (`mysql_tzinfo_to_sql` in CI so `CONVERT_TZ` works).
 ClickHouse 24 runs when `GRANE_CLICKHOUSE_URL` resolves (CI
 `clickhouse/clickhouse-server:24.8`, with `join_use_nulls=1` on every query).
+CI sets `GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse`; a failed probe
+for a required engine fails the suite instead of skipping.
 
 Snowflake / BigQuery / Databricks / Redshift are in-repo adapters that skip in
 OSS CI. Redshift is **not** covered by Postgres certification.

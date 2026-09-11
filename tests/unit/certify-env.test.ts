@@ -28,6 +28,7 @@ describe("certify env-var contract", () => {
     expect(ci).not.toMatch(/GRANE_CERT_BIGQUERY/);
     expect(ci).not.toMatch(/GRANE_CERT_DATABRICKS/);
     expect(ci).not.toMatch(/GRANE_CERT_REDSHIFT/);
+    expect(ci).toMatch(/GRANE_CERT_REQUIRE:\s*postgres,duckdb,mysql,clickhouse/);
   });
 
   it("cloud engines stay self_certifiable (no CI-certified flip)", () => {

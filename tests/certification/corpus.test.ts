@@ -35,9 +35,11 @@ import {
 } from "../fixtures/pg-cert.js";
 import {
   CERT_ENGINES,
+  CI_REQUIRED_CERT_ENGINES,
   clickhouseCertEngine,
   loadAvailableEngines,
   mysqlCertEngine,
+  parseRequiredCertEngines,
   snowflakeCertEngine,
   bigqueryCertEngine,
   databricksCertEngine,
@@ -65,7 +67,7 @@ async function refusalOf(fn: () => Promise<unknown>): Promise<GraneError["refusa
 const engines = await loadAvailableEngines();
 
 describe("certification engine registry", () => {
-  it("registers eight engines; cloud adapters skip without GRANE_CERT_*", async () => {
+  it("registers eight engines; required CI engines enroll; cloud adapters skip without GRANE_CERT_*", async () => {
     expect(CERT_ENGINES.map((e) => e.type)).toEqual([
       "postgres",
       "duckdb",
@@ -90,27 +92,29 @@ describe("certification engine registry", () => {
       return;
     }
     expect(engines.length, "DuckDB (devDependency) and/or live warehouses must run the corpus").toBeGreaterThan(0);
-    if (await mysqlCertEngine.available()) {
-      expect(engines.map((e) => e.type)).toContain("mysql");
-    } else {
-      expect(engines.map((e) => e.type)).not.toContain("mysql");
+    const included = engines.map((e) => e.type);
+    const required = parseRequiredCertEngines();
+    for (const type of required) {
+      expect(included, `required engine ${type} must run the corpus (GRANE_CERT_REQUIRE)`).toContain(type);
     }
-    if (await clickhouseCertEngine.available()) {
-      expect(engines.map((e) => e.type)).toContain("clickhouse");
-    } else {
-      expect(engines.map((e) => e.type)).not.toContain("clickhouse");
+    // CI always requires the four certified engines; do not gate this on available().
+    if (required.length > 0) {
+      expect(required).toEqual([...CI_REQUIRED_CERT_ENGINES]);
+      for (const type of CI_REQUIRED_CERT_ENGINES) {
+        expect(included, `${type} is CI-required and must be in the loaded corpus`).toContain(type);
+      }
     }
     if (!(await snowflakeCertEngine.available())) {
-      expect(engines.map((e) => e.type)).not.toContain("snowflake");
+      expect(included).not.toContain("snowflake");
     }
     if (!(await bigqueryCertEngine.available())) {
-      expect(engines.map((e) => e.type)).not.toContain("bigquery");
+      expect(included).not.toContain("bigquery");
     }
     if (!(await databricksCertEngine.available())) {
-      expect(engines.map((e) => e.type)).not.toContain("databricks");
+      expect(included).not.toContain("databricks");
     }
     if (!(await redshiftCertEngine.available())) {
-      expect(engines.map((e) => e.type)).not.toContain("redshift");
+      expect(included).not.toContain("redshift");
     }
   });
 });

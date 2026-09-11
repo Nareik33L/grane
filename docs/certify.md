@@ -86,6 +86,8 @@ Creates and drops schema `grane_cert_<runid>`. Uses ddl('redshift') and the Reds
 - `clickhouse`: GRANE_CLICKHOUSE_URL (CI clickhouse:24). Isolated database `grane_cert_<runid>`.
 - `duckdb`: No env. Requires `@duckdb/node-api`. Isolated temp file; never opens an adopter database.
 
+CI sets `GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse`. `loadAvailableEngines` throws if a required engine is unavailable (no silent skip). Unset locally so missing warehouses still skip. Cloud engines are unchanged.
+
 ## Dormant GitHub Actions
 
 `.github/workflows/certify-cloud.yml` is present but dormant:

@@ -12,12 +12,15 @@ import {
   warehouseCertificationMarkdown,
   warehouseServerInfo,
 } from "../../src/connectors/certification.js";
+import { CI_REQUIRED_CERT_ENGINES } from "../helpers/cert-engine.js";
 import { exampleConfig } from "../fixtures.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
 function ciExercisesCertifiedEngine(ci: string, type: WarehouseType): boolean {
   const unit = /npm run test:unit/.test(ci);
+  const requireList = /GRANE_CERT_REQUIRE:\s*postgres,duckdb,mysql,clickhouse/.test(ci);
+  if (!requireList) return false;
   switch (type) {
     case "postgres":
       return unit && /image:\s*postgres:16\b/.test(ci) && /GRANE_PG_WRITE_URL/.test(ci);
@@ -67,10 +70,13 @@ describe("warehouse certification map", () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       devDependencies?: Record<string, string>;
     };
+    expect(ci).toContain(`GRANE_CERT_REQUIRE: ${CI_REQUIRED_CERT_ENGINES.join(",")}`);
+    expect([...CI_REQUIRED_CERT_ENGINES]).toEqual(["postgres", "duckdb", "mysql", "clickhouse"]);
     for (const type of WAREHOUSE_TYPES) {
       const entry = WAREHOUSE_CERTIFICATION[type];
       if (entry.certification !== "certified") continue;
       expect(ciExercisesCertifiedEngine(ci, type), `${type} is certified but not exercised in CI`).toBe(true);
+      expect(CI_REQUIRED_CERT_ENGINES, `${type} is certified so it must be GRANE_CERT_REQUIRE`).toContain(type);
       if (type === "duckdb") {
         expect(pkg.devDependencies?.["@duckdb/node-api"], "certified DuckDB requires the CI driver").toBeTruthy();
       }
