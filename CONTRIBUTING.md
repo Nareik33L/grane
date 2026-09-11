@@ -39,7 +39,8 @@ absent.
 Full `npm test` still needs the demo database on `localhost:5433`
 (`docker compose up -d postgres --wait`) for integration MCP/workflow tests.
 `npm run test:benchmark` builds the DuckDB shop from `demo/seed/duckdb.sql`.
-`npm run test:gauntlet` needs only `@duckdb/node-api`. See
+`npm run test:gauntlet` needs only `@duckdb/node-api`. CI fails on
+`SECURITY CRITICAL` / `CRITICAL FAIL`; ordinary `FAIL` is report-only. See
 `tests/benchmark/README.md` and `tests/gauntlet/README.md`.
 
 The first experience is `npm run demo` or `docker compose up`.
