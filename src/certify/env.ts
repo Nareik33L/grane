@@ -144,6 +144,10 @@ export function certEnvContractMarkdown(): string {
   for (const [type, note] of Object.entries(CI_ENGINE_NOTES)) {
     details.push(`- \`${type}\`: ${note}`);
   }
+  details.push(
+    "",
+    "CI sets `GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse`. `loadAvailableEngines` throws if a required engine is unavailable (no silent skip). Unset locally so missing warehouses still skip. Cloud engines are unchanged.",
+  );
   details.push("");
   return `${lines.join("\n")}\n\n${details.join("\n")}`;
 }

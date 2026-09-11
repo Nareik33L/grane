@@ -66,6 +66,8 @@ jobs:
       GRANE_MYSQL_WRITE_URL: mysql://root:grane@127.0.0.1:3306/grane_demo
       GRANE_MYSQL_READ_URL: mysql://grane_readonly:grane_readonly@127.0.0.1:3306/grane_demo
       GRANE_CLICKHOUSE_URL: http://default:grane@127.0.0.1:8123
+      # Fail the corpus if a CI-certified engine is unreachable (no silent skip).
+      GRANE_CERT_REQUIRE: postgres,duckdb,mysql,clickhouse
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

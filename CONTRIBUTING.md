@@ -21,7 +21,9 @@ and `@clickhouse/client` are devDependencies so CI can certify those engines.
 `npm run test:unit` is the PR gate. GitHub Actions provisions PostgreSQL 16,
 MySQL 8 (timezone tables loaded via `mysql_tzinfo_to_sql`), and ClickHouse 24
 and runs the shared certification corpus on every pull request via `GRANE_PG_*`,
-`GRANE_MYSQL_*`, and `GRANE_CLICKHOUSE_URL`. Locally those live engines skip
+`GRANE_MYSQL_*`, and `GRANE_CLICKHOUSE_URL`. CI sets
+`GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse` so a missing required
+engine fails the job instead of skipping. Locally those live engines skip
 unless a server is reachable (Postgres `postgres://grane:grane@127.0.0.1:5432/grane_demo`,
 MySQL `mysql://root:grane@127.0.0.1:3306/grane_demo` with tz tables,
 ClickHouse `http://default:grane@127.0.0.1:8123`,

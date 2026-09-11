@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-Nothing yet.
+- CI sets `GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse`.
+  `loadAvailableEngines` throws if a required engine is unavailable instead of
+  skipping it. Local runs without the variable still skip missing warehouses.
+  Cloud engines stay `self_certifiable`.
 
 ## 0.7.0
 
