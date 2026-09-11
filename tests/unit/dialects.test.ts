@@ -86,6 +86,8 @@ describe("warehouse SQL dialects", () => {
     const compiled = compileFor("clickhouse");
     expect(compiled.sql).toContain("{p1:String}");
     expect(compiled.sql).toContain("SUM(CASE WHEN");
+    expect(compiled.sql).toMatch(/ON `__grane_card`.`__grane_join` = `__grane_result`.`__grane_join`/);
+    expect(compiled.sql).not.toMatch(/ON TRUE/);
   });
 
   it("redshift uses $n but not FILTER", () => {

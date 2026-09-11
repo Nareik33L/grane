@@ -310,7 +310,14 @@ describe("SQL shape: inner membership ORDER BY + outer presentation ORDER BY", (
       expect(compiled.sql, type).toMatch(/__grane_result/);
       expect(orderPairs(compiled.sql), type).toEqual([inner, outer]);
       expect(compiled.sql, type).toMatch(new RegExp(`${inner}\\n {2}LIMIT 2\\n\\)`));
-      expect(compiled.sql, type).toMatch(new RegExp(`ON TRUE\\n${outer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+      if (type === "clickhouse") {
+        const joinOn = `ON ${d.ident("__grane_card")}.${d.ident("__grane_join")} = ${d.ident("__grane_result")}.${d.ident("__grane_join")}`;
+        expect(compiled.sql, type).toMatch(
+          new RegExp(`${joinOn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n${outer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+        );
+      } else {
+        expect(compiled.sql, type).toMatch(new RegExp(`ON TRUE\\n${outer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+      }
       expect(compiled.sql, type).not.toMatch(/SELECT DISTINCT/i);
       expect(compiled.sql, type).not.toMatch(/NULLS FIRST|NULLS LAST/i);
     }

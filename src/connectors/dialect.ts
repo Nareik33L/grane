@@ -401,9 +401,10 @@ export const clickhouseDialect: SqlDialect = {
   localizeTime(expr, timezone) {
     if (!timezone || timezone === "UTC") return expr;
     // toTimeZone() keeps the Unix instant, so comparisons against a UTC-parsed
-    // civil bound would ignore the project timezone. Format in the target zone
-    // and re-parse as session-UTC DateTime to get a wall-clock value.
-    return `parseDateTimeBestEffort(formatDateTime(${expr}, '%Y-%m-%d %H:%M:%S', ${lit(timezone)}))`;
+    // civil bound would ignore the project timezone. Format the zoned wall
+    // clock and re-parse as session-UTC DateTime. `%T` is `%H:%i:%S` — `%M`
+    // is the month name on ClickHouse 24 (since 23.4), which is not parseable.
+    return `CAST(formatDateTime(${expr}, '%F %T', ${lit(timezone)}) AS Nullable(DateTime))`;
   },
   castTimestamp(placeholder) {
     return `parseDateTimeBestEffort(${placeholder})`;

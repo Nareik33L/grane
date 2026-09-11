@@ -483,6 +483,8 @@ describe("compile-only DATE vs timestamp SQL by dialect", () => {
         expect(sql, type).toContain("from_utc_timestamp");
       } else if (type === "clickhouse") {
         expect(sql, type).toContain("formatDateTime");
+        expect(sql, type).toContain("%F %T");
+        expect(sql, type).not.toMatch(/%Y-%m-%d %H:%M:%S/);
       }
     }
   });
