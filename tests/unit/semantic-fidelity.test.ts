@@ -208,6 +208,12 @@ describe("dbt import: what is and is not imported", () => {
     }
   });
 
+  it("never imports additive: none (non_additive_dimension maps to semi or skip)", () => {
+    for (const [name, metric] of Object.entries(contribution.metrics)) {
+      expect(metric.additive, name).not.toBe("none");
+    }
+  });
+
   it("imports the supported subset", () => {
     const imported = Object.keys(contribution.metrics).sort();
     expect(imported).toEqual(

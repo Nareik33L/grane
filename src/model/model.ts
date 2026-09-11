@@ -105,6 +105,14 @@ function editDistance(a: string, b: string): number {
   return dp[n]!;
 }
 
+/** Native YAML `additive: none` is kept in the schema so validate/compile can refuse it clearly. */
+export function unsupportedAdditiveNoneMessage(name: string): string {
+  return (
+    `Metric "${name}" is declared additive: none. Non-additive measures are unsupported; ` +
+    `Grane will not compile them as an ordinary SUM with trust:governed.`
+  );
+}
+
 function resolveSemiAdditive(metric: MetricConfig, entity: EntityConfig | undefined): SemiAdditiveSpec | null {
   if (metric.additive !== "semi") return null;
   const window = metric.semi_additive?.window ?? "last";

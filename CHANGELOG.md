@@ -10,6 +10,8 @@
   `CRITICAL FAIL`. Ordinary `FAIL` stays report-only.
 - Certification map / README / docs label MySQL 8 only. MariaDB is not
   CI-certified (`mysql:8.4` is the CI engine).
+- `additive: none` is refused as unsupported (`invalid_query`). Validate
+  reports `unsupported_additive_none`. It is not compiled as a governed SUM.
 
 ## 0.7.0
 

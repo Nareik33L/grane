@@ -1,4 +1,10 @@
-import { vacuousSnapshotSeriesKeys, vacuousSnapshotSeriesMessage, type SemanticModel, type Metric } from "../model/model.js";
+import {
+  vacuousSnapshotSeriesKeys,
+  vacuousSnapshotSeriesMessage,
+  unsupportedAdditiveNoneMessage,
+  type SemanticModel,
+  type Metric,
+} from "../model/model.js";
 import { parseColumnRef } from "../model/refs.js";
 import {
   isNumericType,
@@ -266,6 +272,15 @@ function validateMetric(
       message: `Metric references undefined entity "${config.entity}". Define it under "entities" in grane.yml.`,
     });
     return issues;
+  }
+
+  if (config.additive === "none") {
+    issues.push({
+      severity: "error",
+      code: "unsupported_additive_none",
+      subject,
+      message: unsupportedAdditiveNoneMessage(metric.name),
+    });
   }
 
   if (config.type === "ratio") {
