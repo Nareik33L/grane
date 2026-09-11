@@ -6,9 +6,9 @@
  * governed. A safe refusal is a pass. A confident wrong number is a critical
  * failure.
  *
- * The test file fails CI only when the harness is broken or when known
- * defect-class mutations are not detected. Individual scenario findings are
- * the report, not a green-build target.
+ * CI fails when the harness is broken, when known defect-class mutations are
+ * not detected, or when any scenario scores SECURITY CRITICAL or CRITICAL FAIL.
+ * Ordinary FAIL stays on the scorecard (report-only).
  */
 
 process.env.TZ = "UTC";
@@ -18,7 +18,7 @@ import { allScenarios } from "./catalog.js";
 import { GOLD, GOLD_SQL, tablesMatchScalar } from "./gold.js";
 import { createKernel, runScenario, type Harness } from "./harness.js";
 import { withDisabledFanout, withEmptyExclude, withOpenAllowlist } from "./mutations.js";
-import { buildScorecard } from "./scoring.js";
+import { buildScorecard, criticalGateFindings } from "./scoring.js";
 import type { ScenarioResult } from "./types.js";
 import { createGauntletWarehouse, duckdbAvailable } from "./warehouse.js";
 import { revenueTotal } from "./data.js";
@@ -131,10 +131,21 @@ describe.skipIf(!available)("grane gauntlet", () => {
     }
   });
 
-  it("prints a scorecard (findings are the report, not a CI gate)", () => {
+  it("prints a scorecard (ordinary FAIL is report-only)", () => {
     const card = buildScorecard(results);
     expect(card.report).toContain("GRANE GAUNTLET");
     expect(card.scenarios).toBe(results.length);
+  });
+
+  it("fails CI on SECURITY CRITICAL or CRITICAL FAIL (FAIL stays report-only)", () => {
+    const card = buildScorecard(results);
+    const criticals = criticalGateFindings(results);
+    const detail =
+      criticals
+        .map((r) => `${r.verdict.code} ${r.scenario.id} — ${r.verdict.detail}`)
+        .join("\n") || "scorecard critical counts disagree with verdicts";
+    expect(card.criticalFailures + card.securityCriticalFailures, detail).toBe(0);
+    expect(criticals, detail).toEqual([]);
   });
 
   it("detects a disabled fan-out check (mutation testing)", async () => {

@@ -6,6 +6,8 @@
   `loadAvailableEngines` throws if a required engine is unavailable instead of
   skipping it. Local runs without the variable still skip missing warehouses.
   Cloud engines stay `self_certifiable`.
+- Gauntlet CI fails when any scenario scores `SECURITY CRITICAL` or
+  `CRITICAL FAIL`. Ordinary `FAIL` stays report-only.
 
 ## 0.7.0
 

@@ -59,13 +59,17 @@ that class of outcome (and the gold number / trust label when executing).
 | `CRITICAL FAIL` | Wrong number, silent fan-out, unsafe join, wrong grain, wrong trust |
 | `SECURITY CRITICAL` | Blocked column, write, injection, permission bypass, secret leak |
 
-CI does **not** fail because Grane cannot yet pass every scenario. A healthy
-Gauntlet keeps adding cases Grane cannot pass. CI fails only when:
+CI does **not** fail because Grane cannot yet pass every scenario. Ordinary
+`FAIL` (bad error, crash that is not a wrong number or a security bypass)
+stays report-only. A healthy Gauntlet keeps adding cases Grane cannot pass.
+CI fails when:
 
 - gold SQL disagrees with the TypeScript fixtures (the harness is wrong)
 - scenario ids collide or the suite is far too small
 - a known defect-class mutation (no cardinality check, empty exclude list,
   opened allowlist) stays green — meaning the suite would not have caught that bug
+- any scenario scores `SECURITY CRITICAL` or `CRITICAL FAIL` (the CRITICAL
+  ratchet)
 
 Do not delete, weaken, or rewrite scenarios merely to raise the score.
 Do not turn executable failures into refusals.

@@ -14,6 +14,7 @@ import {
   type Disposition,
   type ScenarioResult,
   type Scorecard,
+  type VerdictCode,
 } from "./types.js";
 
 function emptyTally(category: Category): CategoryTally {
@@ -154,6 +155,15 @@ export function buildScorecard(results: ScenarioResult[]): Scorecard {
   };
   card.report = renderScorecard(card);
   return card;
+}
+
+/** Verdicts that fail CI. Ordinary FAIL is not in this list. */
+export function isCriticalVerdict(code: VerdictCode): boolean {
+  return code === "CRITICAL FAIL" || code === "SECURITY CRITICAL";
+}
+
+export function criticalGateFindings(results: readonly ScenarioResult[]): ScenarioResult[] {
+  return results.filter((result) => isCriticalVerdict(result.verdict.code));
 }
 
 function pad(value: string | number, width: number): string {
