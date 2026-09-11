@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.7.0
+
+First release after 0.6.4 (`0.6.5` was never published to npm). On main since
+0.6.4: Part 1 HTTP/auth/audit/exploration hardening; warehouse workstreams
+WS1–WS6 (Postgres 16, MySQL 8, DuckDB 1.5, ClickHouse 24 certified in CI;
+Snowflake, BigQuery, Databricks, and Redshift remain `self_certifiable`);
+`grane certify`; MySQL client-deadline hotfix (#62).
+
 - `grane certify --engine <type>` runs the shared certification corpus against
   one warehouse. It creates and drops `grane_cert_<runid>` and refuses
   connections that lack CREATE SCHEMA (never seeds existing adopter tables).
@@ -110,8 +120,6 @@
 - Docker publish records provenance and an SBOM; `node:22-alpine` is pinned
   by digest; Dependabot covers npm, Actions, and Docker; `SECURITY.md`
   points at GitHub private vulnerability reporting.
-
-## 0.6.5
 
 - Public-alpha front door: the package exposes both `grane` and
   `grane-analytics` binaries so `npx grane-analytics demo` resolves after

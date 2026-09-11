@@ -5,7 +5,7 @@ A small SaaS/e-commerce warehouse with a planted last-month revenue drop.
 ```bash
 # from the repo root
 npm run demo
-# after grane-analytics@0.6.5 is on npm: npx grane-analytics demo
+# after grane-analytics@0.7.0 is on npm: npx grane-analytics demo
 # optional Postgres: docker compose up -d postgres --wait && npm run demo:postgres
 ```
 
