@@ -8,6 +8,8 @@
   `session_timezone=UTC`, `aggregate_functions_null_for_empty` (empty SUM is
   NULL), and quotes 64-bit JSON integers. `contains` uses
   `positionCaseInsensitiveUTF8` (ClickHouse 24 has no `LIKE … ESCAPE`).
+  Timestamp localization uses `formatDateTime` (not instant-preserving
+  `toTimeZone`); ratios CAST to `Nullable(Decimal)` so NULL SUM stays NULL.
   `@clickhouse/client` is a dev/optional dependency. Seed DDL uses
   `MergeTree` + `Nullable(...)`.
 

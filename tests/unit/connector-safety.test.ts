@@ -512,7 +512,7 @@ describe.skipIf(!chEnv)("ClickHouse connector safety", () => {
   it("cancels sleep via timeout_ms", async () => {
     const c = live();
     const started = Date.now();
-    await expect(c.query("SELECT sleep(8) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
+    await expect(c.query("SELECT sleep(2) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(5000);
   });
 });

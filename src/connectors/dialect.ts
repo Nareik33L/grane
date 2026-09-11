@@ -400,7 +400,10 @@ export const clickhouseDialect: SqlDialect = {
   },
   localizeTime(expr, timezone) {
     if (!timezone || timezone === "UTC") return expr;
-    return `toTimeZone(${expr}, ${lit(timezone)})`;
+    // toTimeZone() keeps the Unix instant, so comparisons against a UTC-parsed
+    // civil bound would ignore the project timezone. Format in the target zone
+    // and re-parse as session-UTC DateTime to get a wall-clock value.
+    return `parseDateTimeBestEffort(formatDateTime(${expr}, '%Y-%m-%d %H:%M:%S', ${lit(timezone)}))`;
   },
   castTimestamp(placeholder) {
     return `parseDateTimeBestEffort(${placeholder})`;
@@ -409,7 +412,8 @@ export const clickhouseDialect: SqlDialect = {
     return `toDate(${placeholder})`;
   },
   castNumeric(expr) {
-    return `CAST((${expr}) AS Decimal(38, 12))`;
+    // Non-Nullable Decimal rejects NULL (empty SUM / NULLIF numerator).
+    return `CAST((${expr}) AS Nullable(Decimal(38, 12)))`;
   },
   contains(columnExpr, placeholder) {
     // ClickHouse 24 has no `LIKE … ESCAPE` (SQL clause landed in 26.6).

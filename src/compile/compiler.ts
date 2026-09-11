@@ -1149,6 +1149,9 @@ export function compileQuery(
     const cardCteLines = [
       `${ident("__grane_card")} AS (`,
       `  SELECT ${guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`).join(",\n         ")}`,
+      // Dummy row: ClickHouse returns 0 rows for `SELECT (empty scalar subquery)`
+      // with no FROM, which drops the wrapper and makes cardinality unobservable.
+      `  FROM (SELECT 1 AS ${ident("_x")}) AS ${ident("_grane_one")}`,
       `)`,
     ];
 

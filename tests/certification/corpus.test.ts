@@ -46,7 +46,7 @@ import { PG_READONLY_USER } from "../helpers/postgres-live.js";
 const execFileAsync = promisify(execFile);
 
 /** DATE columns must not be localized; naive/instant timestamps may be. */
-const LOCALIZE_SQL = /AT TIME ZONE|CONVERT_TIMEZONE|CONVERT_TZ|from_utc_timestamp|toTimeZone/i;
+const LOCALIZE_SQL = /AT TIME ZONE|CONVERT_TIMEZONE|CONVERT_TZ|from_utc_timestamp|toTimeZone|formatDateTime/i;
 
 async function refusalOf(fn: () => Promise<unknown>): Promise<GraneError["refusal"]> {
   try {
