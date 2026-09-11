@@ -23,11 +23,12 @@ import {
   MYSQL_SESSION_UTC,
   MysqlConnector,
   mysqlMaxExecutionTimeSql,
+  mysqlQueryWithDeadline,
 } from "../../src/connectors/mysql.js";
 import { clickhouseQuerySettings, ClickHouseConnector } from "../../src/connectors/clickhouse.js";
 import { snowflakeSessionSetupSql } from "../../src/connectors/snowflake.js";
-import { DATABRICKS_SESSION_UTC } from "../../src/connectors/databricks.js";
-import { BigQueryConnector } from "../../src/connectors/bigquery.js";
+import { DATABRICKS_SESSION_UTC, DatabricksConnector, databricksStatementOptions } from "../../src/connectors/databricks.js";
+import { BigQueryConnector, bigQueryJobOptions, DEFAULT_BIGQUERY_MAX_BYTES_BILLED } from "../../src/connectors/bigquery.js";
 import { duckdbDialect, isNumericType, isTemporalType, WAREHOUSE_TYPES, type WarehouseType } from "../../src/connectors/dialect.js";
 import {
   isWriteSql,
@@ -193,6 +194,15 @@ describe("timeout / read-only / UTC session SQL (no cloud creds)", () => {
     expect(mysqlMaxExecutionTimeSql(2500)).toBe("SET SESSION max_execution_time = 2500");
   });
 
+  it("MySQL client deadline rejects and destroys when the query hangs", async () => {
+    let destroyed = false;
+    const hang = new Promise<never>(() => undefined);
+    await expect(mysqlQueryWithDeadline(hang, 40, () => {
+      destroyed = true;
+    })).rejects.toThrow(/timeout_ms/);
+    expect(destroyed).toBe(true);
+  });
+
   it("ClickHouse sets timeout, readonly, join_use_nulls, UTC, and empty-agg NULL", () => {
     expect(clickhouseQuerySettings(1500)).toEqual({
       max_execution_time: timeoutSeconds(1500),
@@ -204,11 +214,14 @@ describe("timeout / read-only / UTC session SQL (no cloud creds)", () => {
     });
   });
 
-  it("Snowflake sets statement timeout and TIMEZONE UTC", () => {
+  it("Snowflake sets statement timeout, TIMEZONE UTC, and QUERY_TAG", () => {
     const setup = snowflakeSessionSetupSql(1500);
-    expect(setup.combined).toBe("ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 2, TIMEZONE = 'UTC'");
+    expect(setup.combined).toBe(
+      "ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 2, TIMEZONE = 'UTC', QUERY_TAG = 'grane'",
+    );
     expect(setup.timeoutOnly).toContain("STATEMENT_TIMEOUT_IN_SECONDS = 2");
     expect(setup.timezoneOnly).toBe("ALTER SESSION SET TIMEZONE = 'UTC'");
+    expect(setup.queryTagOnly).toBe("ALTER SESSION SET QUERY_TAG = 'grane'");
   });
 
   it("Databricks pins SET TIME ZONE UTC and uses queryTimeout seconds", () => {
@@ -248,8 +261,12 @@ describe("BigQuery empty-result columns", () => {
           { schema: { fields: [{ name: "revenue" }, { name: "country" }] } },
         ] as [Record<string, unknown>[], unknown, { schema: { fields: { name: string }[] } }],
     };
+    let captured: Record<string, unknown> | undefined;
     const client = {
-      createQueryJob: async () => [job],
+      createQueryJob: async (opts: Record<string, unknown>) => {
+        captured = opts;
+        return [job];
+      },
       query: async () => {
         throw new Error("query() must not be used when createQueryJob exists");
       },
@@ -261,6 +278,44 @@ describe("BigQuery empty-result columns", () => {
     const result = await connector.query("SELECT 1 AS revenue, 'x' AS country LIMIT 0", [], LIMITS);
     expect(result.rows).toEqual([]);
     expect(result.columns).toEqual(["revenue", "country"]);
+    expect(captured?.jobTimeoutMs).toBe(LIMITS.timeout_ms);
+    expect(captured?.maximumBytesBilled).toBe(String(DEFAULT_BIGQUERY_MAX_BYTES_BILLED));
+  });
+
+  it("wires maximumBytesBilled from limits.max_bytes_billed", () => {
+    const opts = bigQueryJobOptions("SELECT 1", {}, { ...LIMITS, max_bytes_billed: 123456 }, "EU");
+    expect(opts.jobTimeoutMs).toBe(LIMITS.timeout_ms);
+    expect(opts.maximumBytesBilled).toBe("123456");
+    expect(opts.location).toBe("EU");
+  });
+});
+
+describe("Databricks queryTimeout from limits", () => {
+  it("exports queryTimeout seconds from timeout_ms", () => {
+    expect(databricksStatementOptions([], 1500)).toEqual({ runAsync: true, queryTimeout: 2 });
+    expect(databricksStatementOptions(["x"], 30_000).ordinalParameters).toEqual(["x"]);
+  });
+
+  it("passes queryTimeout on executeStatement", async () => {
+    const calls: { sql: string; opts: Record<string, unknown> }[] = [];
+    const session = {
+      executeStatement: async (sql: string, opts?: Record<string, unknown>) => {
+        calls.push({ sql, opts: opts ?? {} });
+        return {
+          fetchAll: async () => [{ v: 1 }],
+          getSchema: async () => ({ columns: [{ name: "v" }] }),
+          close: async () => undefined,
+        };
+      },
+      close: async () => undefined,
+    };
+    const connector = new DatabricksConnector(
+      { type: "databricks", host: "example.cloud.databricks.com", http_path: "/sql/1.0/warehouses/x", token: "t" },
+      session,
+    );
+    await connector.query("SELECT 1 AS v", [], { ...LIMITS, timeout_ms: 1500 });
+    const select = calls.find((c) => c.sql.startsWith("SELECT"));
+    expect(select?.opts.queryTimeout).toBe(2);
   });
 });
 
@@ -445,10 +500,18 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
     expect(result.columns).toEqual(["revenue", "country"]);
   });
 
-  it("cancels SLEEP via timeout_ms", async () => {
+  it("cancels a long-running SELECT via timeout_ms", async () => {
     const c = live();
     const started = Date.now();
-    await expect(c.query("SELECT SLEEP(8) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
+    // SLEEP() interrupted by max_execution_time returns 1 and the statement
+    // succeeds (MySQL 8.4). BENCHMARK is aborted with ER_QUERY_TIMEOUT; the
+    // client deadline also destroys the socket.
+    await expect(
+      c.query("SELECT BENCHMARK(2000000000, SHA2('grane-timeout', 256)) AS s", [], {
+        ...LIMITS,
+        timeout_ms: 400,
+      }),
+    ).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(3000);
   });
 

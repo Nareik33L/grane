@@ -59,28 +59,29 @@ export const WAREHOUSE_CERTIFICATION: Record<WarehouseType, WarehouseCertificati
     label: "Snowflake",
     certification: "self_certifiable",
     certified_version: null,
-    explanation: "Connector ships; Grane CI has no Snowflake warehouse.",
+    explanation: "Connector ships; Grane CI has no Snowflake warehouse. Self-certify with `grane certify --engine snowflake`.",
   },
   bigquery: {
     type: "bigquery",
     label: "BigQuery",
     certification: "self_certifiable",
     certified_version: null,
-    explanation: "Connector ships; Grane CI has no BigQuery project.",
+    explanation: "Connector ships; Grane CI has no BigQuery project. Self-certify with `grane certify --engine bigquery`.",
   },
   redshift: {
     type: "redshift",
     label: "Amazon Redshift",
     certification: "self_certifiable",
     certified_version: null,
-    explanation: "Postgres driver compiles and executes; Grane CI does not run the corpus on Redshift.",
+    explanation:
+      "Postgres driver compiles and executes; Postgres CI certification does not cover Redshift. Self-certify with `grane certify --engine redshift`.",
   },
   databricks: {
     type: "databricks",
     label: "Databricks",
     certification: "self_certifiable",
     certified_version: null,
-    explanation: "Connector ships; Grane CI has no Databricks warehouse.",
+    explanation: "Connector ships; Grane CI has no Databricks warehouse. Self-certify with `grane certify --engine databricks`.",
   },
 };
 

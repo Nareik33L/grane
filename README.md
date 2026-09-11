@@ -85,6 +85,7 @@ export DATABASE_URL=postgres://readonly_user:...@host:5432/db
 grane discover --write-relationships
 grane validate
 grane validate --production
+grane certify --engine postgres
 grane mcp connect cursor
 ```
 

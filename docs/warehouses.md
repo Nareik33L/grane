@@ -22,7 +22,9 @@ Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
 The map in `src/connectors/certification.ts` is the source of truth. `catalog.server.warehouse`
 exposes `{ type, certification, certified_version }`. Gold values for the shared corpus are
 TypeScript reductions over the seed, not SQL on the engine under test. Reports write to
-`certification/<engine>.json` (see `certification/README.md`).
+`certification/<engine>.json` (see `certification/README.md`). Self-certify Snowflake,
+BigQuery, Databricks, or Redshift with [`grane certify`](certify.md). Postgres CI
+certification does not cover Redshift.
 
 | State | Meaning |
 | --- | --- |
@@ -58,7 +60,9 @@ connection:
 
 When `ssl: true`, certificates are verified. Set `ssl_verify: false` to opt out.
 Redshift uses the Postgres driver. Aggregates use `CASE WHEN` instead of
-`FILTER (WHERE ...)`.
+`FILTER (WHERE ...)`. Postgres certification in CI does **not** cover Redshift —
+self-certify with `grane certify --engine redshift` and `GRANE_CERT_REDSHIFT_URL`
+([docs/certify.md](certify.md)).
 
 ## MySQL
 
@@ -77,8 +81,9 @@ npm install mysql2
 ```
 
 Each query connection runs `SET SESSION TRANSACTION READ ONLY` and
-`SET time_zone = '+00:00'`. `limits.timeout_ms` is the mysql2 query timeout
-(and MySQL `max_execution_time` when the server accepts it). Aggregates use
+`SET time_zone = '+00:00'`. `limits.timeout_ms` is a client deadline (the
+socket is destroyed when it elapses) plus MySQL `max_execution_time` when the
+server accepts it. Aggregates use
 `CASE WHEN` rather than `FILTER (WHERE ...)`. Named-zone `CONVERT_TZ` needs
 the server timezone tables (`mysql_tzinfo_to_sql`); `grane mcp doctor` warns
 when `CONVERT_TZ` returns NULL. CI certifies MySQL 8 (`COUNT(*) OVER` needs
@@ -103,7 +108,7 @@ connection:
 npm install snowflake-sdk
 ```
 
-Each query best-effort `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS` and `TIMEZONE = 'UTC'`.
+Each query best-effort `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS`, `TIMEZONE = 'UTC'`, and `QUERY_TAG = 'grane'`.
 
 ## BigQuery
 
@@ -122,6 +127,7 @@ npm install @google-cloud/bigquery
 
 Application Default Credentials work if `credentials` is omitted.
 Empty results keep column names from the getQueryResults schema. `jobTimeoutMs` is `limits.timeout_ms`.
+`maximumBytesBilled` is `limits.max_bytes_billed` (default 10 GiB).
 
 ## DuckDB
 

@@ -5,17 +5,22 @@ import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from
 import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
+/** Warehouse QUERY_TAG so certify / MCP work is attributable in Snowflake history. */
+export const SNOWFLAKE_QUERY_TAG = "grane";
+
 /** Session SQL applied before every Snowflake query. */
 export function snowflakeSessionSetupSql(timeoutMs: number): {
   combined: string;
   timeoutOnly: string;
   timezoneOnly: string;
+  queryTagOnly: string;
 } {
   const seconds = timeoutSeconds(timeoutMs);
   return {
-    combined: `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}, TIMEZONE = 'UTC'`,
+    combined: `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}, TIMEZONE = 'UTC', QUERY_TAG = '${SNOWFLAKE_QUERY_TAG}'`,
     timeoutOnly: `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = ${seconds}`,
     timezoneOnly: `ALTER SESSION SET TIMEZONE = 'UTC'`,
+    queryTagOnly: `ALTER SESSION SET QUERY_TAG = '${SNOWFLAKE_QUERY_TAG}'`,
   };
 }
 
@@ -116,6 +121,11 @@ export class SnowflakeConnector implements WarehouseConnector {
         await this.sessionSql(setup.timezoneOnly);
       } catch {
         // TIMEZONE pin is best-effort when the role cannot ALTER SESSION.
+      }
+      try {
+        await this.sessionSql(setup.queryTagOnly);
+      } catch {
+        // QUERY_TAG is best-effort when the role cannot ALTER SESSION.
       }
     }
     const { rows, columns } = await this.exec(sql, params);

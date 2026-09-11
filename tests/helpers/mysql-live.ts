@@ -151,9 +151,7 @@ export async function ensureMysqlReadonlyUser(writeUrl: string, database: string
   }
 }
 
-export function newMysqlCertDatabase(): string {
-  return `mysqlcert_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
+export { newCertifySchemaName as newMysqlCertDatabase } from "../../src/certify/schema.js";
 
 export async function createMysqlPool(url: string) {
   const mysql = await loadMysql2();

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- `grane certify --engine <type>` runs the shared certification corpus against
+  one warehouse. It creates and drops `grane_cert_<runid>` and refuses
+  connections that lack CREATE SCHEMA (never seeds existing adopter tables).
+  Writes `certification/<engine>.json` plus a human summary. Snowflake,
+  BigQuery, Databricks, and Redshift skip when `GRANE_CERT_*` is unset
+  (`docs/certify.md`). `.github/workflows/certify-cloud.yml` is present but
+  dormant (`workflow_dispatch`, optional weekly schedule, optional PR label
+  `certify-cloud`); jobs skip cleanly without secrets. Cloud cost controls:
+  BigQuery `maximumBytesBilled` from `limits.max_bytes_billed` (default 10 GiB),
+  Snowflake `QUERY_TAG=grane` with `STATEMENT_TIMEOUT_IN_SECONDS`, Databricks
+  `queryTimeout` from `limits.timeout_ms`. Redshift is self-certifiable via
+  this path; Postgres CI certification does not cover it. Cloud engines stay
+  `self_certifiable` (not flipped to `certified` without CI evidence).
+- MySQL `limits.timeout_ms` destroys the query socket on the client deadline.
+  Server `max_execution_time` still applies; `SLEEP()` returning 1 is not
+  treated as a successful long query.
+
 - ClickHouse 24 is `certified`: the shared corpus and connector-safety suite
   run in CI (`clickhouse/clickhouse-server:24.8`). Every query sets
   `readonly=1`, `join_use_nulls=1` (unmatched LEFT JOIN is NULL),

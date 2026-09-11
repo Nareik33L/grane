@@ -65,6 +65,7 @@ limits:
   max_rows: 10000
   default_rows: 1000
   timeout_ms: 30000
+  # max_bytes_billed: 10737418240  # BigQuery maximumBytesBilled; default 10 GiB if omitted
   # max_concurrency: 10       # default 2 × connection.pool_size; extra /mcp requests get 503
   # rate_limit_rps: 20        # optional process-wide HTTP token bucket
 

@@ -288,6 +288,12 @@ export const limitsConfigSchema = z.object({
   default_rows: z.number().int().positive().default(1000),
   timeout_ms: z.number().int().positive().default(30000),
   /**
+   * BigQuery `maximumBytesBilled`. Optional. The BigQuery connector still
+   * applies a 10 GiB default when this is omitted so a certify run cannot
+   * scan unlimited bytes.
+   */
+  max_bytes_billed: z.number().int().positive().optional(),
+  /**
    * Max in-flight HTTP `/mcp` requests. Default 2 × `connection.pool_size`.
    * Excess requests get 503 rather than queueing on the warehouse pool.
    */

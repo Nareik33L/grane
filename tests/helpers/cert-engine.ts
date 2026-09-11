@@ -1,9 +1,13 @@
 import type { ConnectionConfig, GraneConfig, WarehouseType } from "../../src/config/schema.js";
 import type { ExecutedRows } from "../../src/connectors/types.js";
+import { bigqueryCertEngine } from "./engines/bigquery-cert.js";
 import { clickhouseCertEngine } from "./engines/clickhouse-cert.js";
+import { databricksCertEngine } from "./engines/databricks-cert.js";
 import { duckdbCertEngine } from "./engines/duckdb-cert.js";
 import { mysqlCertEngine } from "./engines/mysql-cert.js";
 import { postgresCertEngine } from "./engines/postgres-cert.js";
+import { redshiftCertEngine } from "./engines/redshift-cert.js";
+import { snowflakeCertEngine } from "./engines/snowflake-cert.js";
 
 export type CertCapabilities = {
   /** SET TRANSACTION READ ONLY / equivalent on the Grane session. */
@@ -48,20 +52,38 @@ export type CertEngine = {
   setup(): Promise<CertSession>;
 };
 
-/** Engines that can run the corpus in this PR. Stubs return available()=false. */
+/**
+ * Shared corpus adapters. Cloud engines return available()=false unless
+ * GRANE_CERT_* is set — they never run in OSS CI.
+ */
 export const CERT_ENGINES: readonly CertEngine[] = [
   postgresCertEngine,
   duckdbCertEngine,
   mysqlCertEngine,
   clickhouseCertEngine,
+  snowflakeCertEngine,
+  bigqueryCertEngine,
+  databricksCertEngine,
+  redshiftCertEngine,
 ];
 
 export async function loadAvailableEngines(): Promise<CertEngine[]> {
+  const only = process.env.GRANE_CERTIFY_ENGINE?.trim().toLowerCase();
   const out: CertEngine[] = [];
   for (const engine of CERT_ENGINES) {
+    if (only && engine.type !== only) continue;
     if (await engine.available()) out.push(engine);
   }
   return out;
 }
 
-export { clickhouseCertEngine, duckdbCertEngine, mysqlCertEngine, postgresCertEngine };
+export {
+  bigqueryCertEngine,
+  clickhouseCertEngine,
+  databricksCertEngine,
+  duckdbCertEngine,
+  mysqlCertEngine,
+  postgresCertEngine,
+  redshiftCertEngine,
+  snowflakeCertEngine,
+};
