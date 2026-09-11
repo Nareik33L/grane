@@ -252,7 +252,7 @@ describe("query audit log", () => {
 
   it("sanitizes agent ids that would break out of the SQL comment", () => {
     const sql = attributeCompiledSql("SELECT 1", "q_abc", "finance */ DROP TABLE t --");
-    expect(sql).toBe("/* grane query_id=q_abc agent=finance_DROP_TABLE_t_ */\nSELECT 1");
+    expect(sql).toBe("/* grane query_id=q_abc agent=finance_DROP_TABLE_t */\nSELECT 1");
   });
 
   it("swallows a failed audit append by default", async () => {

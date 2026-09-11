@@ -57,7 +57,7 @@ export function newQueryId(): string {
 
 /** Identifier-like token inside a SQL attribution comment. Strips comment terminators. */
 export function sqlCommentToken(value: string): string {
-  const cleaned = value.replace(/\*\//g, "").replace(/[^\w.-]+/g, "_").slice(0, 64);
+  const cleaned = value.replace(/\*\//g, "").replace(/[^\w.]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 64);
   return cleaned || "-";
 }
 
