@@ -215,7 +215,13 @@ export const connectionConfigSchema = z.object({
   user: z.string().optional(),
   password: z.string().optional(),
   schema: z.string().optional(),
+  /** When true, use TLS. Certificate verification is on unless ssl_verify is false. */
   ssl: z.boolean().optional(),
+  /**
+   * Verify TLS certificates. Default true. Set false only for a known
+   * private CA / broken chain you cannot fix yet.
+   */
+  ssl_verify: z.boolean().default(true),
   /** Snowflake account identifier. */
   account: z.string().optional(),
   /** Snowflake warehouse. */
@@ -305,7 +311,8 @@ export const agentConfigSchema = z.object({
   token: z.string().min(1),
   metrics: z.array(z.string()).optional(),
   dimensions: z.array(z.string()).optional(),
-  exploration: z.boolean().default(true),
+  /** Off unless this agent is explicitly allowed to explore raw columns. */
+  exploration: z.boolean().default(false),
 });
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 

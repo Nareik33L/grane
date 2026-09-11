@@ -2,7 +2,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { configError } from "../errors.js";
 import { clickhouseDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule } from "./types.js";
+import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 type ClickHouseMod = {
@@ -38,13 +38,12 @@ export class ClickHouseConnector implements WarehouseConnector {
       username: this.connection.user,
       password: this.connection.password,
       database: this.schemaName,
-      request_timeout: 30_000,
     });
     return this.client;
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (/^\s*(insert|alter|create|drop|truncate|delete|optimize)/i.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const client = await this.getClient();
@@ -52,7 +51,13 @@ export class ClickHouseConnector implements WarehouseConnector {
     params.forEach((value, i) => {
       query_params[`p${i + 1}`] = value;
     });
-    const result = await client.query({ query: sql, query_params, format: "JSONEachRow" });
+    const result = await client.query({
+      query: sql,
+      query_params,
+      format: "JSONEachRow",
+      abort_signal: AbortSignal.timeout(limits.timeout_ms),
+      clickhouse_settings: { max_execution_time: timeoutSeconds(limits.timeout_ms) },
+    });
     const rows = (await result.json<Record<string, unknown>[]>()).slice(0, limits.max_rows);
     return { columns: Object.keys(rows[0] ?? {}), rows };
   }

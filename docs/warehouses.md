@@ -29,8 +29,11 @@ connection:
   type: postgres          # or redshift
   url: ${DATABASE_URL}
   schema: public
+  # ssl: true
+  # ssl_verify: false     # only if you cannot fix the certificate chain
 ```
 
+When `ssl: true`, certificates are verified. Set `ssl_verify: false` to opt out.
 Redshift uses the Postgres driver. Aggregates use `CASE WHEN` instead of
 `FILTER (WHERE ...)`.
 
@@ -41,6 +44,8 @@ connection:
   type: mysql
   url: ${MYSQL_URL}       # mysql://readonly:pass@host:3306/shop
   schema: shop            # database name
+  # ssl: true
+  # ssl_verify: false     # only if you cannot fix the certificate chain
 ```
 
 ```bash

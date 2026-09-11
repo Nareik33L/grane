@@ -2,7 +2,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { configError } from "../errors.js";
 import { bigqueryDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule } from "./types.js";
+import { loadOptionalModule, isWriteSql } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 type BigQueryCtor = new (opts?: Record<string, unknown>) => {
@@ -40,7 +40,7 @@ export class BigQueryConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (/^\s*(insert|update|delete|drop|alter|create|truncate|merge)/i.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const bq = await this.getClient();

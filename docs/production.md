@@ -22,8 +22,11 @@ Build locally if you prefer:
 docker build -t grane .
 ```
 
-The image expects your project at `/project` and listens on `8080`.
-`/health` is public. `/mcp` is the MCP endpoint.
+The image expects your project at `/project` and listens on `0.0.0.0:8080`
+so published ports work. The CLI itself defaults to `127.0.0.1`. Unauthenticated
+HTTP on a non-loopback address is refused unless you pass `--allow-anonymous`
+(the demo compose file does; this production path should set `auth.agents`
+instead). `/health` is public. `/mcp` is the MCP endpoint.
 
 ## One-page `docker run`
 
@@ -53,9 +56,10 @@ named volume. The default `docker-compose.yml` is the self-contained demo.
 
 ## Read-only database user
 
-Create a SELECT-only role (see [first-week.md](first-week.md)). Grane also
-refuses non-SELECT SQL and opens a `READ ONLY` transaction, but leaked
-credentials should still be unable to write.
+Create a SELECT-only role (see [first-week.md](first-week.md)). Grane refuses
+non-SELECT SQL on every warehouse. Postgres and Redshift also open a `READ ONLY`
+transaction with a statement timeout; DuckDB files use `access_mode: READ_ONLY`.
+Leaked credentials should still be unable to write.
 
 ## Per-agent tokens (required on HTTP)
 
@@ -74,6 +78,7 @@ auth:
     - id: analyst
       token: ${ANALYST_AGENT_TOKEN}
       # omit metrics/dimensions to grant the full governed catalog
+      # exploration defaults to false; set true (and enable it globally) for raw columns
 ```
 
 stdio (Cursor, Claude Desktop launching `grane serve --stdio`) does not use

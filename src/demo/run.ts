@@ -136,8 +136,8 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
 
     if (options.serve) {
       const port = options.port ?? 8080;
-      await serveHttp(kernel, port);
-      io.log(`\nMCP  http://localhost:${port}/mcp`);
+      await serveHttp(kernel, port, { onWarning: (message) => io.error(message) });
+      io.log(`\nMCP  http://127.0.0.1:${port}/mcp`);
     }
 
     return {

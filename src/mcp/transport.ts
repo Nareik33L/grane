@@ -5,10 +5,20 @@ import type { GraneKernel } from "../kernel.js";
 import { buildMcpServer } from "./server.js";
 import { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "../auth/agents.js";
 import { recordAudit } from "../audit.js";
+import { anonymousHttpWarning, assertAnonymousHttpBind } from "./http-bind.js";
 
 export interface HttpMcpHandle {
   port: number;
+  host: string;
   close(): Promise<void>;
+}
+
+export interface ServeHttpOptions {
+  /** Bind address. Default 127.0.0.1. */
+  host?: string;
+  /** Required to bind unauthenticated HTTP on a non-loopback address. */
+  allowAnonymous?: boolean;
+  onWarning?: (message: string) => void;
 }
 
 /** Serve MCP over stdio (for local agents like Cursor or Claude Desktop). */
@@ -48,9 +58,21 @@ function writeJson(res: ServerResponse, status: number, body: unknown, extraHead
  * Serve MCP over streamable HTTP at /mcp (stateless mode: a fresh server and
  * transport per request, no session state). When `auth.agents` is configured,
  * `/mcp` requires `Authorization: Bearer <token>`. `/health` stays public.
+ *
+ * Default bind is loopback. Unauthenticated HTTP on a non-loopback address
+ * requires `allowAnonymous`.
  */
-export async function serveHttp(kernel: GraneKernel, port: number): Promise<HttpMcpHandle> {
-  const requireAuth = httpAuthRequired(kernel.config);
+export async function serveHttp(
+  kernel: GraneKernel,
+  port: number,
+  options: ServeHttpOptions = {},
+): Promise<HttpMcpHandle> {
+  const host = options.host ?? "127.0.0.1";
+  const allowAnonymous = Boolean(options.allowAnonymous);
+  const hasAgents = httpAuthRequired(kernel.config);
+  assertAnonymousHttpBind({ host, allowAnonymous, hasAgents });
+
+  const requireAuth = hasAgents;
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 
@@ -128,12 +150,17 @@ export async function serveHttp(kernel: GraneKernel, port: number): Promise<Http
 
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
-    httpServer.listen(port, () => resolve());
+    httpServer.listen(port, host, () => resolve());
   });
   const address = httpServer.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
+  if (!hasAgents) {
+    const warn = options.onWarning ?? ((message) => console.error(message));
+    warn(anonymousHttpWarning(host, actualPort));
+  }
   return {
     port: actualPort,
+    host,
     close: () =>
       new Promise<void>((resolve, reject) => {
         httpServer.close((err) => (err ? reject(err) : resolve()));

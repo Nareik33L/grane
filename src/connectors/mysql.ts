@@ -2,7 +2,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { configError } from "../errors.js";
 import { mysqlDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule } from "./types.js";
+import { loadOptionalModule, isWriteSql, warehouseSslOptions } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 type MysqlPool = {
@@ -29,7 +29,11 @@ export class MysqlConnector implements WarehouseConnector {
       "MySQL",
     ));
     if (this.connection.url) {
-      this.pool = mysql.createPool({ uri: this.connection.url, connectionLimit: 5 });
+      this.pool = mysql.createPool({
+        uri: this.connection.url,
+        connectionLimit: 5,
+        ssl: warehouseSslOptions(this.connection),
+      });
     } else {
       if (!this.connection.host && !this.connection.database) {
         throw configError("MySQL connection requires connection.url or host + database.");
@@ -40,7 +44,7 @@ export class MysqlConnector implements WarehouseConnector {
         user: this.connection.user,
         password: this.connection.password,
         database: this.connection.database,
-        ssl: this.connection.ssl ? {} : undefined,
+        ssl: warehouseSslOptions(this.connection),
         connectionLimit: 5,
       });
     }
@@ -48,7 +52,7 @@ export class MysqlConnector implements WarehouseConnector {
   }
 
   async query(sql: string, params: Scalar[], limits: LimitsConfig): Promise<ExecutedRows> {
-    if (/^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke)/i.test(sql)) {
+    if (isWriteSql(sql)) {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const pool = await this.getPool();

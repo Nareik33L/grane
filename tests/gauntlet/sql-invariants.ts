@@ -5,7 +5,7 @@
 import { BLOCKED_COLUMNS } from "./data.js";
 
 const WRITE_HEAD =
-  /^\s*(with\s+[\s\S]*\b)?(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|execute)\b/i;
+  /^\s*(with\s+[\s\S]*\b)?(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|optimize|execute)\b/i;
 
 const WRITE_ANYWHERE =
   /\b(insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(table|schema|view)|alter\s+table|truncate\s+|grant\s+|revoke\s+|create\s+(table|schema|view|index))\b/i;

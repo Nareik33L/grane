@@ -30,8 +30,10 @@ npm install -g grane-analytics
 
 ## 1. Read-only database user
 
-Grane compiles SQL and wraps it in a `READ ONLY` transaction, but the warehouse
-user is the real security boundary. Do not use a migration or superuser role.
+Grane compiles SQL and refuses write-headed statements. On Postgres it also
+wraps each query in a `READ ONLY` transaction with a statement timeout; DuckDB
+files open with `access_mode: READ_ONLY`. The warehouse user is still the real
+security boundary. Do not use a migration or superuser role.
 
 ```sql
 CREATE ROLE grane_readonly LOGIN PASSWORD '...choose a secret...';

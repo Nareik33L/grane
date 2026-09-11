@@ -7,6 +7,7 @@ import { loadConfig } from "../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
 import { serveHttp, serveStdio } from "../mcp/transport.js";
+import { isLoopbackHost } from "../mcp/http-bind.js";
 import { registerMcpCommands } from "./mcp.js";
 import { GraneError } from "../errors.js";
 import type { SemanticQueryInput } from "../query/model.js";
@@ -355,7 +356,12 @@ program
   .description("Start the Grane MCP server")
   .option("--stdio", "serve MCP over stdio (for local agent configs)")
   .option("--port <port>", "HTTP port", "8080")
-  .action(async (options: { stdio?: boolean; port: string }) => {
+  .option("--host <host>", "HTTP bind address", "127.0.0.1")
+  .option(
+    "--allow-anonymous",
+    "allow unauthenticated HTTP on a non-loopback address (no auth.agents)",
+  )
+  .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean }) => {
     const kernel = loadKernel();
     try {
       if (options.stdio) {
@@ -363,7 +369,11 @@ program
         return; // Keeps running until stdin closes.
       }
       const port = Number(options.port);
-      await serveHttp(kernel, port);
+      const host = options.host;
+      const handle = await serveHttp(kernel, port, {
+        host,
+        allowAnonymous: options.allowAnonymous,
+      });
       const catalog = await kernel.catalog();
       const agents = kernel.config.auth.agents.length;
       console.log("Grane MCP Server\n");
@@ -372,15 +382,21 @@ program
       console.log(
         agents > 0
           ? `Auth          ${agents} agent${agents === 1 ? "" : "s"} (HTTP bearer required)`
-          : `Auth          open`,
+          : `Auth          anonymous`,
       );
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
       if (catalog.exploration.enabled) {
         console.log(`Explorable    ${catalog.exploration.columns.length} columns`);
       }
+      console.log(`Bind          ${handle.host}:${handle.port}`);
       console.log(`Status        ready\n`);
-      console.log(`MCP           http://localhost:${port}/mcp`);
+      const reach = isLoopbackHost(handle.host) || handle.host === "0.0.0.0" || handle.host === "::"
+        ? handle.host === "0.0.0.0" || handle.host === "::"
+          ? "127.0.0.1"
+          : handle.host
+        : handle.host;
+      console.log(`MCP           http://${reach}:${handle.port}/mcp`);
     } catch (err) {
       fail(err);
     }
