@@ -9,3 +9,4 @@ dist/
 *.duckdb
 *.duckdb.wal
 *.tgz
+/certification/*.json

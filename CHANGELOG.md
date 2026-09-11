@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Certification corpus plumbing is engine-agnostic: seed arrays and TypeScript
+  gold in `tests/certification/`, `ddl(dialect)` from a column-type map, and a
+  `CertEngine` adapter (`tests/helpers/engines/`). Postgres and DuckDB run the
+  same parameterised suite (`tests/certification/corpus.test.ts`); MySQL and
+  ClickHouse are stubs until those CI workstreams. Reports write to
+  `certification/<engine>.json`. Connector session safety is unchanged.
+
 - Connector session safety: MySQL `SET SESSION TRANSACTION READ ONLY` and
   `time_zone = '+00:00'` on the query connection; ClickHouse `readonly=1`,
   `join_use_nulls=1`, and `session_timezone=UTC`; Snowflake `TIMEZONE=UTC`

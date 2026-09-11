@@ -35,6 +35,13 @@ jobs:
       - name: Show PostgreSQL version
         run: node --input-type=module -e "import pg from 'pg'; const c=new pg.Client({connectionString:process.env.GRANE_PG_WRITE_URL}); await c.connect(); console.log((await c.query('select version()')).rows[0].version); await c.end();"
       - run: npm run test:unit
+      - name: Upload certification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certification-reports
+          path: certification/*.json
+          if-no-files-found: ignore
       # The A/B/C thesis benchmark. DuckDB is a devDependency, so this runs
       # without making it a default runtime install.
       - run: npm run test:benchmark
