@@ -20,11 +20,13 @@ function authConfig() {
       metrics: ["revenue", "orders"],
       dimensions: ["country"],
       exploration: false,
+      exploration_exclude: [],
     },
     {
       id: "analyst",
       token: analystToken,
       exploration: true,
+      exploration_exclude: [],
     },
   ];
   return config;
@@ -36,6 +38,7 @@ function financeKernel() {
     metrics: ["revenue", "orders"],
     dimensions: ["country"],
     exploration: false,
+    explorationExclude: [],
   });
 }
 
@@ -127,6 +130,7 @@ describe("per-agent grants", () => {
       metrics: null,
       dimensions: null,
       exploration: true,
+      explorationExclude: [],
     });
     const { resolved } = kernel.compile({ metrics: ["revenue"], dimensions: ["country"] });
     expect(resolved.trust).toBe("governed");

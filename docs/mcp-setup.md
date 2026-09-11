@@ -104,10 +104,13 @@ auth:
 
 Omit `metrics` / `dimensions` to grant the full governed catalog. Per-agent
 `exploration` defaults to `false`; set `true` (and enable it globally) to allow
-raw columns. Allow-lists apply to the catalog (including each metric's
-`available_dimensions`), grouping dimensions, governed filters, and
-`time.dimension`. Unknown names suggest only granted fields. An agent's
-`exploration: true` cannot turn exploration on if it is globally disabled.
+raw columns. `exploration_exclude` adds deny patterns for that agent
+(`customers.*`, `*.email`, `*_ssn`). Global exploration can be `mode: allowlist`
+with `include:` so only named columns (and globs) are explorable; `exclude`
+always wins. Allow-lists for governed metrics/dimensions apply to the catalog
+(including each metric's `available_dimensions`), grouping dimensions, governed
+filters, and `time.dimension`. Unknown names suggest only granted fields. An
+agent's `exploration: true` cannot turn exploration on if it is globally disabled.
 
 Queries, refusals, and HTTP authentication denials are appended to
 `.grane/audit.jsonl` (see [production.md](production.md#audit-log)).

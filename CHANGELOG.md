@@ -24,6 +24,11 @@
   token bucket (`429`). `SIGTERM`/`SIGINT` drain in-flight requests then close
   the warehouse connector. Postgres/MySQL pool size is `connection.pool_size`
   (default 5).
+- Exploration supports `mode: allowlist` with `include` patterns, wildcards
+  (`customers.*`, `*.email`, `*_ssn`) on include/exclude, and per-agent
+  `exploration_exclude`. Empty allowlist include permits nothing. The gauntlet
+  mutation-checks an opened allowlist the same way it checks an emptied
+  denylist.
 
 ## 0.6.5
 

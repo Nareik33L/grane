@@ -50,7 +50,7 @@ function kernelWithAudit(
     projectDir,
     connector: stubConnector(),
     agent: agent
-      ? { id: agent.id, metrics: null, dimensions: null, exploration: true }
+      ? { id: agent.id, metrics: null, dimensions: null, exploration: true, explorationExclude: [] }
       : null,
   });
 }

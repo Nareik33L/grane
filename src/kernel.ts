@@ -61,7 +61,9 @@ export interface CatalogEntity {
 
 export interface CatalogExploration {
   enabled: boolean;
+  mode: "allowlist" | "denylist";
   schemas: string[];
+  included: string[];
   excluded: string[];
   columns: ExplorableColumn[];
 }
@@ -288,7 +290,14 @@ export class GraneKernel {
     if (!policy.enabled) {
       return {
         ...governed,
-        exploration: { enabled: false, schemas: [], excluded: this.config.exploration.exclude, columns: [] },
+        exploration: {
+          enabled: false,
+          mode: this.config.exploration.mode,
+          schemas: [],
+          included: this.config.exploration.include,
+          excluded: this.config.exploration.exclude,
+          columns: [],
+        },
       };
     }
     const schema = await this.loadSchema();
@@ -296,7 +305,9 @@ export class GraneKernel {
       ...governed,
       exploration: {
         enabled: true,
+        mode: policy.mode,
         schemas: policy.schemas,
+        included: this.config.exploration.include,
         excluded: this.config.exploration.exclude,
         columns: listExplorableColumns(this.model, schema, search),
       },
@@ -323,6 +334,7 @@ export class GraneKernel {
       exploration: {
         ...this.config.exploration,
         enabled: this.config.exploration.enabled && grant.exploration,
+        exclude: [...this.config.exploration.exclude, ...(grant.explorationExclude ?? [])],
       },
     };
     return new GraneKernel(config, {

@@ -53,6 +53,23 @@ export async function withEmptyExclude<T>(kernel: GraneKernel, fn: () => Promise
   }
 }
 
+/** Open allowlist: every column is included and the denylist is cleared. */
+export async function withOpenAllowlist<T>(kernel: GraneKernel, fn: () => Promise<T>): Promise<T> {
+  const previousMode = kernel.config.exploration.mode;
+  const previousInclude = kernel.config.exploration.include;
+  const previousExclude = kernel.config.exploration.exclude;
+  kernel.config.exploration.mode = "allowlist";
+  kernel.config.exploration.include = ["*"];
+  kernel.config.exploration.exclude = [];
+  try {
+    return await fn();
+  } finally {
+    kernel.config.exploration.mode = previousMode;
+    kernel.config.exploration.include = previousInclude;
+    kernel.config.exploration.exclude = previousExclude;
+  }
+}
+
 export async function expectGauntletToCatch(
   harness: Harness,
   scenario: Scenario,

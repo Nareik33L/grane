@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { allScenarios } from "./catalog.js";
 import { GOLD, GOLD_SQL, tablesMatchScalar } from "./gold.js";
 import { createKernel, runScenario, type Harness } from "./harness.js";
-import { withDisabledFanout, withEmptyExclude } from "./mutations.js";
+import { withDisabledFanout, withEmptyExclude, withOpenAllowlist } from "./mutations.js";
 import { buildScorecard } from "./scoring.js";
 import type { ScenarioResult } from "./types.js";
 import { createGauntletWarehouse, duckdbAvailable } from "./warehouse.js";
@@ -154,6 +154,16 @@ describe.skipIf(!available)("grane gauntlet", () => {
     expect(
       verdict.code === "SECURITY CRITICAL" || verdict.code === "CRITICAL FAIL" || verdict.code === "FAIL",
       `gauntlet stayed green after dropping the exclude list: ${verdict.code} ${verdict.detail}`,
+    ).toBe(true);
+  });
+
+  it("detects an opened allowlist (mutation testing)", async () => {
+    const scenario = results.find((r) => r.scenario.id === "perm/raw-dim/customers-email")?.scenario;
+    expect(scenario).toBeTruthy();
+    const verdict = await withOpenAllowlist(harness.kernel, () => runScenario(scenario!, harness));
+    expect(
+      verdict.code === "SECURITY CRITICAL" || verdict.code === "CRITICAL FAIL" || verdict.code === "FAIL",
+      `gauntlet stayed green after opening the exploration allowlist: ${verdict.code} ${verdict.detail}`,
     ).toBe(true);
   });
 });

@@ -12,6 +12,7 @@ export interface AgentGrant {
   metrics: string[] | null;
   dimensions: string[] | null;
   exploration: boolean;
+  explorationExclude: string[];
 }
 
 export function configuredAgents(config: GraneConfig): AgentConfig[] {
@@ -45,6 +46,7 @@ export function toGrant(agent: AgentConfig): AgentGrant {
     metrics: agent.metrics && agent.metrics.length > 0 ? agent.metrics : null,
     dimensions: agent.dimensions && agent.dimensions.length > 0 ? agent.dimensions : null,
     exploration: agent.exploration,
+    explorationExclude: agent.exploration_exclude ?? [],
   };
 }
 
@@ -74,7 +76,7 @@ export function authenticateAgent(
 ): AgentGrant | "missing" | "invalid" {
   const agents = configuredAgents(config);
   if (agents.length === 0) {
-    return { id: "anonymous", metrics: null, dimensions: null, exploration: true };
+    return { id: "anonymous", metrics: null, dimensions: null, exploration: true, explorationExclude: [] };
   }
   if (!token) return "missing";
   for (const agent of agents) {

@@ -95,7 +95,7 @@ describe("anonymous HTTP bind", () => {
 
   it("serveHttp may bind 0.0.0.0 when agents are configured", async () => {
     const config = exampleConfig();
-    config.auth.agents = [{ id: "finance", token: "secret", exploration: false }];
+    config.auth.agents = [{ id: "finance", token: "secret", exploration: false, exploration_exclude: [] }];
     const kernel = new GraneKernel(config);
     const warnings: string[] = [];
     const handle = await serveHttp(kernel, 0, {

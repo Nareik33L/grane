@@ -81,11 +81,17 @@ audit:
 # governed metrics or dimensions. Results are marked trust: mixed or exploratory.
 # exploration:
 #   enabled: false
+#   mode: denylist            # or allowlist (only include, minus exclude)
 #   schemas:
 #     - public
+#   include:
+#     - orders.*              # allowlist mode; ignored in denylist
+#     - payments.failure_code
 #   exclude:
 #     - users.password_hash
 #     - customers.ssn
+#     - "*.email"             # quote globs that start with *
+#     - "*_ssn"
 
 # HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
 # Required for production HTTP. stdio (local Cursor/Claude) stays trusted.
@@ -95,6 +101,8 @@ audit:
 #       token: \${FINANCE_AGENT_TOKEN}
 #       metrics: [revenue, orders]
 #       exploration: false
+#       exploration_exclude:
+#         - customers.*
 
 # Extra governed definitions you already maintain. Omit type to auto-detect.
 # providers:

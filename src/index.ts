@@ -54,7 +54,7 @@ export {
 } from "./mcp/connect/index.js";
 export type { ClientId, Transport } from "./mcp/connect/index.js";
 export { GraneError, type Refusal, ambiguousQuery, invalidQuery, unsafeQuery } from "./errors.js";
-export { explorationPolicy } from "./explore/policy.js";
+export { explorationPolicy, isExplorable, matchColumnPattern } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";
 export { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "./auth/agents.js";

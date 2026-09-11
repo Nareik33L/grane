@@ -108,10 +108,13 @@ export function explorationDisabled(requested: string): GraneError {
   });
 }
 
-export function columnNotPermitted(requested: string): GraneError {
+export function columnNotPermitted(requested: string, reason: "excluded" | "allowlist" = "excluded"): GraneError {
   return new GraneError({
     status: "column_not_permitted",
-    message: `"${requested}" is excluded from exploration by company policy.`,
+    message:
+      reason === "allowlist"
+        ? `"${requested}" is not on the exploration allowlist.`
+        : `"${requested}" is excluded from exploration by company policy.`,
     requested,
   });
 }
