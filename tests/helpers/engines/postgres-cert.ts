@@ -20,6 +20,7 @@ export const POSTGRES_CERT_CAPABILITIES: CertCapabilities = {
   mutateSeed: true,
   sessionTimezoneLocal: false,
   mcpCli: true,
+  filterClause: true,
 };
 
 export const postgresCertEngine: CertEngine = {

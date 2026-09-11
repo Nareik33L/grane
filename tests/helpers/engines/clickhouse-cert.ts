@@ -8,6 +8,7 @@ export const CLICKHOUSE_CERT_CAPABILITIES: CertCapabilities = {
   mutateSeed: true,
   sessionTimezoneLocal: false,
   mcpCli: false,
+  filterClause: false,
 };
 
 /** Stub until workstream 4 (ClickHouse CI service). `available()` is false unless GRANE_CLICKHOUSE_URL is set. */

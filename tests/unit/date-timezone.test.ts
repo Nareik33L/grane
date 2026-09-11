@@ -492,4 +492,10 @@ describe("compile-only DATE vs timestamp SQL by dialect", () => {
       expect(getDialect(type).castDate("$1")).toMatch(/date|DATE|toDate|TO_DATE/i);
     }
   });
+
+  it("mysql month trunc is a DATE via STR_TO_DATE, not a VARCHAR format string", () => {
+    expect(getDialect("mysql").dateTrunc("month", "`d`", "date")).toBe(
+      "STR_TO_DATE(DATE_FORMAT(`d`, '%Y-%m-01'), '%Y-%m-%d')",
+    );
+  });
 });

@@ -22,9 +22,30 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mysql:
+        # Pin 8.x: COUNT(*) OVER needs MySQL 8.0+. mysql2 handles the
+        # default caching_sha2_password auth plugin — do not force
+        # mysql_native_password. MYSQL_ROOT_HOST=% so the job container
+        # can connect as root (CREATE DATABASE / CREATE USER).
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: grane
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: grane_demo
+          MYSQL_USER: grane
+          MYSQL_PASSWORD: grane
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pgrane --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
     env:
       GRANE_PG_WRITE_URL: postgres://grane:grane@localhost:5432/grane_demo
       GRANE_PG_READ_URL: postgres://grane_readonly:grane_readonly@localhost:5432/grane_demo
+      GRANE_MYSQL_WRITE_URL: mysql://root:grane@127.0.0.1:3306/grane_demo
+      GRANE_MYSQL_READ_URL: mysql://grane_readonly:grane_readonly@127.0.0.1:3306/grane_demo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +55,24 @@ jobs:
       - run: npm ci
       - name: Show PostgreSQL version
         run: node --input-type=module -e "import pg from 'pg'; const c=new pg.Client({connectionString:process.env.GRANE_PG_WRITE_URL}); await c.connect(); console.log((await c.query('select version()')).rows[0].version); await c.end();"
+      - name: Load MySQL timezone tables
+        run: |
+          set -euo pipefail
+          # Official mysql image does not populate mysql.time_zone* tables.
+          # CONVERT_TZ(..., 'UTC', 'America/New_York') returns NULL until loaded.
+          cid=$(docker ps --filter ancestor=mysql:8.4 --format '{{.ID}}' | head -n1)
+          docker exec "$cid" bash -c "mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -uroot -pgrane mysql"
+      - name: Show MySQL version and CONVERT_TZ
+        run: |
+          node --input-type=module -e "
+            import mysql from 'mysql2/promise';
+            const c = await mysql.createConnection(process.env.GRANE_MYSQL_WRITE_URL);
+            const [v] = await c.query('SELECT VERSION() AS version');
+            const [t] = await c.query(\"SELECT CONVERT_TZ('2026-08-01 04:00:00', 'UTC', 'America/New_York') AS t\");
+            console.log(v[0].version, t[0].t);
+            if (t[0].t == null) { console.error('CONVERT_TZ returned NULL — timezone tables missing'); process.exit(1); }
+            await c.end();
+          "
       - run: npm run test:unit
       - name: Upload certification reports
         if: always()

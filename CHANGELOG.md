@@ -2,17 +2,25 @@
 
 ## Unreleased
 
-- Warehouse certification map (`src/connectors/certification.ts`): Postgres 16
-  and DuckDB 1.5 are `certified` (shared corpus in CI). Other engines are
-  `self_certifiable`, not certified. `catalog.server.warehouse` reports
+- MySQL 8 is `certified`: the shared corpus and connector-safety suite run in
+  CI (`mysql:8.4`, timezone tables loaded via `mysql_tzinfo_to_sql` so
+  `CONVERT_TZ` works). `mysql2` is a dev/optional dependency so CI has the
+  driver. `grane mcp doctor` warns when named-zone `CONVERT_TZ` returns NULL.
+  Aggregates use `CASE WHEN` (MySQL has no `FILTER`). `COUNT(*) OVER` needs
+  8.0+. MySQL seed SQL doubles backslashes so `contains 'A\\B'` is a real
+  backslash, not C-escape stripping.
+
+- Warehouse certification map (`src/connectors/certification.ts`): Postgres 16,
+  MySQL 8, and DuckDB 1.5 are `certified` (shared corpus in CI). Other engines
+  are `self_certifiable`, not certified. `catalog.server.warehouse` reports
   `{ type, certification, certified_version }`. `grane validate --production`
   warns (does not fail) when the configured engine is not certified.
 
 - Certification corpus plumbing is engine-agnostic: seed arrays and TypeScript
   gold in `tests/certification/`, `ddl(dialect)` from a column-type map, and a
-  `CertEngine` adapter (`tests/helpers/engines/`). Postgres and DuckDB run the
-  same parameterised suite (`tests/certification/corpus.test.ts`); MySQL and
-  ClickHouse are stubs until those CI workstreams. Reports write to
+  `CertEngine` adapter (`tests/helpers/engines/`). Postgres, DuckDB, and MySQL
+  run the same parameterised suite (`tests/certification/corpus.test.ts`);
+  ClickHouse is a stub until that CI workstream. Reports write to
   `certification/<engine>.json`. Connector session safety is unchanged.
 
 - Connector session safety: MySQL `SET SESSION TRANSACTION READ ONLY` and

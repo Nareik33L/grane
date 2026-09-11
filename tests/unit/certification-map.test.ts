@@ -23,6 +23,14 @@ function ciExercisesCertifiedEngine(ci: string, type: WarehouseType): boolean {
       return unit && /image:\s*postgres:16\b/.test(ci) && /GRANE_PG_WRITE_URL/.test(ci);
     case "duckdb":
       return unit && /DuckDB is a devDependency/.test(ci);
+    case "mysql":
+      return (
+        unit &&
+        /image:\s*mysql:8/.test(ci) &&
+        /GRANE_MYSQL_WRITE_URL/.test(ci) &&
+        /mysql_tzinfo_to_sql/.test(ci) &&
+        /CONVERT_TZ/.test(ci)
+      );
     default:
       return false;
   }
@@ -34,12 +42,12 @@ describe("warehouse certification map", () => {
     expect(CERTIFICATION_STATES).toEqual(["certified", "self_certifiable", "compile_only"]);
   });
 
-  it("marks only Postgres and DuckDB certified; does not overclaim MySQL or ClickHouse", () => {
+  it("marks Postgres, MySQL, and DuckDB certified; does not overclaim ClickHouse or clouds", async () => {
     const certified = WAREHOUSE_TYPES.filter((type) => WAREHOUSE_CERTIFICATION[type].certification === "certified");
-    expect(certified).toEqual(["postgres", "duckdb"]);
+    expect(certified).toEqual(["postgres", "mysql", "duckdb"]);
     expect(WAREHOUSE_CERTIFICATION.postgres.certified_version).toBe("16");
+    expect(WAREHOUSE_CERTIFICATION.mysql.certified_version).toBe("8");
     expect(WAREHOUSE_CERTIFICATION.duckdb.certified_version).toBe("1.5");
-    expect(WAREHOUSE_CERTIFICATION.mysql.certification).not.toBe("certified");
     expect(WAREHOUSE_CERTIFICATION.clickhouse.certification).not.toBe("certified");
     expect(WAREHOUSE_CERTIFICATION.snowflake.certification).not.toBe("certified");
     expect(WAREHOUSE_CERTIFICATION.bigquery.certification).not.toBe("certified");
@@ -59,6 +67,11 @@ describe("warehouse certification map", () => {
       if (type === "duckdb") {
         expect(pkg.devDependencies?.["@duckdb/node-api"], "certified DuckDB requires the CI driver").toBeTruthy();
       }
+      if (type === "mysql") {
+        expect(pkg.devDependencies?.mysql2, "certified MySQL requires mysql2 in CI").toBeTruthy();
+        const doctor = readFileSync(join(ROOT, "src/mcp/connect/doctor.ts"), "utf8");
+        expect(doctor, "grane mcp doctor must probe MySQL timezone tables").toMatch(/CONVERT_TZ/);
+      }
     }
   });
 
@@ -72,8 +85,9 @@ describe("warehouse certification map", () => {
     const line = readmeCertificationLine();
     expect(readme).toContain(line);
     expect(line).toMatch(/PostgreSQL 16/);
+    expect(line).toMatch(/MySQL \/ MariaDB 8/);
     expect(line).toMatch(/DuckDB 1\.5/);
-    expect(line).not.toMatch(/MySQL.*certified in CI/i);
+    expect(line).not.toMatch(/ClickHouse.*certified in CI/i);
   });
 
   it("serverInfo().warehouse matches the map for the configured engine", () => {
@@ -87,8 +101,8 @@ describe("warehouse certification map", () => {
     const mysql = new GraneKernel(exampleConfig({ connection: { type: "mysql", schema: "shop" } })).serverInfo();
     expect(mysql.warehouse).toEqual({
       type: "mysql",
-      certification: "self_certifiable",
-      certified_version: null,
+      certification: "certified",
+      certified_version: "8",
     });
     expect(mysql.database).toBe("mysql");
   });
@@ -96,11 +110,7 @@ describe("warehouse certification map", () => {
   it("validate --production warning is one line and absent when certified", () => {
     expect(uncertifiedWarehouseWarning("postgres")).toBeNull();
     expect(uncertifiedWarehouseWarning("duckdb")).toBeNull();
-    const mysql = uncertifiedWarehouseWarning("mysql");
-    expect(mysql).toBe(
-      "mysql is self_certifiable, not certified. Connector ships; live corpus CI is not in this release.",
-    );
-    expect(mysql?.includes("\n")).toBe(false);
+    expect(uncertifiedWarehouseWarning("mysql")).toBeNull();
     expect(uncertifiedWarehouseWarning("snowflake")).toMatch(/^snowflake is self_certifiable, not certified\. /);
   });
 });

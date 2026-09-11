@@ -20,6 +20,11 @@ export type CertCapabilities = {
   sessionTimezoneLocal: boolean;
   /** MCP + CLI live-warehouse round-trips are meaningful. */
   mcpCli: boolean;
+  /**
+   * Native `FILTER (WHERE …)` on aggregates. MySQL has none — the dialect
+   * emits `CASE WHEN` instead. Corpus assertions must check the compiled SQL.
+   */
+  filterClause: boolean;
 };
 
 export type CertSession = {

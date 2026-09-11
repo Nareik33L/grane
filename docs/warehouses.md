@@ -33,7 +33,7 @@ TypeScript reductions over the seed, not SQL on the engine under test. Reports w
 | Warehouse | `connection.type` | State | Minimum certified version |
 | --- | --- | --- | --- |
 | PostgreSQL | `postgres` | `certified` | 16 |
-| MySQL / MariaDB | `mysql` | `self_certifiable` | — |
+| MySQL / MariaDB | `mysql` | `certified` | 8 |
 | Snowflake | `snowflake` | `self_certifiable` | — |
 | BigQuery | `bigquery` | `self_certifiable` | — |
 | DuckDB | `duckdb` | `certified` | 1.5 |
@@ -78,7 +78,12 @@ npm install mysql2
 
 Each query connection runs `SET SESSION TRANSACTION READ ONLY` and
 `SET time_zone = '+00:00'`. `limits.timeout_ms` is the mysql2 query timeout
-(and MySQL `max_execution_time` when the server accepts it).
+(and MySQL `max_execution_time` when the server accepts it). Aggregates use
+`CASE WHEN` rather than `FILTER (WHERE ...)`. Named-zone `CONVERT_TZ` needs
+the server timezone tables (`mysql_tzinfo_to_sql`); `grane mcp doctor` warns
+when `CONVERT_TZ` returns NULL. CI certifies MySQL 8 (`COUNT(*) OVER` needs
+8.0+). Load `utf8mb4` for `contains` (café) and treat `DECIMAL` as decimal,
+not `DOUBLE`.
 
 ## Snowflake
 

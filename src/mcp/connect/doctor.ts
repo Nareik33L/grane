@@ -4,6 +4,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loadConfig } from "../../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../../kernel.js";
+import { MysqlConnector } from "../../connectors/mysql.js";
 import type { DoctorCheck, DoctorResult, ResolvedLaunch } from "./types.js";
 import { childEnv, stdioArgs } from "./launch.js";
 
@@ -103,6 +104,49 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
         ok: true,
         level: "warn",
         detail: `database unreachable: ${(err as Error).message}`,
+      });
+    }
+  }
+
+  if (
+    !opts.offline &&
+    kernel.config.connection.type === "mysql" &&
+    checks.find((c) => c.name === "schema")?.level !== "warn"
+  ) {
+    try {
+      const connector = new MysqlConnector(kernel.config.connection);
+      try {
+        const tz = await connector.query(
+          "SELECT CONVERT_TZ('2026-08-01 04:00:00', 'UTC', 'America/New_York') AS t",
+          [],
+          kernel.config.limits,
+        );
+        const value = tz.rows[0]?.t;
+        if (value == null) {
+          checks.push({
+            name: "mysql_timezone_tables",
+            ok: true,
+            level: "warn",
+            detail:
+              "CONVERT_TZ returned NULL; load timezone tables (mysql_tzinfo_to_sql) so timestamp localization works",
+          });
+        } else {
+          checks.push({
+            name: "mysql_timezone_tables",
+            ok: true,
+            level: "ok",
+            detail: "CONVERT_TZ named zones work",
+          });
+        }
+      } finally {
+        await connector.close();
+      }
+    } catch (err) {
+      checks.push({
+        name: "mysql_timezone_tables",
+        ok: true,
+        level: "warn",
+        detail: `timezone probe failed: ${(err as Error).message}`,
       });
     }
   }

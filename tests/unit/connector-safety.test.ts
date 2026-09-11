@@ -21,6 +21,7 @@ import {
 import {
   MYSQL_SESSION_READONLY,
   MYSQL_SESSION_UTC,
+  MysqlConnector,
   mysqlMaxExecutionTimeSql,
 } from "../../src/connectors/mysql.js";
 import { clickhouseQuerySettings } from "../../src/connectors/clickhouse.js";
@@ -40,6 +41,7 @@ import { executeCompiled } from "../../src/execute/executor.js";
 import type { CompiledQuery } from "../../src/compile/compiler.js";
 import { GraneError } from "../../src/errors.js";
 import { postgresLiveEnv } from "../helpers/postgres-live.js";
+import { mysqlLiveEnv } from "../helpers/mysql-live.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -397,5 +399,62 @@ describe.skipIf(!pgEnv)("Postgres connector safety", () => {
     const result = await c.query("SELECT 1 AS revenue, 'x' AS country WHERE FALSE", [], LIMITS);
     expect(result.rows).toEqual([]);
     expect(result.columns).toEqual(["revenue", "country"]);
+  });
+});
+
+const mysqlEnv = await mysqlLiveEnv();
+
+describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
+  const connectors: MysqlConnector[] = [];
+
+  afterAll(async () => {
+    for (const c of connectors) await c.close();
+  });
+
+  function live(): MysqlConnector {
+    const c = new MysqlConnector({ type: "mysql", url: mysqlEnv!.writeUrl, schema: "grane_demo" });
+    connectors.push(c);
+    return c;
+  }
+
+  it("refuses a write before the engine", async () => {
+    const c = live();
+    await expect(c.query("INSERT INTO t VALUES (1)", [], LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("runs with SESSION TRANSACTION READ ONLY and UTC", async () => {
+    const c = live();
+    const result = await c.query(
+      "SELECT @@session.transaction_read_only AS ro, @@session.time_zone AS tz",
+      [],
+      LIMITS,
+    );
+    expect(String(result.rows[0]?.ro).toLowerCase()).toMatch(/on|true|1/);
+    expect(String(result.rows[0]?.tz)).toBe("+00:00");
+  });
+
+  it("returns column names on an empty result", async () => {
+    const c = live();
+    const result = await c.query("SELECT 1 AS revenue, 'x' AS country WHERE FALSE", [], LIMITS);
+    expect(result.rows).toEqual([]);
+    expect(result.columns).toEqual(["revenue", "country"]);
+  });
+
+  it("cancels SLEEP via timeout_ms", async () => {
+    const c = live();
+    const started = Date.now();
+    await expect(c.query("SELECT SLEEP(8) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it("round-trips utf8mb4 (café) and DECIMAL as a string or number, not a binary buffer", async () => {
+    const c = live();
+    const result = await c.query("SELECT 'café' AS t, CAST('12.50' AS DECIMAL(18,2)) AS n", [], LIMITS);
+    expect(result.rows[0]?.t).toBe("café");
+    const n = result.rows[0]?.n;
+    expect(n === "12.50" || n === 12.5 || n === "12.5").toBe(true);
+    expect(Buffer.isBuffer(n)).toBe(false);
   });
 });

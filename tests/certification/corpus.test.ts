@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { WAREHOUSE_TYPES } from "../../src/connectors/dialect.js";
+import { WAREHOUSE_TYPES, getDialect } from "../../src/connectors/dialect.js";
 import { RESULT_ROW_COLUMN, RESULT_TOTAL_COLUMN } from "../../src/compile/compiler.js";
 import { GraneError } from "../../src/errors.js";
 import { GraneKernel } from "../../src/kernel.js";
@@ -61,16 +61,21 @@ async function refusalOf(fn: () => Promise<unknown>): Promise<GraneError["refusa
 const engines = await loadAvailableEngines();
 
 describe("certification engine registry", () => {
-  it("registers Postgres + DuckDB; MySQL/ClickHouse are stubs until WS3/WS4", async () => {
+  it("registers four engines; ClickHouse stays a stub until WS4; MySQL enrolls when live", async () => {
     expect(CERT_ENGINES.map((e) => e.type)).toEqual(["postgres", "duckdb", "mysql", "clickhouse"]);
-    expect(await mysqlCertEngine.available()).toBe(false);
     expect(await clickhouseCertEngine.available()).toBe(false);
     expect(mysqlCertEngine.capabilities.postgresReadonlyRole).toBe(false);
     expect(mysqlCertEngine.capabilities.timestamptz).toBe(false);
+    expect(mysqlCertEngine.capabilities.filterClause).toBe(false);
     expect(clickhouseCertEngine.capabilities.fkIntrospection).toBe(false);
-    await expect(mysqlCertEngine.setup()).rejects.toThrow(/workstream 3/i);
+    expect(clickhouseCertEngine.capabilities.filterClause).toBe(false);
     await expect(clickhouseCertEngine.setup()).rejects.toThrow(/workstream 4/i);
-    expect(engines.length, "DuckDB (devDependency) and/or live Postgres must run the corpus").toBeGreaterThan(0);
+    expect(engines.length, "DuckDB (devDependency) and/or live Postgres/MySQL must run the corpus").toBeGreaterThan(0);
+    if (await mysqlCertEngine.available()) {
+      expect(engines.map((e) => e.type)).toContain("mysql");
+    } else {
+      expect(engines.map((e) => e.type)).not.toContain("mysql");
+    }
   });
 });
 
@@ -147,6 +152,7 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
     expect(session.engineVersion.length).toBeGreaterThan(0);
     expect(session.capabilities).toEqual(engine.capabilities);
     expect(session.capabilities.sessionTimezoneLocal).toBe(false);
+    expect(session.capabilities.filterClause).toBe(getDialect(session.type).supportsFilterClause);
     if (session.capabilities.postgresReadonlyRole) {
       expect(session.type).toBe("postgres");
       const who = await session.queryRead(
@@ -638,6 +644,13 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
       const grain = await k.query({ metrics: ["open_revenue"], time: AUG });
       expect(grain.trust).toBe("governed");
       expect(n(grain.rows[0]!.open_revenue)).toBe(GOLD.openAug);
+      const openSql = k.compile({ metrics: ["open_revenue"], time: AUG }).compiled.sql;
+      if (session.capabilities.filterClause) {
+        expect(openSql).toMatch(/FILTER \(WHERE/i);
+      } else {
+        expect(openSql).toMatch(/CASE WHEN/i);
+        expect(openSql).not.toMatch(/FILTER \(WHERE/i);
+      }
       const o = (
         await pgOracle(`
         SELECT SUM(amount) AS s FROM orders
@@ -820,7 +833,8 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
         ["Delta", 75],
       ]);
       const sql = k.compile(q).compiled.sql;
-      expect(sql).toMatch(/ORDER BY "__grane_result"\."revenue" DESC$/);
+      const d = getDialect(session.type);
+      expect(sql.endsWith(`ORDER BY ${d.ident("__grane_result")}.${d.ident("revenue")} DESC`)).toBe(true);
     });
   });
 
