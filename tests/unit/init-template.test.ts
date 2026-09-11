@@ -6,6 +6,8 @@ describe("grane init templates", () => {
   it("keeps providers commented out by default", () => {
     const doc = parseYaml(graneYml()) as Record<string, unknown>;
     expect(doc.providers).toBeUndefined();
+    expect(graneYml()).toContain("fail_closed: true");
+    expect(graneYml()).toContain("token_sha256:");
     expect(graneYml()).toContain("# providers:");
   });
 

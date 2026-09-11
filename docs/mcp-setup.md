@@ -94,7 +94,7 @@ trusted and does not require a bearer token.
 auth:
   agents:
     - id: finance
-      token: ${FINANCE_AGENT_TOKEN}
+      token_sha256: ${FINANCE_AGENT_TOKEN_SHA256}  # or token: ${FINANCE_AGENT_TOKEN}
       metrics: [revenue, orders]
       exploration: false
     - id: analyst

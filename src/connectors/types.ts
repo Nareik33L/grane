@@ -67,10 +67,31 @@ export interface WarehouseConnector {
  * last-line guard, not the security boundary.
  */
 export const WRITE_KEYWORDS =
-  /^\s*(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|optimize|execute)\b/i;
+  /^(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|optimize|execute)\b/i;
+
+/** Strip leading block comments and `--` line comments so write detection sees the real head. */
+export function stripLeadingSqlComments(sql: string): string {
+  let rest = sql;
+  for (;;) {
+    const next = rest.replace(/^\s+/, "");
+    if (next.startsWith("/*")) {
+      const end = next.indexOf("*/");
+      if (end === -1) return next;
+      rest = next.slice(end + 2);
+      continue;
+    }
+    if (next.startsWith("--")) {
+      const nl = next.indexOf("\n");
+      if (nl === -1) return "";
+      rest = next.slice(nl + 1);
+      continue;
+    }
+    return next;
+  }
+}
 
 export function isWriteSql(sql: string): boolean {
-  return WRITE_KEYWORDS.test(sql);
+  return WRITE_KEYWORDS.test(stripLeadingSqlComments(sql));
 }
 
 /** TLS options when `connection.ssl` is enabled. Verify certificates by default. */

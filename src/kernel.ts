@@ -13,8 +13,8 @@ import { listExplorableColumns, type ExplorableColumn } from "./explore/raw.js";
 import { recordRawUsage } from "./explore/usage.js";
 import type { AgentGrant } from "./auth/agents.js";
 import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
-import { recordAudit, refusalFromError } from "./audit.js";
-import type { SemanticAuditEvent } from "./audit.js";
+import { httpFields, isAuditWriteFailed, recordAudit, refusalFromError } from "./audit.js";
+import type { HttpAuditContext, SemanticAuditEvent } from "./audit.js";
 
 export const GRANE_VERSION = "0.6.5";
 
@@ -122,6 +122,8 @@ export interface KernelOptions {
   now?: Date;
   agent?: AgentGrant | null;
   connector?: WarehouseConnector | null;
+  /** HTTP correlation copied onto every audit event from this kernel. */
+  http?: HttpAuditContext | null;
 }
 
 /**
@@ -134,6 +136,7 @@ export class GraneKernel {
   readonly projectDir: string | undefined;
   readonly providerWarnings: string[];
   readonly agent: AgentGrant | null;
+  readonly http: HttpAuditContext | null;
   private readonly now: Date | undefined;
   private connector: WarehouseConnector | null = null;
   private schemaCache: DatabaseSchema | null = null;
@@ -145,6 +148,7 @@ export class GraneKernel {
     this.schemaCache = options.schema ?? null;
     this.providerWarnings = options.providerWarnings ?? [];
     this.agent = options.agent ?? null;
+    this.http = options.http ?? null;
     this.now = options.now;
     this.connector = options.connector ?? null;
   }
@@ -344,6 +348,20 @@ export class GraneKernel {
       now: this.now,
       agent: grant,
       connector: this.connector,
+      http: this.http,
+    });
+  }
+
+  /** Kernel that stamps HTTP correlation onto query / refusal audit events. */
+  bindHttp(http: HttpAuditContext): GraneKernel {
+    return new GraneKernel(this.config, {
+      projectDir: this.projectDir,
+      schema: this.schemaCache ?? undefined,
+      providerWarnings: this.providerWarnings,
+      now: this.now,
+      agent: this.agent,
+      connector: this.connector,
+      http,
     });
   }
 
@@ -376,6 +394,7 @@ export class GraneKernel {
     recordAudit(this.config, this.projectDir, {
       ts: new Date().toISOString(),
       agent: this.agent?.id ?? null,
+      ...httpFields(this.http),
       ...event,
     });
   }
@@ -412,12 +431,17 @@ export class GraneKernel {
         row_limit_source: resolved.limitSource,
       };
     } catch (err) {
-      this.audit({
-        kind: "refusal",
-        operation: "explain",
-        query: input,
-        refusal: refusalFromError(err),
-      });
+      if (isAuditWriteFailed(err)) throw err;
+      try {
+        this.audit({
+          kind: "refusal",
+          operation: "explain",
+          query: input,
+          refusal: refusalFromError(err),
+        });
+      } catch (auditErr) {
+        if (isAuditWriteFailed(auditErr)) throw auditErr;
+      }
       throw err;
     }
   }
@@ -431,7 +455,10 @@ export class GraneKernel {
       const { resolved, compiled } = await this.compileReady(input);
       sql = compiled.sql;
       trust = compiled.trust;
-      const result = await executeCompiled(this.getConnector(), compiled, this.config.limits);
+      const result = await executeCompiled(this.getConnector(), compiled, this.config.limits, {
+        agentId: this.agent?.id ?? null,
+      });
+      sql = result.provenance.generated_sql;
       if (this.projectDir && resolved.ungoverned.length > 0) {
         try {
           recordRawUsage(this.projectDir, resolved.ungoverned);
@@ -445,21 +472,26 @@ export class GraneKernel {
         query: input,
         trust: result.trust,
         query_id: result.provenance.query_id,
-        sql: compiled.sql,
+        sql: result.provenance.generated_sql,
         row_count: result.provenance.row_count,
         duration_ms: result.provenance.duration_ms,
       });
       return { ...result, notes: resolved.notes };
     } catch (err) {
-      this.audit({
-        kind: "refusal",
-        operation: "query",
-        query: input,
-        ...(trust ? { trust } : {}),
-        ...(sql ? { sql } : {}),
-        duration_ms: Date.now() - started,
-        refusal: refusalFromError(err),
-      });
+      if (isAuditWriteFailed(err)) throw err;
+      try {
+        this.audit({
+          kind: "refusal",
+          operation: "query",
+          query: input,
+          ...(trust ? { trust } : {}),
+          ...(sql ? { sql } : {}),
+          duration_ms: Date.now() - started,
+          refusal: refusalFromError(err),
+        });
+      } catch (auditErr) {
+        if (isAuditWriteFailed(auditErr)) throw auditErr;
+      }
       throw err;
     }
   }

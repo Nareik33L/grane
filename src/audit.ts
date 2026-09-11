@@ -1,8 +1,15 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { GraneConfig } from "./config/schema.js";
-import { GraneError } from "./errors.js";
+import { GraneError, configError } from "./errors.js";
 import type { SemanticQueryInput, TrustLevel } from "./query/model.js";
+
+/** Correlation fields on HTTP-originated audit events. Omitted on stdio. */
+export interface HttpAuditContext {
+  request_id: string;
+  client_ip: string | null;
+  user_agent: string | null;
+}
 
 /**
  * Query / explain audit record. `query` stays required so existing JSONL
@@ -24,6 +31,9 @@ export interface SemanticAuditEvent {
     message: string;
     requested?: string;
   };
+  request_id?: string;
+  client_ip?: string | null;
+  user_agent?: string | null;
 }
 
 /**
@@ -36,6 +46,9 @@ export interface AuthAuditEvent {
   operation: "http";
   agent: string | null;
   reason: "missing" | "invalid";
+  request_id?: string;
+  client_ip?: string | null;
+  user_agent?: string | null;
 }
 
 /**
@@ -77,7 +90,25 @@ export function appendAudit(
   }
 }
 
-/** Best-effort: never throws. */
+export function auditWriteFailed(cause: unknown): GraneError {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return configError(
+    `Audit log write failed (${message}); refusing because audit.fail_closed is true.`,
+    { audit_failed: true },
+  );
+}
+
+export function isAuditWriteFailed(err: unknown): boolean {
+  if (!(err instanceof GraneError)) return false;
+  const details = err.refusal.details;
+  return Boolean(details && typeof details === "object" && (details as { audit_failed?: boolean }).audit_failed);
+}
+
+/**
+ * Append one audit line. Best-effort by default (never throws). When
+ * `audit.fail_closed` is true, a write failure becomes `config_error` so a
+ * regulated deployment can refuse rather than swallow.
+ */
 export function recordAudit(
   config: GraneConfig,
   projectDir: string | undefined,
@@ -89,7 +120,16 @@ export function recordAudit(
       path: resolveAuditPath(projectDir, config.audit.path),
       stdout: config.audit.stdout,
     });
-  } catch {
-    // Audit must not fail a query.
+  } catch (err) {
+    if (config.audit.fail_closed) throw auditWriteFailed(err);
   }
+}
+
+export function httpFields(http: HttpAuditContext | null | undefined): HttpAuditContext | Record<string, never> {
+  if (!http) return {};
+  return {
+    request_id: http.request_id,
+    client_ip: http.client_ip,
+    user_agent: http.user_agent,
+  };
 }

@@ -334,17 +334,30 @@ export type ExplorationMode = ExplorationConfig["mode"];
  * Per-agent HTTP MCP credentials. When `agents` is non-empty, streamable HTTP
  * requires `Authorization: Bearer <token>` (stdio stays local-process trusted).
  * Omit `metrics` / `dimensions` to grant the full governed catalog.
+ *
+ * Set exactly one of `token` (plaintext, typically `${ENV}`) or `token_sha256`
+ * (hex digest of the token). The hash form means `grane.yml` never holds a
+ * secret even if the file is committed.
  */
-export const agentConfigSchema = z.object({
-  id: z.string().min(1),
-  token: z.string().min(1),
-  metrics: z.array(z.string()).optional(),
-  dimensions: z.array(z.string()).optional(),
-  /** Off unless this agent is explicitly allowed to explore raw columns. */
-  exploration: z.boolean().default(false),
-  /** Extra deny patterns for this agent, on top of the global exclude list. */
-  exploration_exclude: z.array(z.string()).default([]),
-});
+export const agentConfigSchema = z
+  .object({
+    id: z.string().min(1),
+    token: z.string().min(1).optional(),
+    /** SHA-256 hex digest of the bearer token (64 characters). */
+    token_sha256: z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "token_sha256 must be a 64-character hex SHA-256 digest")
+      .optional(),
+    metrics: z.array(z.string()).optional(),
+    dimensions: z.array(z.string()).optional(),
+    /** Off unless this agent is explicitly allowed to explore raw columns. */
+    exploration: z.boolean().default(false),
+    /** Extra deny patterns for this agent, on top of the global exclude list. */
+    exploration_exclude: z.array(z.string()).default([]),
+  })
+  .refine((agent) => Boolean(agent.token) !== Boolean(agent.token_sha256), {
+    message: "each agent must set exactly one of token or token_sha256",
+  });
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
 export const authConfigSchema = z.object({
@@ -366,6 +379,13 @@ export const auditConfigSchema = z.object({
    * container runtimes still collect it).
    */
   stdout: z.boolean().default(false),
+  /**
+   * When true, a failed audit append refuses the query (`config_error`)
+   * instead of swallowing the write. Default stays best-effort so a full
+   * disk does not take the query path down. Regulated deployments should
+   * set this (or `GRANE_AUDIT_FAIL_CLOSED=1`).
+   */
+  fail_closed: z.boolean().default(false),
 });
 export type AuditConfig = z.infer<typeof auditConfigSchema>;
 

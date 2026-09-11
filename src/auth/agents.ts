@@ -32,7 +32,7 @@ export function validateAuthConfig(config: GraneConfig): void {
       throw configError(`Duplicate auth agent id "${agent.id}".`);
     }
     ids.add(agent.id);
-    const digest = createHash("sha256").update(agent.token).digest("hex");
+    const digest = tokenDigest(agent);
     if (tokenDigests.has(digest)) {
       throw configError(`Duplicate auth token for agent "${agent.id}". Each agent needs its own token.`);
     }
@@ -54,6 +54,22 @@ export function tokensEqual(left: string, right: string): boolean {
   const a = createHash("sha256").update(left).digest();
   const b = createHash("sha256").update(right).digest();
   return timingSafeEqual(a, b);
+}
+
+export function tokenDigest(agent: AgentConfig): string {
+  if (agent.token_sha256) return agent.token_sha256.toLowerCase();
+  if (agent.token) return createHash("sha256").update(agent.token).digest("hex");
+  throw configError(`Agent "${agent.id}" has neither token nor token_sha256.`);
+}
+
+export function tokenMatches(agent: AgentConfig, presented: string): boolean {
+  if (agent.token_sha256) {
+    const expected = Buffer.from(agent.token_sha256, "hex");
+    const actual = createHash("sha256").update(presented).digest();
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+  if (agent.token) return tokensEqual(agent.token, presented);
+  return false;
 }
 
 export function bearerTokenFromHeaders(headers: IncomingHttpHeaders): string | undefined {
@@ -80,7 +96,7 @@ export function authenticateAgent(
   }
   if (!token) return "missing";
   for (const agent of agents) {
-    if (tokensEqual(agent.token, token)) return toGrant(agent);
+    if (tokenMatches(agent, token)) return toGrant(agent);
   }
   return "invalid";
 }

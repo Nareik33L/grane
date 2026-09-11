@@ -55,6 +55,22 @@ export function newQueryId(): string {
   return `q_${randomBytes(6).toString("hex")}`;
 }
 
+/** Identifier-like token inside a SQL attribution comment. Strips comment terminators. */
+export function sqlCommentToken(value: string): string {
+  const cleaned = value.replace(/\*\//g, "").replace(/[^\w.-]+/g, "_").slice(0, 64);
+  return cleaned || "-";
+}
+
+/**
+ * Warehouse-side attribution prepended to every executed statement.
+ * Format: grane query_id=q_… agent=finance inside a SQL block comment.
+ */
+export function attributeCompiledSql(sql: string, queryId: string, agentId: string | null): string {
+  const comment = `/* grane query_id=${sqlCommentToken(queryId)} agent=${sqlCommentToken(agentId ?? "-")} */`;
+  const rest = sql.replace(/^\/\* grane query_id=\S+ agent=\S+ \*\/\r?\n/, "");
+  return `${comment}\n${rest}`;
+}
+
 /**
  * A many_to_one relationship promises that the joined key is unique in the
  * target table. The compiled statement measures that promise against the keys
@@ -119,12 +135,15 @@ export async function executeCompiled(
   connector: WarehouseConnector,
   compiled: CompiledQuery,
   limits: LimitsConfig,
+  options?: { agentId?: string | null; queryId?: string },
 ): Promise<QueryResult> {
   if (isWriteSql(compiled.sql)) {
     throw unsafeQuery("Refusing to execute a non-SELECT statement.");
   }
+  const queryId = options?.queryId ?? newQueryId();
+  const sql = attributeCompiledSql(compiled.sql, queryId, options?.agentId ?? null);
   const startedAt = Date.now();
-  const result = await connector.query(compiled.sql, compiled.params, limits);
+  const result = await connector.query(sql, compiled.params, limits);
   let rows = result.rows.slice(0, limits.max_rows);
   assertCardinality(compiled, rows);
   const hidden = result.columns.filter((name) => isHiddenResultColumn(name));
@@ -149,7 +168,7 @@ export async function executeCompiled(
   }
   const completeness = resultCompleteness(compiled, rows.length, preLimitTotal);
   const provenance: Provenance = {
-    query_id: newQueryId(),
+    query_id: queryId,
     trust: compiled.trust,
     query_model: "v1",
     governed: compiled.governed,
@@ -164,7 +183,7 @@ export async function executeCompiled(
         },
       ]),
     ),
-    generated_sql: compiled.sql,
+    generated_sql: sql,
     params: compiled.params,
     executed_at: new Date(startedAt).toISOString(),
     row_count: rows.length,

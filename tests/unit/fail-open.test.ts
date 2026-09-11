@@ -154,6 +154,12 @@ describe("shared write-keyword guard", () => {
   it("does not treat SELECT as a write", () => {
     expect(isWriteSql("SELECT 1")).toBe(false);
     expect(isWriteSql("  with cte as (select 1) select * from cte")).toBe(false);
+    expect(isWriteSql("/* grane query_id=q_abc agent=finance */\nSELECT 1")).toBe(false);
+  });
+
+  it("still sees writes after a leading comment", () => {
+    expect(isWriteSql("/* c */\nINSERT INTO t VALUES (1)")).toBe(true);
+    expect(isWriteSql("-- comment\nDELETE FROM t")).toBe(true);
   });
 
   it("covers the former connector gaps", () => {
