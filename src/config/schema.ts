@@ -242,6 +242,11 @@ export const connectionConfigSchema = z.object({
   http_path: z.string().optional(),
   /** Databricks or MotherDuck token (falls back to password / MOTHERDUCK_TOKEN). */
   token: z.string().optional(),
+  /**
+   * Postgres/MySQL pool size. Default 5 (a pilot). Raise on a shared HTTP
+   * server; `limits.max_concurrency` defaults to 2× this.
+   */
+  pool_size: z.number().int().positive().default(5),
 });
 export type ConnectionConfig = z.infer<typeof connectionConfigSchema>;
 
@@ -282,6 +287,16 @@ export const limitsConfigSchema = z.object({
   max_rows: z.number().int().positive().default(10000),
   default_rows: z.number().int().positive().default(1000),
   timeout_ms: z.number().int().positive().default(30000),
+  /**
+   * Max in-flight HTTP `/mcp` requests. Default 2 × `connection.pool_size`.
+   * Excess requests get 503 rather than queueing on the warehouse pool.
+   */
+  max_concurrency: z.number().int().positive().optional(),
+  /**
+   * Optional process-wide HTTP token bucket (requests per second). Omit for
+   * no global limit. Per-agent quotas are out of scope.
+   */
+  rate_limit_rps: z.number().positive().optional(),
 });
 export type LimitsConfig = z.infer<typeof limitsConfigSchema>;
 

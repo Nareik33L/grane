@@ -52,6 +52,7 @@ connection:
   schema: public
   # ssl: true                 # TLS; certificates are verified
   # ssl_verify: false         # only if you cannot fix the chain yet
+  # pool_size: 5              # Postgres/MySQL pool; raise on a shared HTTP server
   # Snowflake:  account, warehouse, database, schema, user, password, role
   # BigQuery:   project, dataset, location, credentials (keyfile path)
   # DuckDB:     path (file or :memory:)
@@ -64,6 +65,8 @@ limits:
   max_rows: 10000
   default_rows: 1000
   timeout_ms: 30000
+  # max_concurrency: 10       # default 2 × connection.pool_size; extra /mcp requests get 503
+  # rate_limit_rps: 20        # optional process-wide HTTP token bucket
 
 # Append-only query audit (JSONL). Queries, refusals, HTTP auth denials.
 # No row payloads, no agent tokens.

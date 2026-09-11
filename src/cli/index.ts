@@ -6,7 +6,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { loadConfig } from "../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
-import { serveHttp, serveStdio } from "../mcp/transport.js";
+import { serveHttp, serveStdio, installHttpProcessShutdown, type HttpMcpHandle } from "../mcp/transport.js";
 import { isLoopbackHost } from "../mcp/http-bind.js";
 import { registerMcpCommands } from "./mcp.js";
 import { GraneError } from "../errors.js";
@@ -363,6 +363,7 @@ program
   )
   .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean }) => {
     const kernel = loadKernel();
+    let handle: HttpMcpHandle | undefined;
     try {
       if (options.stdio) {
         await serveStdio(kernel);
@@ -370,12 +371,15 @@ program
       }
       const port = Number(options.port);
       const host = options.host;
-      const handle = await serveHttp(kernel, port, {
+      handle = await serveHttp(kernel, port, {
         host,
         allowAnonymous: options.allowAnonymous,
       });
+      installHttpProcessShutdown(handle, kernel);
       const catalog = await kernel.catalog();
       const agents = kernel.config.auth.agents.length;
+      const poolSize = kernel.config.connection.pool_size;
+      const concurrency = kernel.config.limits.max_concurrency ?? poolSize * 2;
       console.log("Grane MCP Server\n");
       console.log(`Database      ${kernel.config.connection.type}`);
       console.log(`Providers     ${kernel.serverInfo().semantic_providers.join(", ")}`);
@@ -383,6 +387,13 @@ program
         agents > 0
           ? `Auth          ${agents} agent${agents === 1 ? "" : "s"} (HTTP bearer required)`
           : `Auth          anonymous`,
+      );
+      console.log(`Pool          ${poolSize}`);
+      console.log(`Concurrency   ${concurrency}`);
+      console.log(
+        kernel.config.limits.rate_limit_rps != null
+          ? `Rate limit    ${kernel.config.limits.rate_limit_rps} rps`
+          : `Rate limit    off`,
       );
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
@@ -398,6 +409,8 @@ program
         : handle.host;
       console.log(`MCP           http://${reach}:${handle.port}/mcp`);
     } catch (err) {
+      await handle?.close().catch(() => undefined);
+      await kernel.close().catch(() => undefined);
       fail(err);
     }
   });

@@ -120,6 +120,26 @@ server {
 
 Point the agent at `https://analytics.example.com/mcp`.
 
+## HTTP perimeter
+
+The MCP server is Node `http`, not a framework. Production-relevant defaults:
+
+- Request bodies over **1 MiB** are rejected with `413`.
+- `requestTimeout` / `headersTimeout` are set from `limits.timeout_ms`.
+- In-flight `/mcp` requests are capped at `limits.max_concurrency` (default **2 × `connection.pool_size`**). Excess requests get **503** instead of queueing on a 5-connection warehouse pool. `/health` is not counted.
+- Optional process-wide token bucket: `limits.rate_limit_rps`. When set, excess `/mcp` requests get **429**. Per-agent quotas are not in this release.
+- `SIGTERM` / `SIGINT` stop accepting, drain in-flight requests, then `connector.close()`.
+- Postgres and MySQL honour `connection.pool_size` (default 5). Raise it on a shared server.
+
+```yaml
+connection:
+  pool_size: 16
+limits:
+  timeout_ms: 30000
+  max_concurrency: 32
+  rate_limit_rps: 20
+```
+
 ## Audit log
 
 Every `query` (and every `explain`/`query` refusal) appends one JSON line.

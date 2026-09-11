@@ -31,6 +31,7 @@ connection:
   schema: public
   # ssl: true
   # ssl_verify: false     # only if you cannot fix the certificate chain
+  # pool_size: 5          # Postgres pool; raise on a shared HTTP server
 ```
 
 When `ssl: true`, certificates are verified. Set `ssl_verify: false` to opt out.
@@ -46,6 +47,7 @@ connection:
   schema: shop            # database name
   # ssl: true
   # ssl_verify: false     # only if you cannot fix the certificate chain
+  # pool_size: 5
 ```
 
 ```bash

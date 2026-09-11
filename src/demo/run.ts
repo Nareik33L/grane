@@ -9,7 +9,7 @@ import {
   resolveClient,
   resolveGraneLaunch,
 } from "../mcp/connect/index.js";
-import { serveHttp } from "../mcp/transport.js";
+import { serveHttp, installHttpProcessShutdown } from "../mcp/transport.js";
 import { buildDemoWarehouse } from "./warehouse.js";
 import { demoRoot } from "./paths.js";
 import { persistDuckdbConnection, resolveDemoProject, type ResolveDemoProjectOptions } from "./project.js";
@@ -136,7 +136,8 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
 
     if (options.serve) {
       const port = options.port ?? 8080;
-      await serveHttp(kernel, port, { onWarning: (message) => io.error(message) });
+      const handle = await serveHttp(kernel, port, { onWarning: (message) => io.error(message) });
+      installHttpProcessShutdown(handle, kernel, (message) => io.error(message));
       io.log(`\nMCP  http://127.0.0.1:${port}/mcp`);
     }
 
