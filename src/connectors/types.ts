@@ -86,6 +86,11 @@ export function timeoutSeconds(timeoutMs: number): number {
   return Math.max(1, Math.ceil(timeoutMs / 1000));
 }
 
+/** Postgres/MySQL pool size. Default 5 when the field is omitted. */
+export function connectionPoolSize(connection: { pool_size?: number }): number {
+  return connection.pool_size && connection.pool_size > 0 ? connection.pool_size : 5;
+}
+
 /** Honour limits.timeout_ms when the driver has no native deadline. */
 export async function runWithTimeout<T>(
   work: Promise<T>,

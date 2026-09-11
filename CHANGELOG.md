@@ -17,6 +17,13 @@
   connector.
 - Docs no longer claim every warehouse wraps queries in a Postgres `READ ONLY`
   transaction. The database role remains the real control.
+- HTTP MCP caps request bodies at 1 MiB (`413`), sets `requestTimeout` /
+  `headersTimeout`, and refuses extra `/mcp` work with `503` once
+  `limits.max_concurrency` in-flight requests are reached (default 2 ×
+  `connection.pool_size`). Optional `limits.rate_limit_rps` is a process-wide
+  token bucket (`429`). `SIGTERM`/`SIGINT` drain in-flight requests then close
+  the warehouse connector. Postgres/MySQL pool size is `connection.pool_size`
+  (default 5).
 
 ## 0.6.5
 

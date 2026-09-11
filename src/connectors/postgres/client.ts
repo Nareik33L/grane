@@ -3,13 +3,14 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../../config/schema
 import { configError } from "../../errors.js";
 import { postgresDialect, redshiftDialect, type WarehouseType } from "../dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../types.js";
-import { isWriteSql, warehouseSslOptions } from "../types.js";
+import { isWriteSql, warehouseSslOptions, connectionPoolSize } from "../types.js";
 import { unsafeQuery } from "../../errors.js";
 
 const { Pool } = pg;
 
 export function createPgPool(connection: ConnectionConfig): pg.Pool {
   const ssl = warehouseSslOptions(connection);
+  const max = connectionPoolSize(connection);
   if (connection.url) {
     if (connection.url.includes("${")) {
       throw configError(
@@ -19,7 +20,7 @@ export function createPgPool(connection: ConnectionConfig): pg.Pool {
     return new Pool({
       connectionString: connection.url,
       ssl,
-      max: 5,
+      max,
     });
   }
   if (!connection.host && !connection.database && !process.env.PGHOST && !process.env.PGDATABASE) {
@@ -34,7 +35,7 @@ export function createPgPool(connection: ConnectionConfig): pg.Pool {
     user: connection.user,
     password: connection.password,
     ssl,
-    max: 5,
+    max,
   });
 }
 

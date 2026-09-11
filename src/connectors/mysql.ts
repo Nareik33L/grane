@@ -2,7 +2,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { configError } from "../errors.js";
 import { mysqlDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule, isWriteSql, warehouseSslOptions } from "./types.js";
+import { loadOptionalModule, isWriteSql, warehouseSslOptions, connectionPoolSize } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 type MysqlPool = {
@@ -28,10 +28,11 @@ export class MysqlConnector implements WarehouseConnector {
       "mysql2/promise",
       "MySQL",
     ));
+    const connectionLimit = connectionPoolSize(this.connection);
     if (this.connection.url) {
       this.pool = mysql.createPool({
         uri: this.connection.url,
-        connectionLimit: 5,
+        connectionLimit,
         ssl: warehouseSslOptions(this.connection),
       });
     } else {
@@ -45,7 +46,7 @@ export class MysqlConnector implements WarehouseConnector {
         password: this.connection.password,
         database: this.connection.database,
         ssl: warehouseSslOptions(this.connection),
-        connectionLimit: 5,
+        connectionLimit,
       });
     }
     return this.pool;

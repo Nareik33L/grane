@@ -43,7 +43,7 @@ export { inferRelationships, type DatabaseSchema } from "./connectors/types.js";
 export { createConnector } from "./connectors/create.js";
 export { getDialect, WAREHOUSE_TYPES } from "./connectors/dialect.js";
 export { buildMcpServer } from "./mcp/server.js";
-export { serveStdio, serveHttp, type HttpMcpHandle, type ServeHttpOptions } from "./mcp/transport.js";
+export { serveStdio, serveHttp, installHttpProcessShutdown, type HttpMcpHandle, type ServeHttpOptions } from "./mcp/transport.js";
 export {
   CLIENT_IDS,
   connectMcp,
