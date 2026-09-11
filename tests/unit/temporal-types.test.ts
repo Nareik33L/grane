@@ -60,6 +60,13 @@ describe("classifyTemporalType", () => {
     expect(classifyTemporalType("")).toBe("unknown");
   });
 
+  it("unwraps ClickHouse Nullable(...) so Date is not unknown", () => {
+    expect(classifyTemporalType("Nullable(Date)", "clickhouse")).toBe("date");
+    expect(classifyTemporalType("Nullable(DateTime)", "clickhouse")).toBe("timestamp_naive");
+    expect(classifyTemporalType("Nullable(DateTime64(6, 'UTC'))", "clickhouse")).toBe("timestamp_naive");
+    expect(classifyTemporalType("DateTime64(3)", "clickhouse")).toBe("timestamp_naive");
+  });
+
   it("is stable across the supported warehouses for DATE", () => {
     const warehouses: WarehouseType[] = [
       "postgres",

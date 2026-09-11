@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- ClickHouse 24 is `certified`: the shared corpus and connector-safety suite
+  run in CI (`clickhouse/clickhouse-server:24.8`). Every query sets
+  `readonly=1`, `join_use_nulls=1` (unmatched LEFT JOIN is NULL),
+  `session_timezone=UTC`, `aggregate_functions_null_for_empty` (empty SUM is
+  NULL), and quotes 64-bit JSON integers. `contains` uses
+  `positionCaseInsensitiveUTF8` (ClickHouse 24 has no `LIKE … ESCAPE`).
+  `@clickhouse/client` is a dev/optional dependency. Seed DDL uses
+  `MergeTree` + `Nullable(...)`.
+
 - MySQL 8 is `certified`: the shared corpus and connector-safety suite run in
   CI (`mysql:8.4`, timezone tables loaded via `mysql_tzinfo_to_sql` so
   `CONVERT_TZ` works). `mysql2` is a dev/optional dependency so CI has the
@@ -11,17 +20,17 @@
   backslash, not C-escape stripping.
 
 - Warehouse certification map (`src/connectors/certification.ts`): Postgres 16,
-  MySQL 8, and DuckDB 1.5 are `certified` (shared corpus in CI). Other engines
-  are `self_certifiable`, not certified. `catalog.server.warehouse` reports
-  `{ type, certification, certified_version }`. `grane validate --production`
+  MySQL 8, DuckDB 1.5, and ClickHouse 24 are `certified` (shared corpus in CI).
+  Other engines are `self_certifiable`, not certified. `catalog.server.warehouse`
+  reports `{ type, certification, certified_version }`. `grane validate --production`
   warns (does not fail) when the configured engine is not certified.
 
 - Certification corpus plumbing is engine-agnostic: seed arrays and TypeScript
   gold in `tests/certification/`, `ddl(dialect)` from a column-type map, and a
-  `CertEngine` adapter (`tests/helpers/engines/`). Postgres, DuckDB, and MySQL
-  run the same parameterised suite (`tests/certification/corpus.test.ts`);
-  ClickHouse is a stub until that CI workstream. Reports write to
-  `certification/<engine>.json`. Connector session safety is unchanged.
+  `CertEngine` adapter (`tests/helpers/engines/`). Postgres, DuckDB, MySQL, and
+  ClickHouse run the same parameterised suite (`tests/certification/corpus.test.ts`).
+  Reports write to `certification/<engine>.json`. Connector session safety is
+  unchanged.
 
 - Connector session safety: MySQL `SET SESSION TRANSACTION READ ONLY` and
   `time_zone = '+00:00'` on the query connection; ClickHouse `readonly=1`,

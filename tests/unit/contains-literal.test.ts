@@ -61,8 +61,13 @@ describe("contains compile-inspect (every dialect)", () => {
     it(`${type}: ESCAPE, SQL-side replace, raw bound value`, () => {
       for (const value of literals) {
         const { compiled } = compileContains(type, value);
-        expect(compiled.sql, `${type} ${JSON.stringify(value)}`).toMatch(/ESCAPE '!'/);
-        expect(compiled.sql, `${type} ${JSON.stringify(value)}`).toMatch(/replace/i);
+        if (type === "clickhouse") {
+          expect(compiled.sql, `${type} ${JSON.stringify(value)}`).toMatch(/positionCaseInsensitiveUTF8\(/);
+          expect(compiled.sql, `${type} ${JSON.stringify(value)}`).not.toMatch(/ESCAPE /);
+        } else {
+          expect(compiled.sql, `${type} ${JSON.stringify(value)}`).toMatch(/ESCAPE '!'/);
+          expect(compiled.sql, `${type} ${JSON.stringify(value)}`).toMatch(/replace/i);
+        }
         expect(compiled.params).toContain(value);
         expect(compiled.sql).not.toMatch(/ILIKE '%' \|\| \$[0-9]+ \|\| '%'(?! ESCAPE)/);
       }
@@ -90,7 +95,11 @@ describe("contains compile-inspect (every dialect)", () => {
       const sql = d.contains('"sku"', ph);
       expect(sql).toContain(ph);
       expect(sql).not.toContain("A_B");
-      expect(sql).toMatch(/ESCAPE '!'/);
+      if (type === "clickhouse") {
+        expect(sql).toMatch(/positionCaseInsensitiveUTF8\(/);
+      } else {
+        expect(sql).toMatch(/ESCAPE '!'/);
+      }
     }
   });
 });

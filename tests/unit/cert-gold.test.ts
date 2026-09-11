@@ -55,5 +55,8 @@ describe("certification ddl(dialect)", () => {
     // MySQL would store `'A\B'` as `AB`; the seed sku must be `'A\\B'`.
     expect(ddl("mysql").join("\n")).toContain("'A\\\\B'");
     expect(ddl("postgres").join("\n")).toContain("'A\\B'");
+    expect(ddl("clickhouse").some((s) => s.includes("ENGINE = MergeTree"))).toBe(true);
+    expect(ddl("clickhouse").some((s) => s.includes("Nullable("))).toBe(true);
+    expect(ddl("clickhouse").join("\n")).toContain("'A\\\\B'");
   });
 });

@@ -409,10 +409,13 @@ export const clickhouseDialect: SqlDialect = {
     return `toDate(${placeholder})`;
   },
   castNumeric(expr) {
-    return `toFloat64(${expr})`;
+    return `CAST((${expr}) AS Decimal(38, 12))`;
   },
   contains(columnExpr, placeholder) {
-    return `${columnExpr} ILIKE concat('%', ${escapeLikeExpr(placeholder, "replaceAll")}, '%') ESCAPE ${lit(LIKE_ESCAPE_CHAR)}`;
+    // ClickHouse 24 has no `LIKE … ESCAPE` (SQL clause landed in 26.6).
+    // position* is literal substring match, so `%`/`_` in the bound value
+    // stay literal — the same contract as ESCAPE '!' on other dialects.
+    return `positionCaseInsensitiveUTF8(${columnExpr}, ${placeholder}) > 0`;
   },
   filteredAggregate: filteredWithCase,
 };
@@ -474,8 +477,14 @@ export function classifyTemporalType(
   warehouse?: WarehouseType,
 ): TemporalKind {
   if (!dataType) return "unknown";
-  const t = dataType
-    .trim()
+  let raw = dataType.trim();
+  // ClickHouse introspects `Nullable(Date)` / `Nullable(DateTime64(3))`.
+  for (let i = 0; i < 4; i++) {
+    const inner = raw.match(/^nullable\((.*)\)\s*$/i);
+    if (!inner) break;
+    raw = inner[1]!.trim();
+  }
+  const t = raw
     .toLowerCase()
     .replace(/_/g, " ")
     .replace(/\([^)]*\)/g, " ")

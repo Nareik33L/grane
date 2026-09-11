@@ -24,7 +24,7 @@ import {
   MysqlConnector,
   mysqlMaxExecutionTimeSql,
 } from "../../src/connectors/mysql.js";
-import { clickhouseQuerySettings } from "../../src/connectors/clickhouse.js";
+import { clickhouseQuerySettings, ClickHouseConnector } from "../../src/connectors/clickhouse.js";
 import { snowflakeSessionSetupSql } from "../../src/connectors/snowflake.js";
 import { DATABRICKS_SESSION_UTC } from "../../src/connectors/databricks.js";
 import { BigQueryConnector } from "../../src/connectors/bigquery.js";
@@ -42,6 +42,7 @@ import type { CompiledQuery } from "../../src/compile/compiler.js";
 import { GraneError } from "../../src/errors.js";
 import { postgresLiveEnv } from "../helpers/postgres-live.js";
 import { mysqlLiveEnv } from "../helpers/mysql-live.js";
+import { clickhouseLiveEnv } from "../helpers/clickhouse-live.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -192,12 +193,14 @@ describe("timeout / read-only / UTC session SQL (no cloud creds)", () => {
     expect(mysqlMaxExecutionTimeSql(2500)).toBe("SET SESSION max_execution_time = 2500");
   });
 
-  it("ClickHouse sets timeout, readonly, join_use_nulls, and UTC", () => {
+  it("ClickHouse sets timeout, readonly, join_use_nulls, UTC, and empty-agg NULL", () => {
     expect(clickhouseQuerySettings(1500)).toEqual({
       max_execution_time: timeoutSeconds(1500),
       readonly: "1",
       join_use_nulls: "1",
       session_timezone: "UTC",
+      aggregate_functions_null_for_empty: 1,
+      output_format_json_quote_64bit_integers: 1,
     });
   });
 
@@ -456,5 +459,60 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
     const n = result.rows[0]?.n;
     expect(n === "12.50" || n === 12.5 || n === "12.5").toBe(true);
     expect(Buffer.isBuffer(n)).toBe(false);
+  });
+});
+
+const chEnv = await clickhouseLiveEnv();
+
+describe.skipIf(!chEnv)("ClickHouse connector safety", () => {
+  const connectors: ClickHouseConnector[] = [];
+
+  afterAll(async () => {
+    for (const c of connectors) await c.close();
+  });
+
+  function live(): ClickHouseConnector {
+    const c = new ClickHouseConnector({ type: "clickhouse", url: chEnv!.url, schema: "default" });
+    connectors.push(c);
+    return c;
+  }
+
+  it("refuses a write before the engine", async () => {
+    const c = live();
+    await expect(c.query("INSERT INTO t VALUES (1)", [], LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("pins readonly, UTC, and join_use_nulls so unmatched LEFT JOIN is NULL not 0/''", async () => {
+    const c = live();
+    const result = await c.query(
+      `SELECT timezone() AS tz,
+              r.name AS name
+       FROM (SELECT toUInt8(1) AS id) AS a
+       LEFT JOIN (SELECT toUInt8(2) AS id, 'x' AS name) AS r ON a.id = r.id`,
+      [],
+      LIMITS,
+    );
+    expect(String(result.rows[0]?.tz).toUpperCase()).toBe("UTC");
+    expect(result.rows[0]?.name).toBeNull();
+  });
+
+  it("returns column names on an empty result", async () => {
+    const c = live();
+    const result = await c.query(
+      "SELECT 1 AS revenue, 'x' AS country FROM system.one WHERE 0",
+      [],
+      LIMITS,
+    );
+    expect(result.rows).toEqual([]);
+    expect(result.columns).toEqual(["revenue", "country"]);
+  });
+
+  it("cancels sleep via timeout_ms", async () => {
+    const c = live();
+    const started = Date.now();
+    await expect(c.query("SELECT sleep(8) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });

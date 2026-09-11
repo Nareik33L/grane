@@ -13,6 +13,10 @@ export function clickhouseQuerySettings(timeoutMs: number): Record<string, strin
     readonly: "1",
     join_use_nulls: "1",
     session_timezone: "UTC",
+    // Empty SUM/AVG would otherwise be 0, so #34 NULL-measure groups collapse.
+    aggregate_functions_null_for_empty: 1,
+    // Int64 past MAX_SAFE_INTEGER must not become a JSON number.
+    output_format_json_quote_64bit_integers: 1,
   };
 }
 
@@ -49,6 +53,7 @@ export class ClickHouseConnector implements WarehouseConnector {
       username: this.connection.user,
       password: this.connection.password,
       database: this.schemaName,
+      clickhouse_settings: clickhouseQuerySettings(30_000),
     });
     return this.client;
   }
@@ -82,6 +87,7 @@ export class ClickHouseConnector implements WarehouseConnector {
               ORDER BY table, position`,
       query_params: { db: this.schemaName },
       format: "JSONEachRow",
+      clickhouse_settings: clickhouseQuerySettings(30_000),
     });
     const rows = await result.json<{ table_name: string; column_name: string; data_type: string }[]>();
     const tablesByName = new Map<string, TableInfo>();

@@ -4,7 +4,7 @@ import { CERT_TABLES, SEED, type CertColumn, type CertColumnType } from "./data.
 type Dialect = WarehouseType;
 
 function quoteIdent(dialect: Dialect, name: string): string {
-  if (dialect === "mysql") return `\`${name.replace(/`/g, "``")}\``;
+  if (dialect === "mysql" || dialect === "clickhouse") return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -92,13 +92,17 @@ export const SQL_TYPE: Record<Dialect, Record<CertColumnType, string>> = {
 };
 
 function columnSql(dialect: Dialect, col: CertColumn): string {
-  return `${quoteIdent(dialect, col.name)} ${SQL_TYPE[dialect][col.type]}`;
+  const ty = SQL_TYPE[dialect][col.type];
+  if (dialect === "clickhouse") {
+    return `${quoteIdent(dialect, col.name)} Nullable(${ty})`;
+  }
+  return `${quoteIdent(dialect, col.name)} ${ty}`;
 }
 
 function escapeString(dialect: Dialect, value: string): string {
   let s = value;
-  // MySQL C-escapes in string literals: `\B` is stored as `B` unless doubled.
-  if (dialect === "mysql") s = s.replaceAll("\\", "\\\\");
+  // MySQL / ClickHouse C-escape string literals: `\B` is stored as `B` unless doubled.
+  if (dialect === "mysql" || dialect === "clickhouse") s = s.replaceAll("\\", "\\\\");
   return `'${s.replaceAll("'", "''")}'`;
 }
 
@@ -120,9 +124,11 @@ function literal(dialect: Dialect, col: CertColumn, value: unknown): string {
     case "text":
       return escapeString(dialect, String(value));
     case "date":
+      if (dialect === "clickhouse") return `toDate('${String(value)}')`;
       return `DATE '${String(value)}'`;
     case "timestamp_naive":
       if (dialect === "mysql") return `'${wallClock(String(value))}'`;
+      if (dialect === "clickhouse") return `parseDateTimeBestEffort('${wallClock(String(value))}')`;
       return `TIMESTAMP '${wallClock(String(value))}'`;
     case "timestamptz": {
       const clock = wallClock(String(value));
@@ -130,6 +136,7 @@ function literal(dialect: Dialect, col: CertColumn, value: unknown): string {
         return `'${clock}+00'`;
       }
       if (dialect === "mysql") return `'${clock}'`;
+      if (dialect === "clickhouse") return `toDateTime64('${clock}', 6, 'UTC')`;
       return `'${clock}+00'`;
     }
     default:
@@ -139,7 +146,11 @@ function literal(dialect: Dialect, col: CertColumn, value: unknown): string {
 
 function createTable(dialect: Dialect, table: (typeof CERT_TABLES)[number]): string {
   const cols = table.columns.map((c) => `  ${columnSql(dialect, c)}`).join(",\n");
-  return `CREATE TABLE ${quoteIdent(dialect, table.name)} (\n${cols}\n)`;
+  const name = quoteIdent(dialect, table.name);
+  if (dialect === "clickhouse") {
+    return `CREATE TABLE ${name} (\n${cols}\n) ENGINE = MergeTree ORDER BY tuple()`;
+  }
+  return `CREATE TABLE ${name} (\n${cols}\n)`;
 }
 
 function insertRows(
