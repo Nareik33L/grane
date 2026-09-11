@@ -52,5 +52,8 @@ describe("certification ddl(dialect)", () => {
     expect(ddl("postgres").some((s) => s.includes("9007199254740993"))).toBe(true);
     expect(ddl("postgres").some((s) => s.includes("DROP TABLE"))).toBe(true);
     expect(ddl("postgres").filter((s) => s.startsWith("CREATE TABLE")).length).toBe(12);
+    // MySQL would store `'A\B'` as `AB`; the seed sku must be `'A\\B'`.
+    expect(ddl("mysql").join("\n")).toContain("'A\\\\B'");
+    expect(ddl("postgres").join("\n")).toContain("'A\\B'");
   });
 });

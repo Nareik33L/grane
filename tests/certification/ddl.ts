@@ -95,8 +95,11 @@ function columnSql(dialect: Dialect, col: CertColumn): string {
   return `${quoteIdent(dialect, col.name)} ${SQL_TYPE[dialect][col.type]}`;
 }
 
-function escapeString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+function escapeString(dialect: Dialect, value: string): string {
+  let s = value;
+  // MySQL C-escapes in string literals: `\B` is stored as `B` unless doubled.
+  if (dialect === "mysql") s = s.replaceAll("\\", "\\\\");
+  return `'${s.replaceAll("'", "''")}'`;
 }
 
 function wallClock(iso: string): string {
@@ -115,7 +118,7 @@ function literal(dialect: Dialect, col: CertColumn, value: unknown): string {
       if (dialect === "mysql") return value ? "1" : "0";
       return value ? "TRUE" : "FALSE";
     case "text":
-      return escapeString(String(value));
+      return escapeString(dialect, String(value));
     case "date":
       return `DATE '${String(value)}'`;
     case "timestamp_naive":
@@ -130,7 +133,7 @@ function literal(dialect: Dialect, col: CertColumn, value: unknown): string {
       return `'${clock}+00'`;
     }
     default:
-      return escapeString(String(value));
+      return escapeString(dialect, String(value));
   }
 }
 
