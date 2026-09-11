@@ -23,6 +23,7 @@ import {
   MYSQL_SESSION_UTC,
   MysqlConnector,
   mysqlMaxExecutionTimeSql,
+  mysqlQueryWithDeadline,
 } from "../../src/connectors/mysql.js";
 import { clickhouseQuerySettings, ClickHouseConnector } from "../../src/connectors/clickhouse.js";
 import { snowflakeSessionSetupSql } from "../../src/connectors/snowflake.js";
@@ -191,6 +192,15 @@ describe("timeout / read-only / UTC session SQL (no cloud creds)", () => {
     expect(MYSQL_SESSION_READONLY).toBe("SET SESSION TRANSACTION READ ONLY");
     expect(MYSQL_SESSION_UTC).toBe("SET time_zone = '+00:00'");
     expect(mysqlMaxExecutionTimeSql(2500)).toBe("SET SESSION max_execution_time = 2500");
+  });
+
+  it("MySQL client deadline rejects and destroys when the query hangs", async () => {
+    let destroyed = false;
+    const hang = new Promise<never>(() => undefined);
+    await expect(mysqlQueryWithDeadline(hang, 40, () => {
+      destroyed = true;
+    })).rejects.toThrow(/timeout_ms/);
+    expect(destroyed).toBe(true);
   });
 
   it("ClickHouse sets timeout, readonly, join_use_nulls, UTC, and empty-agg NULL", () => {
@@ -490,10 +500,18 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
     expect(result.columns).toEqual(["revenue", "country"]);
   });
 
-  it("cancels SLEEP via timeout_ms", async () => {
+  it("cancels a long-running SELECT via timeout_ms", async () => {
     const c = live();
     const started = Date.now();
-    await expect(c.query("SELECT SLEEP(8) AS s", [], { ...LIMITS, timeout_ms: 400 })).rejects.toThrow();
+    // SLEEP() interrupted by max_execution_time returns 1 and the statement
+    // succeeds (MySQL 8.4). BENCHMARK is aborted with ER_QUERY_TIMEOUT; the
+    // client deadline also destroys the socket.
+    await expect(
+      c.query("SELECT BENCHMARK(2000000000, SHA2('grane-timeout', 256)) AS s", [], {
+        ...LIMITS,
+        timeout_ms: 400,
+      }),
+    ).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(3000);
   });
 

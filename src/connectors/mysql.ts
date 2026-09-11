@@ -2,7 +2,14 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js
 import { configError } from "../errors.js";
 import { mysqlDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule, isWriteSql, warehouseSslOptions, connectionPoolSize } from "./types.js";
+import {
+  loadOptionalModule,
+  isWriteSql,
+  warehouseSslOptions,
+  connectionPoolSize,
+  runWithTimeout,
+  timeoutSeconds,
+} from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 export const MYSQL_SESSION_READONLY = "SET SESSION TRANSACTION READ ONLY";
@@ -20,9 +27,23 @@ export function mysqlMaxExecutionTimeSql(timeoutMs: number): string {
   return `SET SESSION max_execution_time = ${Math.max(1, Math.floor(timeoutMs))}`;
 }
 
+/** Hard client deadline. mysql2 `timeout` does not destroy the socket. */
+export async function mysqlQueryWithDeadline<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+  destroy: () => void,
+): Promise<T> {
+  try {
+    return await runWithTimeout(work, timeoutMs, destroy, "MySQL query");
+  } finally {
+    void work.catch(() => undefined);
+  }
+}
+
 type MysqlConnection = {
   query: (opts: unknown, values?: unknown) => Promise<[unknown, { name: string }[] | undefined]>;
   release: () => void;
+  destroy?: () => void;
 };
 
 type MysqlPool = {
@@ -87,9 +108,23 @@ export class MysqlConnector implements WarehouseConnector {
       try {
         await conn.query(mysqlMaxExecutionTimeSql(limits.timeout_ms));
       } catch {
-        // MariaDB uses max_statement_time (seconds). mysql2 `timeout` still cancels.
+        try {
+          await conn.query(`SET SESSION max_statement_time = ${timeoutSeconds(limits.timeout_ms)}`);
+        } catch {
+          // MariaDB / older MySQL: client deadline below still cancels.
+        }
       }
-      const [rows, fields] = await conn.query({ sql, values: params, timeout: limits.timeout_ms });
+      // mysql2 `timeout` is an inactivity timer and does not destroy the
+      // socket. SLEEP() interrupted by max_execution_time returns 1 instead
+      // of erroring (MySQL 8.4). Race a hard deadline and destroy.
+      const work = conn.query({ sql, values: params, timeout: limits.timeout_ms });
+      const [rows, fields] = await mysqlQueryWithDeadline(work, limits.timeout_ms, () => {
+        try {
+          conn.destroy?.();
+        } catch {
+          /* destroy is best-effort after the deadline */
+        }
+      });
       const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
       return {
         columns: Array.isArray(fields) ? fields.map((f) => String(f.name)) : Object.keys(list[0] ?? {}),

@@ -15,6 +15,9 @@
   `queryTimeout` from `limits.timeout_ms`. Redshift is self-certifiable via
   this path; Postgres CI certification does not cover it. Cloud engines stay
   `self_certifiable` (not flipped to `certified` without CI evidence).
+- MySQL `limits.timeout_ms` destroys the query socket on the client deadline.
+  Server `max_execution_time` still applies; `SLEEP()` returning 1 is not
+  treated as a successful long query.
 
 - ClickHouse 24 is `certified`: the shared corpus and connector-safety suite
   run in CI (`clickhouse/clickhouse-server:24.8`). Every query sets

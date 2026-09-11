@@ -81,8 +81,9 @@ npm install mysql2
 ```
 
 Each query connection runs `SET SESSION TRANSACTION READ ONLY` and
-`SET time_zone = '+00:00'`. `limits.timeout_ms` is the mysql2 query timeout
-(and MySQL `max_execution_time` when the server accepts it). Aggregates use
+`SET time_zone = '+00:00'`. `limits.timeout_ms` is a client deadline (the
+socket is destroyed when it elapses) plus MySQL `max_execution_time` when the
+server accepts it. Aggregates use
 `CASE WHEN` rather than `FILTER (WHERE ...)`. Named-zone `CONVERT_TZ` needs
 the server timezone tables (`mysql_tzinfo_to_sql`); `grane mcp doctor` warns
 when `CONVERT_TZ` returns NULL. CI certifies MySQL 8 (`COUNT(*) OVER` needs
