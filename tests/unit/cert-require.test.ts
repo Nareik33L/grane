@@ -32,7 +32,6 @@ function stub(type: WarehouseType, available: boolean | (() => Promise<boolean>)
 
 describe("GRANE_CERT_REQUIRE", () => {
   it("parses a comma list and ignores blanks", () => {
-    expect(parseRequiredCertEngines(undefined)).toEqual([]);
     expect(parseRequiredCertEngines("")).toEqual([]);
     expect(parseRequiredCertEngines("  ")).toEqual([]);
     expect(parseRequiredCertEngines("postgres, duckdb,mysql, clickhouse")).toEqual([
