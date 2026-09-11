@@ -4,7 +4,7 @@ The shop lives in [`demo/`](../demo/). This file is a pointer so older links
 and `example/DEMO.md` still work.
 
 ```bash
-npx grane-analytics demo   # requires grane-analytics@0.6.5+
+npx grane-analytics demo   # after 0.7.0 is on npm
 # from a clone: npm install && npm run demo
 
 npx grane-analytics -p demo/analytics mcp connect cursor

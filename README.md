@@ -24,7 +24,7 @@ Agent → MCP → Grane → Warehouse
 
 Requires Node 20+. No Docker. No API keys for Grane.
 
-From this repository (works before `0.6.5` is on npm):
+From this repository (until `0.7.0` is on npm):
 
 ```bash
 git clone https://github.com/Nareik33L/grane.git
@@ -33,7 +33,7 @@ npm install
 npm run demo
 ```
 
-Once `grane-analytics@0.6.5` is published, the same path is:
+Once `grane-analytics@0.7.0` is published, the same path is:
 
 ```bash
 npx grane-analytics demo

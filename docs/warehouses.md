@@ -150,7 +150,7 @@ The canonical shop is `demo/`. `npx grane-analytics demo` materialises
 `demo/seed/duckdb.sql` into a local DuckDB file (Node, not Python):
 
 ```bash
-npx grane-analytics demo   # requires grane-analytics@0.6.5+
+npx grane-analytics demo   # after 0.7.0 is on npm
 # from a clone: npm install && npm run demo
 # or: python3 example/scripts/build_duckdb.py   # also writes Parquet
 npx grane-analytics -p demo/analytics query revenue -d country --last last_month
