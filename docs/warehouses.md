@@ -37,7 +37,7 @@ TypeScript reductions over the seed, not SQL on the engine under test. Reports w
 | Snowflake | `snowflake` | `self_certifiable` | — |
 | BigQuery | `bigquery` | `self_certifiable` | — |
 | DuckDB | `duckdb` | `certified` | 1.5 |
-| ClickHouse | `clickhouse` | `self_certifiable` | — |
+| ClickHouse | `clickhouse` | `certified` | 24 |
 | Amazon Redshift | `redshift` | `self_certifiable` | — |
 | Databricks | `databricks` | `self_certifiable` | — |
 
@@ -213,9 +213,21 @@ npm install @clickhouse/client
 ```
 
 Queries use ClickHouse `FORMAT JSON` so `meta` supplies column names when
-`data` is empty. Each query sets `readonly=1`, `join_use_nulls=1`,
-`session_timezone=UTC`, and `max_execution_time` from `limits.timeout_ms`
-(plus an abort signal).
+`data` is empty. Each query sets `readonly=1`, `join_use_nulls=1` (unmatched
+LEFT JOIN is NULL, not `0`/`''`), `session_timezone=UTC`,
+`aggregate_functions_null_for_empty` (empty SUM is NULL, not 0),
+`output_format_json_quote_64bit_integers`, and `max_execution_time` from
+`limits.timeout_ms` (plus an abort signal). Aggregates use `CASE WHEN`
+rather than `FILTER (WHERE ...)`. `contains` uses
+`positionCaseInsensitiveUTF8` because ClickHouse 24 has no `LIKE … ESCAPE`
+(that SQL clause landed in 26.6). CI certifies ClickHouse 24. Week starts
+use `toStartOfWeek(expr, 1)` (Monday) and `toStartOfWeek(expr, 0)` (Sunday).
+Timestamp localization uses `formatDateTime(…, '%F %T', timezone)` (`%T` is
+`%H:%i:%S`; `%M` is the month name on 24.x) and CASTs to `Nullable(DateTime)`
+so the civil bound is a wall-clock value. `toTimeZone` keeps the Unix instant
+and would not shift NY day bounds. The cardinality wrapper is an equi-join on
+`__grane_join` — ClickHouse rewrites `LEFT JOIN ON TRUE` to CROSS JOIN and
+drops an empty right side. Ratio CAST uses `Nullable(Decimal(38, 12))`.
 
 ## Time dimensions and `project.timezone`
 

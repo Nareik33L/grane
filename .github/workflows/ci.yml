@@ -41,11 +41,31 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
+      clickhouse:
+        # Pin 24.x LTS. Every Grane query sets readonly=1, join_use_nulls=1
+        # (unmatched LEFT JOIN is NULL, not 0/''), session_timezone=UTC,
+        # aggregate_functions_null_for_empty, and max_execution_time.
+        # wget not curl: the image has no curl, so /ping health must use wget.
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: default
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: grane
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 8123:8123
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
     env:
       GRANE_PG_WRITE_URL: postgres://grane:grane@localhost:5432/grane_demo
       GRANE_PG_READ_URL: postgres://grane_readonly:grane_readonly@localhost:5432/grane_demo
       GRANE_MYSQL_WRITE_URL: mysql://root:grane@127.0.0.1:3306/grane_demo
       GRANE_MYSQL_READ_URL: mysql://grane_readonly:grane_readonly@127.0.0.1:3306/grane_demo
+      GRANE_CLICKHOUSE_URL: http://default:grane@127.0.0.1:8123
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,6 +92,16 @@ jobs:
             console.log(v[0].version, t[0].t);
             if (t[0].t == null) { console.error('CONVERT_TZ returned NULL — timezone tables missing'); process.exit(1); }
             await c.end();
+          "
+      - name: Show ClickHouse version
+        run: |
+          node --input-type=module -e "
+            import { createClient } from '@clickhouse/client';
+            const c = createClient({ url: process.env.GRANE_CLICKHOUSE_URL });
+            const r = await c.query({ query: 'SELECT version() AS version', format: 'JSON' });
+            const j = await r.json();
+            console.log(j.data[0].version);
+            await c.close();
           "
       - run: npm run test:unit
       - name: Upload certification reports

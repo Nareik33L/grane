@@ -142,6 +142,13 @@ export const RESULT_TOTAL_COLUMN = "__grane_n";
  * NULLs to decide padding. Stripped before return.
  */
 export const RESULT_ROW_COLUMN = "__grane_row";
+/**
+ * Equi-join key for the cardinality wrapper. ClickHouse rewrites
+ * `LEFT JOIN … ON TRUE` / `ON 1=1` to CROSS JOIN, which drops an empty
+ * right side (issues #51649 / #60992). A real column equality stays a
+ * hash LEFT JOIN and still pads. Not selected in the outer query.
+ */
+export const WRAPPER_JOIN_COLUMN = "__grane_join";
 
 export function isHiddenResultColumn(name: string): boolean {
   return isInternalResultColumn(name);
@@ -1146,15 +1153,26 @@ export function compileQuery(
       ...preAggReachGuards.map(renderReach),
       ...guards.filter((guard) => guard.scope === "join").map(renderReach),
     ];
+    const clickhouseWrapperJoin = dialect.type === "clickhouse";
+    const cardSelects = [
+      ...guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`),
+      ...(clickhouseWrapperJoin ? [`1 AS ${ident(WRAPPER_JOIN_COLUMN)}`] : []),
+    ];
     const cardCteLines = [
       `${ident("__grane_card")} AS (`,
-      `  SELECT ${guards.map((g) => `${renderGuard(g)} AS ${ident(g.column)}`).join(",\n         ")}`,
+      `  SELECT ${cardSelects.join(",\n         ")}`,
+      // Dummy row: ClickHouse returns 0 rows for `SELECT (empty scalar subquery)`
+      // with no FROM, which drops the wrapper and makes cardinality unobservable.
+      `  FROM (SELECT 1 AS ${ident("_x")}) AS ${ident("_grane_one")}`,
       `)`,
     ];
 
     // --- Analytical result ---
+    const resultSelects = clickhouseWrapperJoin
+      ? `${selects.join(",\n         ")},\n         1 AS ${ident(WRAPPER_JOIN_COLUMN)}`
+      : selects.join(",\n         ");
     const resultCteLines = [`${ident("__grane_result")} AS (`];
-    resultCteLines.push(`  SELECT ${selects.join(",\n         ")}`);
+    resultCteLines.push(`  SELECT ${resultSelects}`);
     resultCteLines.push(`  FROM ${ident(POP_CTE)} AS ${ident(baseTable)}`);
     for (const join of joins) {
       resultCteLines.push(`  ${renderJoin(join)}`);
@@ -1196,7 +1214,13 @@ export function compileQuery(
     lines.push(`WITH ${allCtes.join(",\n")}`);
     lines.push(`SELECT ${outerSelects.join(",\n       ")}`);
     lines.push(`FROM ${ident("__grane_card")}`);
-    lines.push(`LEFT JOIN ${ident("__grane_result")} ON TRUE`);
+    if (clickhouseWrapperJoin) {
+      lines.push(
+        `LEFT JOIN ${ident("__grane_result")} ON ${ident("__grane_card")}.${ident(WRAPPER_JOIN_COLUMN)} = ${ident("__grane_result")}.${ident(WRAPPER_JOIN_COLUMN)}`,
+      );
+    } else {
+      lines.push(`LEFT JOIN ${ident("__grane_result")} ON TRUE`);
+    }
     if (orderKeys.length > 0) {
       lines.push(`ORDER BY ${renderOrderBy("__grane_result")}`);
     }

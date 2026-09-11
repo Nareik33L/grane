@@ -10,7 +10,7 @@ are the #36 corpus; this directory holds engine-agnostic plumbing.
 | `tests/certification/gold.ts` | TypeScript reductions (never SQL on the engine under test) |
 | `tests/certification/corpus.test.ts` | `describe.each(engines)` |
 | `tests/helpers/cert-engine.ts` | `CertEngine` adapter |
-| `tests/helpers/engines/` | Postgres + DuckDB + MySQL (real); ClickHouse (stub until WS4) |
+| `tests/helpers/engines/` | Postgres + DuckDB + MySQL + ClickHouse (real) |
 
 ## Running
 
@@ -23,7 +23,8 @@ Postgres runs when `GRANE_PG_WRITE_URL` / `GRANE_PG_READ_URL` resolve (GitHub
 Actions `postgres:16`). DuckDB runs whenever `@duckdb/node-api` is installed
 (devDependency). MySQL 8 runs when `GRANE_MYSQL_WRITE_URL` resolves and
 timezone tables are loaded (`mysql_tzinfo_to_sql` in CI so `CONVERT_TZ` works).
-ClickHouse remains a stub until that workstream adds a CI service.
+ClickHouse 24 runs when `GRANE_CLICKHOUSE_URL` resolves (CI
+`clickhouse/clickhouse-server:24.8`, with `join_use_nulls=1` on every query).
 
 ## Report artifact
 

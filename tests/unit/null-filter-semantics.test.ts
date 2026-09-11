@@ -319,7 +319,11 @@ describe.skipIf(!duckOk)("JSON null filters (DuckDB live)", () => {
         metrics: ["total"],
         filters: [{ field: "label", operator: "contains", value: "%" }],
       });
-      expect(escaped.compiled.sql, type).toMatch(/ESCAPE '!'/);
+      if (type === "clickhouse") {
+        expect(escaped.compiled.sql, type).toMatch(/positionCaseInsensitiveUTF8\(/);
+      } else {
+        expect(escaped.compiled.sql, type).toMatch(/ESCAPE '!'/);
+      }
       expect(escaped.compiled.params, type).toContain("%");
       expect(refusal(() => k.compile({ metrics: ["total"], filters: [{ field: "status", operator: "=", value: null }] })).status, type).toBe(
         "invalid_query",

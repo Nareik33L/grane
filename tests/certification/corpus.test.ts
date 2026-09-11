@@ -46,7 +46,7 @@ import { PG_READONLY_USER } from "../helpers/postgres-live.js";
 const execFileAsync = promisify(execFile);
 
 /** DATE columns must not be localized; naive/instant timestamps may be. */
-const LOCALIZE_SQL = /AT TIME ZONE|CONVERT_TIMEZONE|CONVERT_TZ|from_utc_timestamp/i;
+const LOCALIZE_SQL = /AT TIME ZONE|CONVERT_TIMEZONE|CONVERT_TZ|from_utc_timestamp|toTimeZone|formatDateTime/i;
 
 async function refusalOf(fn: () => Promise<unknown>): Promise<GraneError["refusal"]> {
   try {
@@ -61,20 +61,24 @@ async function refusalOf(fn: () => Promise<unknown>): Promise<GraneError["refusa
 const engines = await loadAvailableEngines();
 
 describe("certification engine registry", () => {
-  it("registers four engines; ClickHouse stays a stub until WS4; MySQL enrolls when live", async () => {
+  it("registers four engines; MySQL and ClickHouse enroll when live", async () => {
     expect(CERT_ENGINES.map((e) => e.type)).toEqual(["postgres", "duckdb", "mysql", "clickhouse"]);
-    expect(await clickhouseCertEngine.available()).toBe(false);
     expect(mysqlCertEngine.capabilities.postgresReadonlyRole).toBe(false);
     expect(mysqlCertEngine.capabilities.timestamptz).toBe(false);
     expect(mysqlCertEngine.capabilities.filterClause).toBe(false);
     expect(clickhouseCertEngine.capabilities.fkIntrospection).toBe(false);
     expect(clickhouseCertEngine.capabilities.filterClause).toBe(false);
-    await expect(clickhouseCertEngine.setup()).rejects.toThrow(/workstream 4/i);
-    expect(engines.length, "DuckDB (devDependency) and/or live Postgres/MySQL must run the corpus").toBeGreaterThan(0);
+    expect(clickhouseCertEngine.capabilities.timestamptz).toBe(false);
+    expect(engines.length, "DuckDB (devDependency) and/or live warehouses must run the corpus").toBeGreaterThan(0);
     if (await mysqlCertEngine.available()) {
       expect(engines.map((e) => e.type)).toContain("mysql");
     } else {
       expect(engines.map((e) => e.type)).not.toContain("mysql");
+    }
+    if (await clickhouseCertEngine.available()) {
+      expect(engines.map((e) => e.type)).toContain("clickhouse");
+    } else {
+      expect(engines.map((e) => e.type)).not.toContain("clickhouse");
     }
   });
 });
@@ -621,7 +625,9 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
       const juneOk = await k.query({ metrics: ["ending_mrr_series"], time: AUG });
       expect(juneOk.trust).toBe("governed");
       if (session.capabilities.mutateSeed) {
-        await session.execWrite(`INSERT INTO snapshots VALUES (10, 'DUP', DATE '2026-08-01', 3.00, 1.00)`);
+        await session.execWrite(
+          `INSERT INTO snapshots VALUES (10, 'DUP', ${session.type === "clickhouse" ? "toDate('2026-08-01')" : "DATE '2026-08-01'"}, 3.00, 1.00)`,
+        );
         try {
           const refused = await refusalOf(() =>
             k.query({ metrics: ["ending_mrr"], dimensions: ["status"], time: AUG }),
@@ -704,7 +710,11 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
           time: AUG,
         });
         expect(compiled.compiled.params, value).toContain(value);
-        expect(compiled.compiled.sql, value).toMatch(/ESCAPE '!'/);
+        if (session.type === "clickhouse") {
+          expect(compiled.compiled.sql, value).toMatch(/positionCaseInsensitiveUTF8\(/);
+        } else {
+          expect(compiled.compiled.sql, value).toMatch(/ESCAPE '!'/);
+        }
       }
       const empty = await k.query({
         metrics: ["revenue"],

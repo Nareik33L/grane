@@ -450,7 +450,7 @@ describe("compile-only DATE vs timestamp SQL by dialect", () => {
         metrics: ["revenue"],
         time: { from: "2026-08-01", to: "2026-08-01", grain: "month" },
       }).compiled.sql;
-      expect(sql, type).not.toMatch(/AT TIME ZONE|CONVERT_TIMEZONE|CONVERT_TZ|from_utc_timestamp|DATETIME\(|toTimeZone/);
+      expect(sql, type).not.toMatch(/AT TIME ZONE|CONVERT_TIMEZONE|CONVERT_TZ|from_utc_timestamp|DATETIME\(|toTimeZone|formatDateTime/);
       expect(sql, type).toMatch(/::date|AS DATE|TO_DATE|toDate|DATE\(/);
     }
   });
@@ -482,7 +482,9 @@ describe("compile-only DATE vs timestamp SQL by dialect", () => {
       } else if (type === "databricks") {
         expect(sql, type).toContain("from_utc_timestamp");
       } else if (type === "clickhouse") {
-        expect(sql, type).toContain("toTimeZone");
+        expect(sql, type).toContain("formatDateTime");
+        expect(sql, type).toContain("%F %T");
+        expect(sql, type).not.toMatch(/%Y-%m-%d %H:%M:%S/);
       }
     }
   });

@@ -50,9 +50,9 @@ export const WAREHOUSE_CERTIFICATION: Record<WarehouseType, WarehouseCertificati
   clickhouse: {
     type: "clickhouse",
     label: "ClickHouse",
-    certification: "self_certifiable",
-    certified_version: null,
-    explanation: "Connector ships; live corpus CI is not in this release.",
+    certification: "certified",
+    certified_version: "24",
+    explanation: "Shared corpus runs in CI against ClickHouse 24.",
   },
   snowflake: {
     type: "snowflake",
