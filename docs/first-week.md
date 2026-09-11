@@ -32,7 +32,8 @@ npm install -g grane-analytics
 
 Grane compiles SQL and refuses write-headed statements. On Postgres it also
 wraps each query in a `READ ONLY` transaction with a statement timeout; DuckDB
-files open with `access_mode: READ_ONLY`. The warehouse user is still the real
+files open with `access_mode: READ_ONLY`; MySQL sets `SESSION TRANSACTION READ ONLY`;
+ClickHouse sends `readonly=1`. The warehouse user is still the real
 security boundary. Do not use a migration or superuser role.
 
 ```sql

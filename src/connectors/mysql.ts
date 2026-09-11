@@ -5,8 +5,21 @@ import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from
 import { loadOptionalModule, isWriteSql, warehouseSslOptions, connectionPoolSize } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
+export const MYSQL_SESSION_READONLY = "SET SESSION TRANSACTION READ ONLY";
+export const MYSQL_SESSION_UTC = "SET time_zone = '+00:00'";
+
+export function mysqlMaxExecutionTimeSql(timeoutMs: number): string {
+  return `SET SESSION max_execution_time = ${Math.max(1, Math.floor(timeoutMs))}`;
+}
+
+type MysqlConnection = {
+  query: (opts: unknown, values?: unknown) => Promise<[unknown, { name: string }[] | undefined]>;
+  release: () => void;
+};
+
 type MysqlPool = {
   query: (opts: unknown, values?: unknown) => Promise<[unknown, { name: string }[] | undefined]>;
+  getConnection: () => Promise<MysqlConnection>;
   end: () => Promise<void>;
 };
 
@@ -57,12 +70,28 @@ export class MysqlConnector implements WarehouseConnector {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const pool = await this.getPool();
-    const [rows, fields] = await pool.query({ sql, values: params, timeout: limits.timeout_ms });
-    const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
-    return {
-      columns: Array.isArray(fields) ? fields.map((f) => String(f.name)) : Object.keys(list[0] ?? {}),
-      rows: list.slice(0, limits.max_rows),
-    };
+    const conn = await pool.getConnection();
+    try {
+      await conn.query(MYSQL_SESSION_READONLY);
+      await conn.query(MYSQL_SESSION_UTC);
+      try {
+        await conn.query(mysqlMaxExecutionTimeSql(limits.timeout_ms));
+      } catch {
+        // MariaDB uses max_statement_time (seconds). mysql2 `timeout` still cancels.
+      }
+      const [rows, fields] = await conn.query({ sql, values: params, timeout: limits.timeout_ms });
+      const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+      return {
+        columns: Array.isArray(fields) ? fields.map((f) => String(f.name)) : Object.keys(list[0] ?? {}),
+        rows: list.slice(0, limits.max_rows),
+      };
+    } finally {
+      try {
+        conn.release();
+      } catch {
+        // Query timeout may have destroyed the socket.
+      }
+    }
   }
 
   async introspect(): Promise<DatabaseSchema> {

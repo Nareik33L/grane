@@ -54,6 +54,10 @@ connection:
 npm install mysql2
 ```
 
+Each query connection runs `SET SESSION TRANSACTION READ ONLY` and
+`SET time_zone = '+00:00'`. `limits.timeout_ms` is the mysql2 query timeout
+(and MySQL `max_execution_time` when the server accepts it).
+
 ## Snowflake
 
 ```yaml
@@ -72,6 +76,8 @@ connection:
 npm install snowflake-sdk
 ```
 
+Each query best-effort `ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS` and `TIMEZONE = 'UTC'`.
+
 ## BigQuery
 
 ```yaml
@@ -88,6 +94,7 @@ npm install @google-cloud/bigquery
 ```
 
 Application Default Credentials work if `credentials` is omitted.
+Empty results keep column names from the job schema. `jobTimeoutMs` is `limits.timeout_ms`.
 
 ## DuckDB
 
@@ -162,7 +169,8 @@ npm install @databricks/sql
 Use a SQL warehouse HTTP path and a read-only personal access token (or
 service principal token). Tables compile as `` `catalog`.`schema`.`table` ``.
 Empty results still return column names from the statement schema, not
-`Object.keys` of the first row.
+`Object.keys` of the first row. The session is pinned with `SET TIME ZONE 'UTC'`
+and `queryTimeout` is `limits.timeout_ms` in seconds.
 
 ## ClickHouse
 
@@ -178,7 +186,9 @@ npm install @clickhouse/client
 ```
 
 Queries use ClickHouse `FORMAT JSON` so `meta` supplies column names when
-`data` is empty.
+`data` is empty. Each query sets `readonly=1`, `join_use_nulls=1`,
+`session_timezone=UTC`, and `max_execution_time` from `limits.timeout_ms`
+(plus an abort signal).
 
 ## Time dimensions and `project.timezone`
 
@@ -213,9 +223,11 @@ not UTC, Grane refuses (`unsafe_query`) instead of applying timezone
 semantics that might be wrong. `grane query` / `explain` introspect the
 schema when a time range is present so DATE vs timestamp can be distinguished.
 
-DuckDB execution sets `TimeZone=UTC` on the connection so identical SQL does
-not change meaning with the host timezone. Postgres already used
-`SET LOCAL TIME ZONE 'UTC'`.
+DuckDB execution sets `TimeZone=UTC` on the connection (and again before
+each query) so identical SQL does not change meaning with the host timezone.
+Postgres uses `SET LOCAL TIME ZONE 'UTC'`, MySQL `SET time_zone = '+00:00'`,
+ClickHouse `session_timezone=UTC`, Snowflake `ALTER SESSION SET TIMEZONE = 'UTC'`,
+and Databricks `SET TIME ZONE 'UTC'`. BigQuery `TIMESTAMP` values are already UTC.
 
 ## Same metrics, different SQL
 

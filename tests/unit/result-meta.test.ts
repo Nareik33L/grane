@@ -3,6 +3,7 @@ import {
   columnsFromDatabricksSchema,
   executedRowsFromClickHouseJson,
   executedRowsFromDatabricks,
+  executedRowsFromBigQuery,
 } from "../../src/connectors/result-meta.js";
 
 describe("ClickHouse JSON envelope", () => {
@@ -53,6 +54,19 @@ describe("Databricks schema metadata", () => {
 
   it("falls back to the first row when schema is missing", () => {
     const result = executedRowsFromDatabricks([{ revenue: 1 }], null, 10);
+    expect(result.columns).toEqual(["revenue"]);
+  });
+});
+
+describe("BigQuery job schema metadata", () => {
+  it("keeps column names when rows are empty", () => {
+    const result = executedRowsFromBigQuery([], { fields: [{ name: "revenue" }, { name: "country" }] }, 100);
+    expect(result.columns).toEqual(["revenue", "country"]);
+    expect(result.rows).toEqual([]);
+  });
+
+  it("prefers schema over the first row", () => {
+    const result = executedRowsFromBigQuery([{ revenue: 1, extra: 2 }], { fields: [{ name: "revenue" }] }, 10);
     expect(result.columns).toEqual(["revenue"]);
   });
 });

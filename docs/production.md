@@ -58,7 +58,8 @@ named volume. The default `docker-compose.yml` is the self-contained demo.
 
 Create a SELECT-only role (see [first-week.md](first-week.md)). Grane refuses
 non-SELECT SQL on every warehouse. Postgres and Redshift also open a `READ ONLY`
-transaction with a statement timeout; DuckDB files use `access_mode: READ_ONLY`.
+transaction with a statement timeout; DuckDB files use `access_mode: READ_ONLY`;
+MySQL sets `SESSION TRANSACTION READ ONLY`; ClickHouse sends `readonly=1`.
 Leaked credentials should still be unable to write.
 
 ## Per-agent tokens (required on HTTP)

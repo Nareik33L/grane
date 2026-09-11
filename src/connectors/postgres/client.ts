@@ -6,6 +6,13 @@ import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from
 import { isWriteSql, warehouseSslOptions, connectionPoolSize } from "../types.js";
 import { unsafeQuery } from "../../errors.js";
 
+export const POSTGRES_READ_ONLY_BEGIN = "BEGIN TRANSACTION READ ONLY";
+export const POSTGRES_SESSION_UTC = "SET LOCAL TIME ZONE 'UTC'";
+
+export function postgresStatementTimeoutSql(timeoutMs: number): string {
+  return `SET LOCAL statement_timeout = ${Math.floor(timeoutMs)}`;
+}
+
 const { Pool } = pg;
 
 export function createPgPool(connection: ConnectionConfig): pg.Pool {
@@ -58,9 +65,9 @@ export class PostgresConnector implements WarehouseConnector {
     }
     const client = await this.pool.connect();
     try {
-      await client.query("BEGIN TRANSACTION READ ONLY");
-      await client.query(`SET LOCAL statement_timeout = ${Math.floor(limits.timeout_ms)}`);
-      await client.query("SET LOCAL TIME ZONE 'UTC'");
+      await client.query(POSTGRES_READ_ONLY_BEGIN);
+      await client.query(postgresStatementTimeoutSql(limits.timeout_ms));
+      await client.query(POSTGRES_SESSION_UTC);
       const result = await client.query<Record<string, unknown>>(sql, params);
       await client.query("COMMIT");
       return {

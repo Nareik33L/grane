@@ -6,6 +6,16 @@ import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
 import { executedRowsFromClickHouseJson } from "./result-meta.js";
 import { unsafeQuery } from "../errors.js";
 
+/** Settings applied to every ClickHouse query Grane sends. */
+export function clickhouseQuerySettings(timeoutMs: number): Record<string, string | number> {
+  return {
+    max_execution_time: timeoutSeconds(timeoutMs),
+    readonly: "1",
+    join_use_nulls: "1",
+    session_timezone: "UTC",
+  };
+}
+
 type ClickHouseMod = {
   createClient: (opts: Record<string, unknown>) => {
     query: (opts: Record<string, unknown>) => Promise<{ json: <T>() => Promise<T> }>;
@@ -57,7 +67,7 @@ export class ClickHouseConnector implements WarehouseConnector {
       query_params,
       format: "JSON",
       abort_signal: AbortSignal.timeout(limits.timeout_ms),
-      clickhouse_settings: { max_execution_time: timeoutSeconds(limits.timeout_ms) },
+      clickhouse_settings: clickhouseQuerySettings(limits.timeout_ms),
     });
     const payload = await result.json<unknown>();
     return executedRowsFromClickHouseJson(payload, limits.max_rows);

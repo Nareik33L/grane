@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Connector session safety: MySQL `SET SESSION TRANSACTION READ ONLY` and
+  `time_zone = '+00:00'` on the query connection; ClickHouse `readonly=1`,
+  `join_use_nulls=1`, and `session_timezone=UTC`; Snowflake `TIMEZONE=UTC`
+  with `STATEMENT_TIMEOUT_IN_SECONDS`; Databricks `SET TIME ZONE 'UTC'`;
+  DuckDB re-pins UTC on every query. BigQuery empty results keep column
+  names from the job schema, not `Object.keys` of the first row.
+
 - HTTP MCP binds `127.0.0.1` by default (`--host` to change). Unauthenticated
   HTTP on a non-loopback address requires `--allow-anonymous`. A warning is
   printed whenever `auth.agents` is empty. The Docker image still listens on

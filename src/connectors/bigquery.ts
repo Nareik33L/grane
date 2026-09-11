@@ -3,10 +3,17 @@ import { configError } from "../errors.js";
 import { bigqueryDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import { loadOptionalModule, isWriteSql } from "./types.js";
+import { executedRowsFromBigQuery } from "./result-meta.js";
 import { unsafeQuery } from "../errors.js";
 
+type BqJob = {
+  getQueryResults: (opts?: Record<string, unknown>) => Promise<[Record<string, unknown>[]]>;
+  metadata?: { schema?: unknown };
+};
+
 type BigQueryCtor = new (opts?: Record<string, unknown>) => {
-  query: (opts: Record<string, unknown>) => Promise<[Record<string, unknown>[]]>;
+  createQueryJob: (opts: Record<string, unknown>) => Promise<[BqJob]>;
+  query: (opts: Record<string, unknown>) => Promise<[Record<string, unknown>[], { schema?: unknown }?]>;
 };
 
 export class BigQueryConnector implements WarehouseConnector {
@@ -48,14 +55,19 @@ export class BigQueryConnector implements WarehouseConnector {
     params.forEach((value, i) => {
       named[`p${i + 1}`] = value;
     });
-    const [rows] = await bq.query({
+    const jobOpts = {
       query: sql,
       params: named,
       location: this.connection.location,
       jobTimeoutMs: limits.timeout_ms,
-    });
-    const list = rows.slice(0, limits.max_rows);
-    return { columns: Object.keys(list[0] ?? {}), rows: list };
+    };
+    if (typeof bq.createQueryJob === "function") {
+      const [job] = await bq.createQueryJob(jobOpts);
+      const [rows] = await job.getQueryResults({ maxResults: limits.max_rows });
+      return executedRowsFromBigQuery(rows, job.metadata?.schema, limits.max_rows);
+    }
+    const [rows, meta] = await bq.query(jobOpts);
+    return executedRowsFromBigQuery(rows, meta?.schema, limits.max_rows);
   }
 
   async introspect(): Promise<DatabaseSchema> {

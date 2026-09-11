@@ -55,3 +55,33 @@ export function executedRowsFromDatabricks(
     rows: sliced,
   };
 }
+
+/**
+ * BigQuery job `metadata.schema` (or `getQueryResults` apiResponse.schema).
+ * Column names survive `LIMIT 0` / empty `rows`.
+ */
+export function columnsFromBigQuerySchema(schema: unknown): string[] {
+  if (!schema || typeof schema !== "object") return [];
+  const fields = (schema as { fields?: unknown }).fields;
+  if (!Array.isArray(fields)) return [];
+  return fields
+    .map((field) => {
+      if (!field || typeof field !== "object") return "";
+      const name = (field as { name?: unknown }).name;
+      return name == null ? "" : String(name);
+    })
+    .filter(Boolean);
+}
+
+export function executedRowsFromBigQuery(
+  rows: Record<string, unknown>[],
+  schema: unknown,
+  maxRows: number,
+): ExecutedRows {
+  const sliced = rows.slice(0, maxRows);
+  const columns = columnsFromBigQuerySchema(schema);
+  return {
+    columns: columns.length > 0 ? columns : Object.keys(sliced[0] ?? {}),
+    rows: sliced,
+  };
+}
