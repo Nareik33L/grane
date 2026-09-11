@@ -27,6 +27,13 @@ MySQL `mysql://root:grane@127.0.0.1:3306/grane_demo` with tz tables,
 ClickHouse `http://default:grane@127.0.0.1:8123`,
 or the Docker demo Postgres on `localhost:5433`).
 
+Snowflake, BigQuery, Databricks, and Redshift are `self_certifiable`. Their
+`CertEngine` adapters skip unless `GRANE_CERT_*` is set — they are not live in
+OSS CI. `grane certify --engine <type>` runs the same corpus into an isolated
+`grane_cert_<runid>` schema. See [docs/certify.md](docs/certify.md). The dormant
+workflow `.github/workflows/certify-cloud.yml` skips cleanly when secrets are
+absent.
+
 Full `npm test` still needs the demo database on `localhost:5433`
 (`docker compose up -d postgres --wait`) for integration MCP/workflow tests.
 `npm run test:benchmark` builds the DuckDB shop from `demo/seed/duckdb.sql`.

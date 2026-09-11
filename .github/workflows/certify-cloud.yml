@@ -1,0 +1,130 @@
+name: Certify cloud
+
+# Dormant credentialed workflow (Workstream 6).
+# Jobs skip when GRANE_CERT_* secrets are absent.
+# continue-on-error is false on the certify step. That step runs only when
+# the engine's secrets are present, so a skip is a successful no-op — not a
+# swallowed failure. See docs/certify.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: Warehouse to certify
+        type: choice
+        options:
+          - all
+          - snowflake
+          - bigquery
+          - databricks
+          - redshift
+        default: all
+  schedule:
+    # Optional weekly. No-ops without secrets.
+    - cron: "0 6 * * 1"
+  pull_request:
+    types: [labeled, opened, synchronize, reopened]
+
+jobs:
+  certify:
+    name: certify-${{ matrix.engine }}
+    if: >
+      github.event_name == 'workflow_dispatch'
+      || github.event_name == 'schedule'
+      || (github.event_name == 'pull_request'
+          && contains(join(github.event.pull_request.labels.*.name, ','), 'certify-cloud'))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [snowflake, bigquery, databricks, redshift]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Select engine
+        id: select
+        env:
+          REQUESTED: ${{ github.event.inputs.engine || 'all' }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$REQUESTED" != "all" ] && [ "$REQUESTED" != "${{ matrix.engine }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Detect ${{ matrix.engine }} secrets
+        if: steps.select.outputs.run == 'true'
+        id: creds
+        env:
+          GRANE_CERT_SNOWFLAKE_ACCOUNT: ${{ secrets.GRANE_CERT_SNOWFLAKE_ACCOUNT }}
+          GRANE_CERT_SNOWFLAKE_USER: ${{ secrets.GRANE_CERT_SNOWFLAKE_USER }}
+          GRANE_CERT_SNOWFLAKE_PASSWORD: ${{ secrets.GRANE_CERT_SNOWFLAKE_PASSWORD }}
+          GRANE_CERT_SNOWFLAKE_WAREHOUSE: ${{ secrets.GRANE_CERT_SNOWFLAKE_WAREHOUSE }}
+          GRANE_CERT_SNOWFLAKE_DATABASE: ${{ secrets.GRANE_CERT_SNOWFLAKE_DATABASE }}
+          GRANE_CERT_BIGQUERY_PROJECT: ${{ secrets.GRANE_CERT_BIGQUERY_PROJECT }}
+          GRANE_CERT_DATABRICKS_HOST: ${{ secrets.GRANE_CERT_DATABRICKS_HOST }}
+          GRANE_CERT_DATABRICKS_HTTP_PATH: ${{ secrets.GRANE_CERT_DATABRICKS_HTTP_PATH }}
+          GRANE_CERT_DATABRICKS_TOKEN: ${{ secrets.GRANE_CERT_DATABRICKS_TOKEN }}
+          GRANE_CERT_REDSHIFT_URL: ${{ secrets.GRANE_CERT_REDSHIFT_URL }}
+        run: |
+          present=false
+          case "${{ matrix.engine }}" in
+            snowflake)
+              if [ -n "$GRANE_CERT_SNOWFLAKE_ACCOUNT" ] && [ -n "$GRANE_CERT_SNOWFLAKE_USER" ] && [ -n "$GRANE_CERT_SNOWFLAKE_PASSWORD" ] && [ -n "$GRANE_CERT_SNOWFLAKE_WAREHOUSE" ] && [ -n "$GRANE_CERT_SNOWFLAKE_DATABASE" ]; then
+                present=true
+              fi
+              ;;
+            bigquery)
+              if [ -n "$GRANE_CERT_BIGQUERY_PROJECT" ]; then
+                present=true
+              fi
+              ;;
+            databricks)
+              if [ -n "$GRANE_CERT_DATABRICKS_HOST" ] && [ -n "$GRANE_CERT_DATABRICKS_HTTP_PATH" ] && [ -n "$GRANE_CERT_DATABRICKS_TOKEN" ]; then
+                present=true
+              fi
+              ;;
+            redshift)
+              if [ -n "$GRANE_CERT_REDSHIFT_URL" ]; then
+                present=true
+              fi
+              ;;
+          esac
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+      - name: Skip (secrets absent or engine not selected)
+        if: steps.select.outputs.run != 'true' || steps.creds.outputs.present != 'true'
+        run: |
+          if [ "${{ steps.select.outputs.run }}" != "true" ]; then
+            echo "Skipping ${{ matrix.engine }} (workflow_dispatch selected a different engine)."
+          else
+            echo "Skipping ${{ matrix.engine }} — GRANE_CERT_* secrets absent. Expected on public PRs. See docs/certify.md."
+          fi
+      - name: Certify ${{ matrix.engine }}
+        if: steps.select.outputs.run == 'true' && steps.creds.outputs.present == 'true'
+        continue-on-error: false
+        env:
+          GRANE_CERT_SNOWFLAKE_ACCOUNT: ${{ secrets.GRANE_CERT_SNOWFLAKE_ACCOUNT }}
+          GRANE_CERT_SNOWFLAKE_USER: ${{ secrets.GRANE_CERT_SNOWFLAKE_USER }}
+          GRANE_CERT_SNOWFLAKE_PASSWORD: ${{ secrets.GRANE_CERT_SNOWFLAKE_PASSWORD }}
+          GRANE_CERT_SNOWFLAKE_WAREHOUSE: ${{ secrets.GRANE_CERT_SNOWFLAKE_WAREHOUSE }}
+          GRANE_CERT_SNOWFLAKE_DATABASE: ${{ secrets.GRANE_CERT_SNOWFLAKE_DATABASE }}
+          GRANE_CERT_SNOWFLAKE_ROLE: ${{ secrets.GRANE_CERT_SNOWFLAKE_ROLE }}
+          GRANE_CERT_BIGQUERY_PROJECT: ${{ secrets.GRANE_CERT_BIGQUERY_PROJECT }}
+          GRANE_CERT_BIGQUERY_LOCATION: ${{ secrets.GRANE_CERT_BIGQUERY_LOCATION }}
+          GRANE_CERT_BIGQUERY_CREDENTIALS: ${{ secrets.GRANE_CERT_BIGQUERY_CREDENTIALS }}
+          GRANE_CERT_DATABRICKS_HOST: ${{ secrets.GRANE_CERT_DATABRICKS_HOST }}
+          GRANE_CERT_DATABRICKS_HTTP_PATH: ${{ secrets.GRANE_CERT_DATABRICKS_HTTP_PATH }}
+          GRANE_CERT_DATABRICKS_TOKEN: ${{ secrets.GRANE_CERT_DATABRICKS_TOKEN }}
+          GRANE_CERT_DATABRICKS_CATALOG: ${{ secrets.GRANE_CERT_DATABRICKS_CATALOG }}
+          GRANE_CERT_REDSHIFT_URL: ${{ secrets.GRANE_CERT_REDSHIFT_URL }}
+        run: npx tsx src/cli/index.ts certify --engine ${{ matrix.engine }}
+      - name: Upload certification report
+        if: always() && steps.select.outputs.run == 'true' && steps.creds.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: certify-${{ matrix.engine }}
+          path: certification/${{ matrix.engine }}.json
+          if-no-files-found: ignore

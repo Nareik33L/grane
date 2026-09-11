@@ -4,7 +4,14 @@ import { CERT_TABLES, SEED, type CertColumn, type CertColumnType } from "./data.
 type Dialect = WarehouseType;
 
 function quoteIdent(dialect: Dialect, name: string): string {
-  if (dialect === "mysql" || dialect === "clickhouse") return `\`${name.replace(/`/g, "``")}\``;
+  if (
+    dialect === "mysql" ||
+    dialect === "clickhouse" ||
+    dialect === "bigquery" ||
+    dialect === "databricks"
+  ) {
+    return `\`${name.replace(/`/g, "``")}\``;
+  }
   return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -129,14 +136,19 @@ function literal(dialect: Dialect, col: CertColumn, value: unknown): string {
     case "timestamp_naive":
       if (dialect === "mysql") return `'${wallClock(String(value))}'`;
       if (dialect === "clickhouse") return `parseDateTimeBestEffort('${wallClock(String(value))}')`;
+      if (dialect === "bigquery") return `DATETIME '${wallClock(String(value))}'`;
+      if (dialect === "databricks") return `TIMESTAMP_NTZ '${wallClock(String(value))}'`;
+      if (dialect === "snowflake") return `TIMESTAMP_NTZ '${wallClock(String(value))}'`;
       return `TIMESTAMP '${wallClock(String(value))}'`;
     case "timestamptz": {
       const clock = wallClock(String(value));
-      if (dialect === "postgres" || dialect === "duckdb") {
+      if (dialect === "postgres" || dialect === "duckdb" || dialect === "redshift") {
         return `'${clock}+00'`;
       }
       if (dialect === "mysql") return `'${clock}'`;
       if (dialect === "clickhouse") return `toDateTime64('${clock}', 6, 'UTC')`;
+      if (dialect === "bigquery") return `TIMESTAMP '${clock}+00'`;
+      if (dialect === "snowflake") return `'${clock}+00'`;
       return `'${clock}+00'`;
     }
     default:

@@ -62,12 +62,7 @@ export class BigQueryConnector implements WarehouseConnector {
     params.forEach((value, i) => {
       named[`p${i + 1}`] = value;
     });
-    const jobOpts = {
-      query: sql,
-      params: named,
-      location: this.connection.location,
-      jobTimeoutMs: limits.timeout_ms,
-    };
+    const jobOpts = bigQueryJobOptions(sql, named, limits, this.connection.location);
     if (typeof bq.createQueryJob === "function") {
       const [job] = await bq.createQueryJob(jobOpts);
       const [rows, , apiResponse] = await job.getQueryResults({ maxResults: limits.max_rows });
@@ -108,6 +103,34 @@ export class BigQueryConnector implements WarehouseConnector {
   async close(): Promise<void> {
     this.client = null;
   }
+}
+
+/** Default scan cap when `limits.max_bytes_billed` is omitted (10 GiB). */
+export const DEFAULT_BIGQUERY_MAX_BYTES_BILLED = 10 * 1024 * 1024 * 1024;
+
+export function bigQueryMaximumBytesBilled(limits: LimitsConfig): string {
+  return String(limits.max_bytes_billed ?? DEFAULT_BIGQUERY_MAX_BYTES_BILLED);
+}
+
+export function bigQueryJobOptions(
+  sql: string,
+  params: Record<string, Scalar>,
+  limits: LimitsConfig,
+  location?: string,
+): {
+  query: string;
+  params: Record<string, Scalar>;
+  location?: string;
+  jobTimeoutMs: number;
+  maximumBytesBilled: string;
+} {
+  return {
+    query: sql,
+    params,
+    location,
+    jobTimeoutMs: limits.timeout_ms,
+    maximumBytesBilled: bigQueryMaximumBytesBilled(limits),
+  };
 }
 
 export function bigquerySchemaNamespace(connection: ConnectionConfig): string | undefined {

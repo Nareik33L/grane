@@ -41,6 +41,18 @@ export function databricksSchemaNamespace(connection: ConnectionConfig): string 
 
 export const DATABRICKS_SESSION_UTC = "SET TIME ZONE 'UTC'";
 
+/** Statement options honoring `limits.timeout_ms` as `queryTimeout` seconds. */
+export function databricksStatementOptions(
+  params: Scalar[],
+  timeoutMs: number,
+): { runAsync: true; ordinalParameters?: Scalar[]; queryTimeout: number } {
+  return {
+    runAsync: true,
+    ...(params.length > 0 ? { ordinalParameters: params } : {}),
+    queryTimeout: timeoutSeconds(timeoutMs),
+  };
+}
+
 export class DatabricksConnector implements WarehouseConnector {
   readonly type = "databricks" as const;
   readonly dialect = databricksDialect;
@@ -50,10 +62,11 @@ export class DatabricksConnector implements WarehouseConnector {
   private readonly schemaName: string;
   private readonly catalog?: string;
 
-  constructor(connection: ConnectionConfig) {
+  constructor(connection: ConnectionConfig, session?: DatabricksSession | null) {
     this.connection = connection;
     this.schemaName = connection.schema || "default";
     this.catalog = connection.catalog || connection.database || undefined;
+    this.session = session ?? null;
   }
 
   private async getSession(): Promise<DatabricksSession> {
@@ -103,11 +116,10 @@ export class DatabricksConnector implements WarehouseConnector {
       throw unsafeQuery("Refusing to execute a non-SELECT statement.");
     }
     const session = await this.getSession();
-    const operation = await session.executeStatement(sql, {
-      runAsync: true,
-      ordinalParameters: params.length > 0 ? params : undefined,
-      ...(timeoutMs != null ? { queryTimeout: timeoutSeconds(timeoutMs) } : {}),
-    });
+    const operation = await session.executeStatement(
+      sql,
+      timeoutMs != null ? databricksStatementOptions(params, timeoutMs) : { runAsync: true, ...(params.length > 0 ? { ordinalParameters: params } : {}) },
+    );
     try {
       return (await operation.fetchAll()) ?? [];
     } finally {
@@ -121,11 +133,7 @@ export class DatabricksConnector implements WarehouseConnector {
     }
     const session = await this.getSession();
     await this.pinUtc(session);
-    const operation = await session.executeStatement(sql, {
-      runAsync: true,
-      ordinalParameters: params.length > 0 ? params : undefined,
-      queryTimeout: timeoutSeconds(limits.timeout_ms),
-    });
+    const operation = await session.executeStatement(sql, databricksStatementOptions(params, limits.timeout_ms));
     try {
       const rows = (await operation.fetchAll()) ?? [];
       const schema = operation.getSchema ? await operation.getSchema() : null;

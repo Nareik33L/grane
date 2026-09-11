@@ -38,6 +38,10 @@ import {
   clickhouseCertEngine,
   loadAvailableEngines,
   mysqlCertEngine,
+  snowflakeCertEngine,
+  bigqueryCertEngine,
+  databricksCertEngine,
+  redshiftCertEngine,
   type CertEngine,
   type CertSession,
 } from "../helpers/cert-engine.js";
@@ -61,14 +65,30 @@ async function refusalOf(fn: () => Promise<unknown>): Promise<GraneError["refusa
 const engines = await loadAvailableEngines();
 
 describe("certification engine registry", () => {
-  it("registers four engines; MySQL and ClickHouse enroll when live", async () => {
-    expect(CERT_ENGINES.map((e) => e.type)).toEqual(["postgres", "duckdb", "mysql", "clickhouse"]);
+  it("registers eight engines; cloud adapters skip without GRANE_CERT_*", async () => {
+    expect(CERT_ENGINES.map((e) => e.type)).toEqual([
+      "postgres",
+      "duckdb",
+      "mysql",
+      "clickhouse",
+      "snowflake",
+      "bigquery",
+      "databricks",
+      "redshift",
+    ]);
     expect(mysqlCertEngine.capabilities.postgresReadonlyRole).toBe(false);
     expect(mysqlCertEngine.capabilities.timestamptz).toBe(false);
     expect(mysqlCertEngine.capabilities.filterClause).toBe(false);
     expect(clickhouseCertEngine.capabilities.fkIntrospection).toBe(false);
     expect(clickhouseCertEngine.capabilities.filterClause).toBe(false);
     expect(clickhouseCertEngine.capabilities.timestamptz).toBe(false);
+    expect(redshiftCertEngine.capabilities.filterClause).toBe(false);
+    expect(redshiftCertEngine.type).toBe("redshift");
+    const only = process.env.GRANE_CERTIFY_ENGINE?.trim();
+    if (only) {
+      expect(CERT_ENGINES.map((e) => e.type)).toContain(only);
+      return;
+    }
     expect(engines.length, "DuckDB (devDependency) and/or live warehouses must run the corpus").toBeGreaterThan(0);
     if (await mysqlCertEngine.available()) {
       expect(engines.map((e) => e.type)).toContain("mysql");
@@ -79,6 +99,18 @@ describe("certification engine registry", () => {
       expect(engines.map((e) => e.type)).toContain("clickhouse");
     } else {
       expect(engines.map((e) => e.type)).not.toContain("clickhouse");
+    }
+    if (!(await snowflakeCertEngine.available())) {
+      expect(engines.map((e) => e.type)).not.toContain("snowflake");
+    }
+    if (!(await bigqueryCertEngine.available())) {
+      expect(engines.map((e) => e.type)).not.toContain("bigquery");
+    }
+    if (!(await databricksCertEngine.available())) {
+      expect(engines.map((e) => e.type)).not.toContain("databricks");
+    }
+    if (!(await redshiftCertEngine.available())) {
+      expect(engines.map((e) => e.type)).not.toContain("redshift");
     }
   });
 });
@@ -114,6 +146,7 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
           generatedAt: new Date().toISOString(),
           scenarios,
           connectorSafety: safety,
+          schemaName: session.schemaName,
         });
       } catch {
         // Report is best-effort; the suite result is the source of truth.

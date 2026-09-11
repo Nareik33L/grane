@@ -28,6 +28,7 @@ import {
   loadUserTestCases,
   runUserTests,
 } from "./user-tests.js";
+import { runCertify } from "../certify/run.js";
 
 const program = new Command();
 
@@ -325,6 +326,37 @@ program
       fail(err);
     } finally {
       await kernel.close();
+    }
+  });
+
+// ---------------------------------------------------------------- certify
+program
+  .command("certify")
+  .description(
+    "Run the shared certification corpus against one warehouse (isolated grane_cert_<runid> schema)",
+  )
+  .option(
+    "--engine <type>",
+    "postgres | mysql | duckdb | clickhouse | snowflake | bigquery | databricks | redshift (default: connection.type in grane.yml)",
+  )
+  .option("--out-dir <dir>", "directory for certification/<engine>.json", "certification")
+  .option("--json", "print the certification report JSON")
+  .action(async (options: { engine?: string; outDir: string; json?: boolean }) => {
+    try {
+      const result = await runCertify({
+        engine: options.engine,
+        projectDir: projectDir(),
+        outDir: options.outDir,
+        json: options.json,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result.report, null, 2));
+      } else {
+        console.log(result.summary);
+      }
+      process.exit(result.exitCode);
+    } catch (err) {
+      fail(err);
     }
   });
 

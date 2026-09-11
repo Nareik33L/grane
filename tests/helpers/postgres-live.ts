@@ -144,6 +144,4 @@ export async function grantReadonlyOnSchema(writePool: pg.Pool, schema: string):
   await writePool.query(`REVOKE CREATE ON SCHEMA ${schema} FROM ${PG_READONLY_USER}`);
 }
 
-export function newCertSchema(): string {
-  return `pgcert_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
+export { newCertifySchemaName as newCertSchema } from "../../src/certify/schema.js";

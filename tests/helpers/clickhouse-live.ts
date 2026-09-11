@@ -42,9 +42,7 @@ async function loadClickHouse(): Promise<ChMod | null> {
   }
 }
 
-export function newClickhouseCertDatabase(): string {
-  return `chcert_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
+export { newCertifySchemaName as newClickhouseCertDatabase } from "../../src/certify/schema.js";
 
 export async function createClickHouseClient(url: string, database?: string): Promise<ChClient> {
   const mod = await loadClickHouse();
