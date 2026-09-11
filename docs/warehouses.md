@@ -7,7 +7,7 @@ the one you need.
 | Warehouse | `connection.type` | Driver (if not Postgres) |
 | --- | --- | --- |
 | Postgres | `postgres` | bundled (`pg`) |
-| MySQL / MariaDB | `mysql` | `npm install mysql2` |
+| MySQL | `mysql` | `npm install mysql2` |
 | Snowflake | `snowflake` | `npm install snowflake-sdk` |
 | BigQuery | `bigquery` | `npm install @google-cloud/bigquery` |
 | DuckDB | `duckdb` | `npm install @duckdb/node-api` |
@@ -35,7 +35,7 @@ certification does not cover Redshift.
 | Warehouse | `connection.type` | State | Minimum certified version |
 | --- | --- | --- | --- |
 | PostgreSQL | `postgres` | `certified` | 16 |
-| MySQL / MariaDB | `mysql` | `certified` | 8 |
+| MySQL | `mysql` | `certified` | 8 |
 | Snowflake | `snowflake` | `self_certifiable` | — |
 | BigQuery | `bigquery` | `self_certifiable` | — |
 | DuckDB | `duckdb` | `certified` | 1.5 |
@@ -87,9 +87,11 @@ as a backup so the server cannot return a successful interrupted SLEEP/BENCHMARK
 row at the same instant as the client deadline. Aggregates use
 `CASE WHEN` rather than `FILTER (WHERE ...)`. Named-zone `CONVERT_TZ` needs
 the server timezone tables (`mysql_tzinfo_to_sql`); `grane mcp doctor` warns
-when `CONVERT_TZ` returns NULL. CI certifies MySQL 8 (`COUNT(*) OVER` needs
-8.0+). Load `utf8mb4` for `contains` (café) and treat `DECIMAL` as decimal,
-not `DOUBLE`.
+when `CONVERT_TZ` returns NULL. CI certifies MySQL 8 (`mysql:8.4` in GitHub Actions; `COUNT(*) OVER` needs
+8.0+). MariaDB is **not** CI-certified. `connection.type: mysql` plus mysql2
+may connect to MariaDB; treat that as self-certifiable and verify against
+your server. Load `utf8mb4` for `contains` (café) and treat `DECIMAL` as
+decimal, not `DOUBLE`.
 
 ## Snowflake
 

@@ -42,10 +42,11 @@ export const WAREHOUSE_CERTIFICATION: Record<WarehouseType, WarehouseCertificati
   },
   mysql: {
     type: "mysql",
-    label: "MySQL / MariaDB",
+    label: "MySQL",
     certification: "certified",
     certified_version: "8",
-    explanation: "Shared corpus runs in CI against MySQL 8.",
+    explanation:
+      "Shared corpus runs in CI against MySQL 8 (mysql:8.4). MariaDB is not CI-certified.",
   },
   clickhouse: {
     type: "clickhouse",

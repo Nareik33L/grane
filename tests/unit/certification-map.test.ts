@@ -57,6 +57,8 @@ describe("warehouse certification map", () => {
     expect(certified).toEqual(["postgres", "mysql", "duckdb", "clickhouse"]);
     expect(WAREHOUSE_CERTIFICATION.postgres.certified_version).toBe("16");
     expect(WAREHOUSE_CERTIFICATION.mysql.certified_version).toBe("8");
+    expect(WAREHOUSE_CERTIFICATION.mysql.label).toBe("MySQL");
+    expect(WAREHOUSE_CERTIFICATION.mysql.label).not.toMatch(/MariaDB/i);
     expect(WAREHOUSE_CERTIFICATION.duckdb.certified_version).toBe("1.5");
     expect(WAREHOUSE_CERTIFICATION.clickhouse.certified_version).toBe("24");
     expect(WAREHOUSE_CERTIFICATION.snowflake.certification).not.toBe("certified");
@@ -94,6 +96,7 @@ describe("warehouse certification map", () => {
   it("docs/warehouses.md three-state tables match the map", () => {
     const docs = readFileSync(join(ROOT, "docs/warehouses.md"), "utf8");
     expect(docs).toContain(warehouseCertificationMarkdown());
+    expect(docs).not.toMatch(/MariaDB \| `mysql` \| `certified`/);
   });
 
   it("README honest matrix line matches the map", () => {
@@ -101,7 +104,9 @@ describe("warehouse certification map", () => {
     const line = readmeCertificationLine();
     expect(readme).toContain(line);
     expect(line).toMatch(/PostgreSQL 16/);
-    expect(line).toMatch(/MySQL \/ MariaDB 8/);
+    expect(line).toMatch(/MySQL 8/);
+    expect(line).not.toMatch(/MariaDB/);
+    expect(WAREHOUSE_CERTIFICATION.mysql.label).toBe("MySQL");
     expect(line).toMatch(/DuckDB 1\.5/);
     expect(line).toMatch(/ClickHouse 24/);
     expect(line).not.toMatch(/Snowflake.*certified in CI/i);
