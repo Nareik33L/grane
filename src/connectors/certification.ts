@@ -43,9 +43,9 @@ export const WAREHOUSE_CERTIFICATION: Record<WarehouseType, WarehouseCertificati
   mysql: {
     type: "mysql",
     label: "MySQL / MariaDB",
-    certification: "self_certifiable",
-    certified_version: null,
-    explanation: "Connector ships; live corpus CI is not in this release.",
+    certification: "certified",
+    certified_version: "8",
+    explanation: "Shared corpus runs in CI against MySQL 8.",
   },
   clickhouse: {
     type: "clickhouse",
@@ -144,5 +144,12 @@ export function readmeCertificationLine(): string {
       return `${entry.label} ${entry.certified_version}`;
     },
   );
-  return `Certified in CI: ${certified.join(" and ")}. Other engines are not CI-certified — see [docs/warehouses.md](docs/warehouses.md).`;
+  return `Certified in CI: ${joinEnglish(certified)}. Other engines are not CI-certified — see [docs/warehouses.md](docs/warehouses.md).`;
+}
+
+function joinEnglish(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0]!;
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }

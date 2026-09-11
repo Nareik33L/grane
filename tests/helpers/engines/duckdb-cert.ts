@@ -31,6 +31,7 @@ export const DUCKDB_CERT_CAPABILITIES: CertCapabilities = {
   mutateSeed: false,
   sessionTimezoneLocal: false,
   mcpCli: true,
+  filterClause: true,
 };
 
 export const duckdbCertEngine: CertEngine = {

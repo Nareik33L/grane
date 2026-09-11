@@ -200,7 +200,9 @@ export const mysqlDialect: SqlDialect = {
           ? `DATE_SUB(DATE(${expr}), INTERVAL (DAYOFWEEK(${expr}) - 1) DAY)`
           : `DATE_SUB(DATE(${expr}), INTERVAL WEEKDAY(${expr}) DAY)`;
       case "month":
-        return `DATE_FORMAT(${expr}, '%Y-%m-01')`;
+        // DATE_FORMAT returns a string; STR_TO_DATE keeps a DATE so grain
+        // comparisons and leap-year month starts stay typed.
+        return `STR_TO_DATE(DATE_FORMAT(${expr}, '%Y-%m-01'), '%Y-%m-%d')`;
       case "quarter":
         return `MAKEDATE(YEAR(${expr}), 1) + INTERVAL (QUARTER(${expr}) - 1) QUARTER`;
       case "year":

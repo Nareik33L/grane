@@ -14,16 +14,17 @@ docker compose up -d postgres --wait
 npm test
 ```
 
-Warehouse SDKs (MySQL, Snowflake, BigQuery, DuckDB, ClickHouse, Databricks)
-are not installed with the repo. Add the driver you are working on, e.g.
-`npm install mysql2`.
+Warehouse SDKs for Snowflake, BigQuery, ClickHouse, and Databricks are not
+installed with the repo. Add the driver you are working on. DuckDB and `mysql2`
+are devDependencies so CI can certify those engines.
 
 `npm run test:unit` is the PR gate. GitHub Actions provisions PostgreSQL 16
-and runs the live-Postgres correctness corpus (plus the older
-`describe.skipIf` Postgres blocks) on every pull request via
-`GRANE_PG_WRITE_URL` / `GRANE_PG_READ_URL`. Locally those tests skip unless
-a server is reachable (default `postgres://grane:grane@127.0.0.1:5432/grane_demo`,
-or the Docker demo on `localhost:5433`).
+and MySQL 8 (timezone tables loaded via `mysql_tzinfo_to_sql`) and runs the
+shared certification corpus on every pull request via `GRANE_PG_*` and
+`GRANE_MYSQL_*` URLs. Locally those live engines skip unless a server is
+reachable (Postgres `postgres://grane:grane@127.0.0.1:5432/grane_demo`,
+MySQL `mysql://root:grane@127.0.0.1:3306/grane_demo` with tz tables,
+or the Docker demo Postgres on `localhost:5433`).
 
 Full `npm test` still needs the demo database on `localhost:5433`
 (`docker compose up -d postgres --wait`) for integration MCP/workflow tests.

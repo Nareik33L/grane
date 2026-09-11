@@ -8,6 +8,14 @@ import { unsafeQuery } from "../errors.js";
 export const MYSQL_SESSION_READONLY = "SET SESSION TRANSACTION READ ONLY";
 export const MYSQL_SESSION_UTC = "SET time_zone = '+00:00'";
 
+/** Pool flags required for corpus correctness: utf8mb4 contains, BIGINT past MAX_SAFE_INTEGER, civil DATE strings. */
+export const MYSQL_POOL_DEFAULTS = {
+  charset: "utf8mb4",
+  supportBigNumbers: true,
+  bigNumberStrings: true,
+  dateStrings: true,
+} as const;
+
 export function mysqlMaxExecutionTimeSql(timeoutMs: number): string {
   return `SET SESSION max_execution_time = ${Math.max(1, Math.floor(timeoutMs))}`;
 }
@@ -47,6 +55,7 @@ export class MysqlConnector implements WarehouseConnector {
         uri: this.connection.url,
         connectionLimit,
         ssl: warehouseSslOptions(this.connection),
+        ...MYSQL_POOL_DEFAULTS,
       });
     } else {
       if (!this.connection.host && !this.connection.database) {
@@ -60,6 +69,7 @@ export class MysqlConnector implements WarehouseConnector {
         database: this.connection.database,
         ssl: warehouseSslOptions(this.connection),
         connectionLimit,
+        ...MYSQL_POOL_DEFAULTS,
       });
     }
     return this.pool;
