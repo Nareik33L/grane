@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { exampleKernel, exploringKernel } from "../fixtures.js";
+import { exampleConfig, exampleKernel, exampleSchema, exploringKernel } from "../fixtures.js";
 import { GraneError } from "../../src/errors.js";
+import { GraneKernel } from "../../src/kernel.js";
 
 const kernel = exampleKernel();
 
@@ -139,6 +140,29 @@ describe("deterministic refusals", () => {
     }
   });
 
+  it("refuses additive: none as invalid_query, not unsafe_query or a governed SUM", () => {
+    const config = exampleConfig();
+    config.metrics["stock"] = {
+      entity: "product",
+      type: "sum",
+      sql: "${products.id}",
+      additive: "none",
+      status: "approved",
+      synonyms: [],
+    };
+    const noneKernel = new GraneKernel(config);
+    try {
+      noneKernel.compile({ metrics: ["stock"] });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).refusal.status).toBe("invalid_query");
+      expect((err as GraneError).refusal.status).not.toBe("unsafe_query");
+      expect((err as GraneError).refusal.message).toMatch(/additive: none/);
+      expect((err as GraneError).refusal.message).toMatch(/trust:governed/);
+    }
+  });
+
   it("refuses queries mixing metrics of different grains", () => {
     try {
       kernel.compile({ metrics: ["revenue", "customers"] });
@@ -176,8 +200,6 @@ describe("deterministic refusals", () => {
   });
 });
 
-import { exampleConfig, exampleSchema } from "../fixtures.js";
-import { GraneKernel } from "../../src/kernel.js";
 import { gauntletConfig } from "../gauntlet/model.js";
 import { GAUNTLET_NOW } from "../gauntlet/types.js";
 import { SemanticModel } from "../../src/model/model.js";

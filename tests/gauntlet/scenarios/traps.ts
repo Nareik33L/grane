@@ -260,6 +260,32 @@ function metricTraps(): Scenario[] {
       expectation: { kind: "execute", trust: "governed", gold: { kind: "sql", sql: GOLD_SQL.revenueTotal } },
     }),
     sc({
+      id: "metrics/additive-none",
+      category: "metrics",
+      question: "Non-additive stock (additive: none).",
+      interpretation: "additive: none must not compile as SUM with trust:governed.",
+      expectedSqlBehaviour: "invalid_query; do not emit an ordinary governed SUM.",
+      query: { metrics: ["none_additive_stock"] },
+      disposition: "UNSUPPORTED",
+      expectation: { kind: "refuse", statuses: ["invalid_query"], reason: "additive none" },
+      guessSeverity: "critical",
+      config: (base) => ({
+        ...base,
+        metrics: {
+          ...base.metrics,
+          none_additive_stock: {
+            description: "Non-additive inventory; must not SUM.",
+            entity: "product",
+            type: "sum",
+            sql: "${products.inventory_level}",
+            additive: "none",
+            status: "approved",
+            synonyms: [],
+          },
+        },
+      }),
+    }),
+    sc({
       id: "metrics/semi-additive-balance",
       category: "metrics",
       question: "Account Balance (no date).",

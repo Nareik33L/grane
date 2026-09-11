@@ -156,6 +156,23 @@ describe("structural validation", () => {
     expect(revenue.issues.find((i) => i.code === "filter_out_of_scope")!.message).toMatch(/one_to_many/);
   });
 
+  it("reports additive: none as unsupported, not a legal SUM", () => {
+    const config = exampleConfig();
+    config.metrics["stock"] = {
+      entity: "product",
+      type: "sum",
+      sql: "${products.id}",
+      additive: "none",
+      status: "approved",
+      synonyms: [],
+    };
+    const report = validateModel(new SemanticModel(config));
+    const stock = report.metrics.find((m) => m.metric === "stock")!;
+    expect(stock.ok).toBe(false);
+    expect(stock.issues.some((i) => i.code === "unsupported_additive_none")).toBe(true);
+    expect(report.ok).toBe(false);
+  });
+
   it("allows a many_to_one parent filter that compile joins onto the grain", () => {
     const config = exampleConfig();
     config.metrics["revenue"]!.filters = { "orders.status": "completed", "customers.country": "UK" };

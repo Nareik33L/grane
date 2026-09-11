@@ -494,6 +494,8 @@ function emitSimple(
       time_dimension: timeCol ? sqlRef(model.table, timeCol) : undefined,
       synonyms,
       filters: filters.length > 0 ? filters : undefined,
+      // Never emit additive: none. MetricFlow non_additive_dimension is semi
+      // (min/max window) or skipped; non-additive SUM would be a false governed answer.
       additive: semi ? "semi" : undefined,
       semi_additive: semi,
       fill_nulls_with: fillNullsWith,

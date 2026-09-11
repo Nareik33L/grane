@@ -134,7 +134,8 @@ export const metricConfigSchema = z
      * How the measure combines across the time dimension.
      * `full` (default) may be summed across dates. `semi` keeps one snapshot
      * per key within the requested time range (see `semi_additive`), then
-     * aggregates across keys. `none` is reserved for non-additive measures.
+     * aggregates across keys. `none` is reserved for non-additive measures
+     * and is refused as unsupported (never compiled as an ordinary SUM).
      */
     additive: z.enum(["full", "semi", "none"]).optional(),
     semi_additive: semiAdditiveConfigSchema.optional(),

@@ -1,4 +1,10 @@
-import { vacuousSnapshotSeriesKeys, vacuousSnapshotSeriesMessage, type SemanticModel, type Metric } from "../model/model.js";
+import {
+  vacuousSnapshotSeriesKeys,
+  vacuousSnapshotSeriesMessage,
+  unsupportedAdditiveNoneMessage,
+  type SemanticModel,
+  type Metric,
+} from "../model/model.js";
 import type { ResolvedQuery, ResolvedFilter, RowLimitSource } from "../query/resolve.js";
 import { timeAlias } from "../query/resolve.js";
 import { ambiguousRelationshipMessage, type Edge } from "../model/graph.js";
@@ -589,6 +595,11 @@ export function compileQuery(
   };
 
   const components = expandComponents(model, resolved.metrics);
+  for (const metric of [...resolved.metrics, ...components]) {
+    if (metric.config.additive === "none") {
+      throw invalidQuery(unsupportedAdditiveNoneMessage(metric.name));
+    }
+  }
   const semiComponents = components.filter((metric) => metric.semiAdditive);
   const anySemiAdditive = semiComponents.length > 0;
   if (anySemiAdditive) {
