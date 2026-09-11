@@ -43,6 +43,18 @@ export {
 export { inferRelationships, type DatabaseSchema } from "./connectors/types.js";
 export { createConnector } from "./connectors/create.js";
 export { getDialect, WAREHOUSE_TYPES } from "./connectors/dialect.js";
+export {
+  WAREHOUSE_CERTIFICATION,
+  CERTIFICATION_STATES,
+  warehouseCertification,
+  warehouseServerInfo,
+  uncertifiedWarehouseWarning,
+  warehouseCertificationMarkdown,
+  readmeCertificationLine,
+  type CertificationState,
+  type WarehouseCertification,
+  type WarehouseServerInfo,
+} from "./connectors/certification.js";
 export { buildMcpServer } from "./mcp/server.js";
 export { serveStdio, serveHttp, installHttpProcessShutdown, type HttpMcpHandle, type ServeHttpOptions } from "./mcp/transport.js";
 export {

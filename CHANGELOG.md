@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Warehouse certification map (`src/connectors/certification.ts`): Postgres 16
+  and DuckDB 1.5 are `certified` (shared corpus in CI). Other engines are
+  `self_certifiable`, not certified. `catalog.server.warehouse` reports
+  `{ type, certification, certified_version }`. `grane validate --production`
+  warns (does not fail) when the configured engine is not certified.
+
 - Certification corpus plumbing is engine-agnostic: seed arrays and TypeScript
   gold in `tests/certification/`, `ddl(dialect)` from a column-type map, and a
   `CertEngine` adapter (`tests/helpers/engines/`). Postgres and DuckDB run the

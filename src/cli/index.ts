@@ -21,6 +21,7 @@ import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
 import { parseFilterSpec } from "./args.js";
 import { formatProductionLint, lintProduction } from "./production-lint.js";
+import { uncertifiedWarehouseWarning } from "../connectors/certification.js";
 import {
   defaultUserTestTargets,
   formatUserTestReport,
@@ -248,6 +249,8 @@ program
       if (options.production) {
         const lint = lintProduction(kernel.config, kernel.projectDir);
         console.log("");
+        const warehouseWarning = uncertifiedWarehouseWarning(kernel.config.connection.type);
+        if (warehouseWarning) console.log(`WARNING ${warehouseWarning}`);
         console.log(formatProductionLint(lint));
         productionOk = lint.ok;
       }

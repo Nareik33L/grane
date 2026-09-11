@@ -254,8 +254,10 @@ on fail-open production conditions:
   10000 / 1000 / 30000 / 32
 - any metric with `status: experimental`
 
-Equal to those ceilings is allowed. `grane mcp doctor` is the MCP handshake
-check; this lint is the hardening checklist.
+Equal to those ceilings is allowed. `grane validate --production` also prints a
+one-line `WARNING` when `connection.type` is not `certified` (it does not fail
+the process for that). `grane mcp doctor` is the MCP handshake check; this lint
+is the hardening checklist.
 
 ## Adopter test suites
 

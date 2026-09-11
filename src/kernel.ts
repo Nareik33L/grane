@@ -12,6 +12,7 @@ import { explorationPolicy } from "./explore/policy.js";
 import { listExplorableColumns, type ExplorableColumn } from "./explore/raw.js";
 import { recordRawUsage } from "./explore/usage.js";
 import type { AgentGrant } from "./auth/agents.js";
+import { warehouseServerInfo, type WarehouseServerInfo } from "./connectors/certification.js";
 import { dimensionAllowed, metricAllowed } from "./auth/agents.js";
 import { httpFields, isAuditWriteFailed, recordAudit, refusalFromError } from "./audit.js";
 import type { HttpAuditContext, SemanticAuditEvent } from "./audit.js";
@@ -23,6 +24,7 @@ export interface ServerInfo {
   version: string;
   query_model: "v1";
   database: string;
+  warehouse: WarehouseServerInfo;
   capabilities: string[];
   exploration: { enabled: boolean };
   semantic_providers: string[];
@@ -196,6 +198,7 @@ export class GraneKernel {
       version: GRANE_VERSION,
       query_model: "v1",
       database: this.config.connection.type,
+      warehouse: warehouseServerInfo(this.config.connection.type),
       capabilities,
       exploration: { enabled: this.config.exploration.enabled },
       semantic_providers: [...new Set(semantic_providers)],
