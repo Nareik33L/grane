@@ -7,7 +7,8 @@
   `CONVERT_TZ` works). `mysql2` is a dev/optional dependency so CI has the
   driver. `grane mcp doctor` warns when named-zone `CONVERT_TZ` returns NULL.
   Aggregates use `CASE WHEN` (MySQL has no `FILTER`). `COUNT(*) OVER` needs
-  8.0+.
+  8.0+. MySQL seed SQL doubles backslashes so `contains 'A\\B'` is a real
+  backslash, not C-escape stripping.
 
 - Warehouse certification map (`src/connectors/certification.ts`): Postgres 16,
   MySQL 8, and DuckDB 1.5 are `certified` (shared corpus in CI). Other engines
