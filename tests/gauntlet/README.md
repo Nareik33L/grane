@@ -64,8 +64,8 @@ Gauntlet keeps adding cases Grane cannot pass. CI fails only when:
 
 - gold SQL disagrees with the TypeScript fixtures (the harness is wrong)
 - scenario ids collide or the suite is far too small
-- a known defect-class mutation (no cardinality check, empty exclude list)
-  stays green — meaning the suite would not have caught that bug
+- a known defect-class mutation (no cardinality check, empty exclude list,
+  opened allowlist) stays green — meaning the suite would not have caught that bug
 
 Do not delete, weaken, or rewrite scenarios merely to raise the score.
 Do not turn executable failures into refusals.

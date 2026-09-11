@@ -12,6 +12,7 @@ import {
   explorationPolicy,
   isExcluded,
   isSchemaAllowed,
+  matchesAnyPattern,
   type ExplorationPolicy,
 } from "./policy.js";
 import type { MetricType } from "../config/schema.js";
@@ -83,7 +84,9 @@ export function resolveRawColumn(
     throw explorationDisabled(qualified);
   }
   if (isExcluded(policy, ref.table, ref.column)) {
-    throw columnNotPermitted(qualified);
+    const allowlistMiss =
+      policy.mode === "allowlist" && !matchesAnyPattern(policy.include, ref.table, ref.column);
+    throw columnNotPermitted(qualified, allowlistMiss ? "allowlist" : "excluded");
   }
 
   let dataType: string | null = null;

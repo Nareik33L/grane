@@ -8,6 +8,7 @@ import type { DatabaseSchema } from "../connectors/types.js";
 import { isReservedInternalIdent, reservedInternalMessage } from "../compile/internal-namespace.js";
 import { classifyMetricFilterField } from "../compile/metric-filter-support.js";
 import { filterValueContainsJsonNull, jsonNullFilterMessage } from "../query/filter-null.js";
+import { isExplorationPattern, matchColumnPattern } from "../explore/policy.js";
 
 /**
  * Structural validation: is every semantic definition legal and analytically
@@ -155,26 +156,24 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
   }
 
   // --- Exploration policy ---
-  for (const entry of model.config.exploration.exclude) {
-    if (!parseColumnRef(entry)) {
-      issues.push({
-        severity: "error",
-        code: "invalid_reference",
-        subject: "exploration",
-        message: `exploration.exclude entry "${entry}" must be a table.column reference.`,
-      });
-      continue;
-    }
-    const ref = parseColumnRef(entry)!;
-    if (!tableColumns) continue;
-    if (!tableColumns.has(ref.table) || !tableColumns.get(ref.table)!.has(ref.column)) {
-      issues.push({
-        severity: "warning",
-        code: "unknown_exclude",
-        subject: "exploration",
-        message: `exploration.exclude "${entry}" was not found in the introspected schema.`,
-      });
-    }
+  const exploration = model.config.exploration;
+  validateExplorationPatterns(issues, "exploration.include", exploration.include, schema);
+  validateExplorationPatterns(issues, "exploration.exclude", exploration.exclude, schema);
+  if (exploration.enabled && exploration.mode === "allowlist" && exploration.include.length === 0) {
+    issues.push({
+      severity: "warning",
+      code: "empty_allowlist",
+      subject: "exploration",
+      message: "exploration.mode is allowlist but include is empty; no raw columns are explorable.",
+    });
+  }
+  for (const agent of model.config.auth.agents) {
+    validateExplorationPatterns(
+      issues,
+      `auth.agents.${agent.id}.exploration_exclude`,
+      agent.exploration_exclude ?? [],
+      schema,
+    );
   }
   const metricReports: MetricReport[] = [];
   for (const metric of model.metrics.values()) {
@@ -496,6 +495,55 @@ function validateMetric(
   }
 
   return issues;
+}
+
+function validateExplorationPatterns(
+  issues: ValidationIssue[],
+  subject: string,
+  entries: string[],
+  schema?: DatabaseSchema,
+): void {
+  const key = subject.startsWith("auth.") ? "exclude" : subject.replace(/^exploration\./, "");
+  for (const entry of entries) {
+    if (!isExplorationPattern(entry)) {
+      issues.push({
+        severity: "error",
+        code: "invalid_reference",
+        subject: "exploration",
+        message: `${subject} entry "${entry}" must be table.column or a glob (customers.*, *.email, *_ssn).`,
+      });
+      continue;
+    }
+    if (!schema) continue;
+    const exact = parseColumnRef(entry);
+    if (exact) {
+      const table = schema.tables.find((item) => item.name === exact.table);
+      const column = table?.columns.find((item) => item.name === exact.column);
+      if (!table || !column) {
+        issues.push({
+          severity: "warning",
+          code: key === "include" ? "unknown_include" : "unknown_exclude",
+          subject: "exploration",
+          message: `${subject} "${entry}" was not found in the introspected schema.`,
+        });
+      }
+      continue;
+    }
+    let hits = 0;
+    for (const table of schema.tables) {
+      for (const column of table.columns) {
+        if (matchColumnPattern(entry, table.name, column.name)) hits += 1;
+      }
+    }
+    if (hits === 0) {
+      issues.push({
+        severity: "warning",
+        code: key === "include" ? "unknown_include" : "unknown_exclude",
+        subject: "exploration",
+        message: `${subject} glob "${entry}" matched no introspected columns.`,
+      });
+    }
+  }
 }
 
 function buildSchemaIndex(schema?: DatabaseSchema): Map<string, Map<string, string>> | null {

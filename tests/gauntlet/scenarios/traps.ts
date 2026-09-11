@@ -760,6 +760,7 @@ function agentTraps(): Scenario[] {
     metrics: ["revenue"],
     dimensions: ["channel"],
     exploration: false,
+    exploration_exclude: [],
   });
   return [
     sc({

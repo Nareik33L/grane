@@ -79,6 +79,7 @@ auth:
       token: ${ANALYST_AGENT_TOKEN}
       # omit metrics/dimensions to grant the full governed catalog
       # exploration defaults to false; set true (and enable it globally) for raw columns
+      # exploration_exclude: [customers.*]   # extra deny globs for this agent
 ```
 
 stdio (Cursor, Claude Desktop launching `grane serve --stdio`) does not use
@@ -86,6 +87,27 @@ these tokens — the agent is a local child process.
 
 There is no SSO, OIDC, or SAML in this release. Rotate tokens in the
 environment and in `grane.yml`.
+
+## Exploration allowlist
+
+Default exploration is a **denylist**: every column except `exploration.exclude`.
+Production HTTP should use **allowlist** mode so only named columns are
+explorable. Wildcards work on `include`, `exclude`, and per-agent
+`exploration_exclude`: `customers.*`, `*.email`, `*_ssn`.
+
+```yaml
+exploration:
+  enabled: true
+  mode: allowlist
+  include:
+    - orders.discount_code
+    - payments.failure_code
+  exclude:
+    - "*.email"
+    - "*_ssn"
+```
+
+An empty `include` list in allowlist mode permits nothing.
 
 ## TLS in front
 

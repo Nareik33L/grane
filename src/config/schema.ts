@@ -307,14 +307,28 @@ export type LimitsConfig = z.infer<typeof limitsConfigSchema>;
 export const explorationConfigSchema = z.object({
   enabled: z.boolean().default(false),
   /**
+   * `denylist` (default): every introspected column except `exclude`.
+   * `allowlist`: only columns matching `include`, minus `exclude`.
+   */
+  mode: z.enum(["allowlist", "denylist"]).default("denylist"),
+  /**
    * Schemas agents may explore. Empty means the connection schema (or every
    * table returned by introspection).
    */
   schemas: z.array(z.string()).default([]),
-  /** table.column refs that must never be queried, even when exploration is on. */
+  /**
+   * Allowlist patterns (`customers.*`, `*.email`, `orders.discount_code`).
+   * Ignored in denylist mode. Empty allowlist permits nothing.
+   */
+  include: z.array(z.string()).default([]),
+  /**
+   * Deny patterns, applied in both modes. Wildcards: `customers.*`, `*.email`,
+   * `*_ssn`. Exact `table.column` still works.
+   */
   exclude: z.array(z.string()).default([]),
 });
 export type ExplorationConfig = z.infer<typeof explorationConfigSchema>;
+export type ExplorationMode = ExplorationConfig["mode"];
 
 /**
  * Per-agent HTTP MCP credentials. When `agents` is non-empty, streamable HTTP
@@ -328,6 +342,8 @@ export const agentConfigSchema = z.object({
   dimensions: z.array(z.string()).optional(),
   /** Off unless this agent is explicitly allowed to explore raw columns. */
   exploration: z.boolean().default(false),
+  /** Extra deny patterns for this agent, on top of the global exclude list. */
+  exploration_exclude: z.array(z.string()).default([]),
 });
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
