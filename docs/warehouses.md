@@ -16,9 +16,12 @@ the one you need.
 | Databricks | `databricks` | `npm install @databricks/sql` |
 
 Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
-Every pull request also executes a compact live-PostgreSQL correctness corpus
-(GitHub Actions `postgres:16` service, restricted `grane_readonly` role).
-Compile inspection of other dialects is not runtime certification.
+Every pull request executes the certification corpus against live PostgreSQL
+(GitHub Actions `postgres:16` service, restricted `grane_readonly` role) and,
+where the driver is installed, DuckDB. Gold values are TypeScript reductions
+over the shared seed, not SQL on the engine under test. Compile inspection of
+other dialects is not runtime certification. Reports are written to
+`certification/<engine>.json` (see `certification/README.md`).
 First week on Postgres: [first-week.md](first-week.md). Production Docker:
 [production.md](production.md).
 
