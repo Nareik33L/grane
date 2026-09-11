@@ -8,10 +8,12 @@ import { getDialect } from "../../src/connectors/dialect.js";
 import type { WarehouseConnector } from "../../src/connectors/types.js";
 import {
   expectedDisposition,
+  defaultUserTestTargets,
   loadUserTestCases,
   parseUserTestDocument,
   runUserTests,
 } from "../../src/cli/user-tests.js";
+import { loadConfig } from "../../src/config/load.js";
 
 const dirs: string[] = [];
 
@@ -127,5 +129,53 @@ scenarios:
     const cases = loadUserTestCases([dir]);
     expect(cases).toHaveLength(1);
     expect(cases[0]?.scenario.id).toBe("revenue");
+  });
+
+  it("lets loadConfig and grane-test defaults share a project directory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-default-tests-"));
+    dirs.push(dir);
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `
+connection: { type: postgres }
+entities:
+  order: { table: orders, primary_key: id }
+metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: \${orders.net_amount}
+`,
+    );
+    writeFileSync(
+      join(dir, "grane-tests.yml"),
+      `
+scenarios:
+  - id: missing
+    query:
+      metrics: [not_a_metric]
+    disposition: refuse
+    expectation:
+      status: undefined_metric
+  - id: revenue
+    query:
+      metrics: [revenue]
+    disposition: execute
+    expectation:
+      trust: governed
+      gold: 184230
+`,
+    );
+    const loaded = loadConfig(dir);
+    expect(loaded.files).toEqual(["grane.yml"]);
+    expect(loaded.files).not.toContain("grane-tests.yml");
+    const targets = defaultUserTestTargets(loaded.projectDir);
+    expect(targets).toEqual([join(dir, "grane-tests.yml")]);
+    const cases = loadUserTestCases(targets);
+    expect(cases.map((c) => c.scenario.id)).toEqual(["missing", "revenue"]);
+    const kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir, connector: stubConnector() });
+    const report = await runUserTests(kernel, cases);
+    expect(report.ok).toBe(true);
+    expect(report.passed).toBe(2);
   });
 });

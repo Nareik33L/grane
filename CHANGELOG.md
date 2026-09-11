@@ -44,7 +44,9 @@
   TLS verify off, audit path not writable, limits above ceilings,
   `status: experimental` metrics).
 - `grane test` runs user-authored YAML scenarios (query + disposition /
-  status / gold) against the project warehouse.
+  status / gold) against the project warehouse. `grane-tests.yml` next to
+  `grane.yml` is skipped by the config loader so it is not merged as project
+  YAML.
 - Docker publish records provenance and an SBOM; `node:22-alpine` is pinned
   by digest; Dependabot covers npm, Actions, and Docker; `SECURITY.md`
   points at GitHub private vulnerability reporting.

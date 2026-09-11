@@ -11,7 +11,8 @@ import { validateAuthConfig } from "../auth/agents.js";
 /**
  * A Grane project is a directory containing grane.yml plus any number of
  * additional YAML files (metrics.yml, dimensions.yml, relationships.yml, ...).
- * All files are parsed and merged by top-level key, so users are free to
+ * `grane-tests.yml` / `grane-tests.yaml` are skipped (see `grane test`).
+ * All other files are parsed and merged by top-level key, so users are free to
  * organise definitions across files however they like.
  *
  * Optional `providers:` entries (dbt/MetricFlow, Cube, LookML, Ossie, Malloy)
@@ -33,6 +34,16 @@ const UNSUPPORTED_MAP = {
   relationship: "relationships",
 } as const;
 const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "auth", "audit", "providers"] as const;
+
+/**
+ * YAML next to `grane.yml` that is not project config. `grane test` loads
+ * `grane-tests.yml` / `grane-tests.yaml`; merging them as config throws
+ * `Unknown top-level key "scenarios"` (or `"id"` / `"query"`).
+ */
+export function isAdopterTestYaml(filename: string): boolean {
+  const base = filename.split(/[/\\]/).pop() ?? filename;
+  return /^grane-tests\.ya?ml$/i.test(base);
+}
 
 /** Resolve the project directory: the given dir, or ./analytics under it if grane.yml lives there. */
 export function findProjectDir(startDir: string): string {
@@ -98,6 +109,7 @@ export function loadConfig(projectDir: string): LoadedConfig {
   const dir = findProjectDir(projectDir);
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+    .filter((f) => !isAdopterTestYaml(f))
     .filter((f) => statSync(join(dir, f)).isFile())
     .sort();
 

@@ -14,6 +14,10 @@ grane test path/to/dir
 Exit 0 when every scenario matches. Exit 1 on a mismatch. Exit 2 when no
 files are found.
 
+`grane-tests.yml` sits next to `grane.yml`. The config loader skips it so a
+`scenarios:` (or single-scenario `id` / `query`) document is not merged as
+project YAML. `grane-tests/` is also skipped because load does not recurse.
+
 ```yaml
 # grane-tests.yml
 scenarios:
