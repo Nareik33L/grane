@@ -69,7 +69,7 @@ jobs:
       # Fail the corpus if a CI-certified engine is unreachable (no silent skip).
       GRANE_CERT_REQUIRE: postgres,duckdb,mysql,clickhouse
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
