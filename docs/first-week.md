@@ -94,6 +94,7 @@ skip this step: `grane init --provider ../that_project` (or add `providers:` to
 
 ```bash
 grane validate
+grane validate --production   # fail-open lint (agents, TLS, audit path, limits, experimental)
 ```
 
 Fix every `ERROR`. Live schema checks confirm `${table.column}` references

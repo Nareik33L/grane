@@ -45,5 +45,6 @@ analytics, unrestricted agent-written SQL, SSO, or anything that makes Grane
 invent business definitions or present exploration as governed truth.
 
 See [README.md](README.md), [docs/first-week.md](docs/first-week.md),
-[docs/production.md](docs/production.md), and
-[docs/connect-an-agent.md](docs/connect-an-agent.md).
+[docs/production.md](docs/production.md),
+[docs/connect-an-agent.md](docs/connect-an-agent.md), and
+[SECURITY.md](SECURITY.md) for vulnerability reports.

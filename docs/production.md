@@ -239,3 +239,33 @@ project mount, set `GRANE_AUDIT_PATH` (or `audit.path`) to a writable volume.
 
 `GET /health` returns `{ "status": "ok", "name": "grane", "version": "..." }`.
 The image HEALTHCHECK hits that URL on port 8080.
+
+## Production lint
+
+`grane validate --production` and `grane doctor --production` fail the process
+on fail-open production conditions:
+
+- no `auth.agents` (unauthenticated HTTP)
+- any agent with `exploration: true`
+- `connection.ssl` on and `ssl_verify: false`
+- `audit.path` not writable (or `audit.enabled: false`)
+- `limits.max_rows` / `default_rows` / `timeout_ms` / `max_concurrency` above
+  10000 / 1000 / 30000 / 32
+- any metric with `status: experimental`
+
+Equal to those ceilings is allowed. `grane mcp doctor` is the MCP handshake
+check; this lint is the hardening checklist.
+
+## Adopter test suites
+
+`grane test` runs YAML scenarios against your warehouse (query + expected
+disposition / refusal status / gold value). Default files:
+`grane-tests.yml` or `grane-tests/` in the project. See
+[tests.md](tests.md).
+
+## Supply chain
+
+`v*` tags publish to GHCR with BuildKit provenance and an SBOM attached.
+The image is built `FROM node:22-alpine` pinned by digest. Dependabot
+updates npm, GitHub Actions, and that Docker digest weekly. Security
+reports: [SECURITY.md](../SECURITY.md).

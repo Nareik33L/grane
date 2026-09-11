@@ -161,6 +161,8 @@ npm install @databricks/sql
 
 Use a SQL warehouse HTTP path and a read-only personal access token (or
 service principal token). Tables compile as `` `catalog`.`schema`.`table` ``.
+Empty results still return column names from the statement schema, not
+`Object.keys` of the first row.
 
 ## ClickHouse
 
@@ -174,6 +176,9 @@ connection:
 ```bash
 npm install @clickhouse/client
 ```
+
+Queries use ClickHouse `FORMAT JSON` so `meta` supplies column names when
+`data` is empty.
 
 ## Time dimensions and `project.timezone`
 
