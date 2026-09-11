@@ -334,7 +334,7 @@ describe.skipIf(!pgEnv)("Postgres connector safety", () => {
   });
 
   function live(): PostgresConnector {
-    const c = new PostgresConnector({ type: "postgres", url: pgEnv!.readUrl, schema: "public" });
+    const c = new PostgresConnector({ type: "postgres", url: pgEnv!.writeUrl, schema: "public" });
     connectors.push(c);
     return c;
   }
