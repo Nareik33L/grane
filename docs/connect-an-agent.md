@@ -36,15 +36,16 @@ deterministic infrastructure in the middle.
 
 ## Fast path
 
-**First time?** Run the bundled shop, then connect a local desktop client:
+**First time?** One guided command (demo shop or your Postgres, then MCP):
 
 ```bash
-npx grane-analytics demo
-npx grane-analytics -p demo/analytics mcp connect cursor
+npx grane-analytics setup
+# from a clone: npm install && npm run setup
 ```
 
-`npx grane-analytics demo` requires `grane-analytics@0.7.0` on npm (publish pending).
-From a clone of this repository, use `npm install && npm run demo` instead.
+`npx grane-analytics setup` requires `grane-analytics@0.7.0` on npm (publish pending).
+The wizard calls `grane demo` / `grane mcp connect` for you. To do those steps
+by hand: `npm run demo` then `grane -p demo/analytics mcp connect cursor`.
 
 Ask: *Why did revenue fall last month?* Script: [demo/README.md](../demo/README.md).
 ChatGPT (HTTPS only) is not this path.

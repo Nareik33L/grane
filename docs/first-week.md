@@ -4,11 +4,12 @@ This is the path from an empty directory to five governed metrics on **your**
 warehouse. Postgres is the default. DuckDB is an optional extra, not the
 starting point.
 
-If you have not used Grane yet, run the bundled shop first:
+If you have not used Grane yet, run the guided setup (demo shop or your
+Postgres), then ask the printed question:
 
 ```bash
-npx grane-analytics demo   # after 0.7.0 is on npm
-# from a clone: npm install && npm run demo
+npx grane-analytics setup   # after 0.7.0 is on npm
+# from a clone: npm install && npm run setup
 ```
 
 That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).

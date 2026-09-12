@@ -24,35 +24,35 @@ Agent → MCP → Grane → Warehouse
 
 Requires Node 20+. No Docker. No API keys for Grane.
 
-From this repository (until `0.7.0` is on npm):
+From a git clone (until `0.7.0` is on npm), one guided command:
 
 ```bash
 git clone https://github.com/Nareik33L/grane.git
 cd grane
 npm install
-npm run demo
+npm run setup
 ```
 
-Once `grane-analytics@0.7.0` is published, the same path is:
+That walks you through: demo shop **or** your own Postgres URL → write/validate project config → register Cursor / Claude / another MCP client → a question to ask the agent. Prompts are the default. CI / scripts can skip them:
 
 ```bash
-npx grane-analytics demo
+npm run setup -- --yes --path demo --connect cursor
+npm run setup -- --yes --path own --url postgres://readonly@host:5432/db --offline --skip-connect
 ```
 
-You should see: revenue down ~14%, Germany the outlier, card authentication failures the lead. Revenue and geography are governed. The failure-code slice is exploratory.
+`npm run demo` still builds the shop and runs the investigation without the wizard. Once `grane-analytics@0.7.0` is published, the same paths are `npx grane-analytics setup` and `npx grane-analytics demo`.
 
-The demo writes a DuckDB connection into the project it just built. Query or connect that same project — no Postgres, no Docker:
-
-```bash
-npx grane-analytics -p demo/analytics query revenue --last last_month
-npx grane-analytics -p demo/analytics mcp connect cursor
-```
-
-From a clone, `npx grane-analytics` is `npm run demo` / `npx tsx src/cli/index.ts` until you `npm run build` and use `node dist/cli/index.js`.
-
-Ask:
+On the demo path you should see: revenue down ~14%, Germany the outlier, card authentication failures the lead. Then ask:
 
 > Why did Revenue fall last month?
+
+The demo writes a DuckDB connection into the project it just built. Query that same project — no Postgres, no Docker:
+
+```bash
+npx tsx src/cli/index.ts -p demo/analytics query revenue --last last_month
+```
+
+From a clone, `npx grane-analytics` is `npx tsx src/cli/index.ts` until you `npm run build` and use `node dist/cli/index.js`.
 
 Postgres (optional):
 
@@ -158,6 +158,7 @@ No dashboards, no chart builder, no built-in chatbot, no hosted data plane, no r
 
 ```bash
 npm install
+npm run setup                                            # guided demo or own Postgres + MCP
 npm run demo
 npm run test:unit                                        # no database needed
 docker compose up -d postgres --wait

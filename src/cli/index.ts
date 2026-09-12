@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Command } from "commander";
 import { stringify as stringifyYaml } from "yaml";
@@ -16,10 +15,11 @@ import { listExplorableColumns } from "../explore/raw.js";
 import { explorationPolicy } from "../explore/policy.js";
 import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
-import { graneYml, METRICS_YML, DIMENSIONS_YML, RELATIONSHIPS_YML } from "./templates.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
+import { runSetup } from "../setup/run.js";
 import { parseFilterSpec } from "./args.js";
+import { writeInitProject } from "./init-project.js";
 import { formatProductionLint, lintProduction } from "./production-lint.js";
 import { uncertifiedWarehouseWarning } from "../connectors/certification.js";
 import {
@@ -62,6 +62,81 @@ function fail(err: unknown): never {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------- setup (guided first-run)
+program
+  .command("setup")
+  .alias("onboard")
+  .description("Guided setup: demo shop or your Postgres, then connect an MCP client")
+  .option("--yes", "non-interactive; requires --path")
+  .option("--non-interactive", "alias for --yes")
+  .option("--path <kind>", "demo | own")
+  .option("--dir <dir>", "project directory (demo destination, or where to write grane.yml)")
+  .option("--url <url>", "Postgres URL for --path own (mysql:// and clickhouse:// also write connection.type)")
+  .option(
+    "--provider <path>",
+    "existing dbt/MetricFlow, Cube, LookML, … project to import (own path)",
+  )
+  .option("--connect <client>", "register an MCP client (cursor, claude, …)")
+  .option("--skip-connect", "do not register an MCP client")
+  .option("--offline", "skip live database checks (own path)")
+  .option("--json", "print a JSON summary")
+  .action(
+    async (options: {
+      yes?: boolean;
+      nonInteractive?: boolean;
+      path?: string;
+      dir?: string;
+      url?: string;
+      provider?: string;
+      connect?: string;
+      skipConnect?: boolean;
+      offline?: boolean;
+      json?: boolean;
+    }) => {
+      try {
+        const path = options.path;
+        if (path && path !== "demo" && path !== "own") {
+          throw new Error(`Unknown --path "${path}". Use demo or own.`);
+        }
+        const json = Boolean(options.json);
+        const result = await runSetup({
+          path: path === "demo" || path === "own" ? path : undefined,
+          yes: Boolean(options.yes || options.nonInteractive),
+          dir: options.dir,
+          url: options.url,
+          provider: options.provider,
+          connect: options.connect,
+          skipConnect: options.skipConnect,
+          offline: options.offline,
+          json,
+          io: json
+            ? { log: (line) => console.error(line), error: (line) => console.error(line) }
+            : undefined,
+        });
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                path: result.path,
+                projectDir: result.projectDir,
+                warehouse: result.warehouse,
+                client: result.client,
+                question: result.question,
+                validated: result.validated,
+                live: result.live,
+                mcpPath: result.connect?.path ?? null,
+              },
+              null,
+              2,
+            ),
+          );
+        }
+      } catch (err) {
+        fail(err);
+      }
+    },
+  );
+
 // ---------------------------------------------------------------- init
 program
   .command("init")
@@ -72,29 +147,13 @@ program
     "existing dbt/MetricFlow, Cube, LookML, … project to import (relative to the new project); written live under providers:",
   )
   .action((options: { dir: string; provider?: string }) => {
-    const dir = resolve(options.dir);
-    mkdirSync(dir, { recursive: true });
-    const files: [string, string][] = [
-      ["grane.yml", graneYml(options.provider)],
-      ["metrics.yml", METRICS_YML],
-      ["dimensions.yml", DIMENSIONS_YML],
-      ["relationships.yml", RELATIONSHIPS_YML],
-    ];
-    const written: string[] = [];
-    for (const [name, contents] of files) {
-      const path = join(dir, name);
-      if (existsSync(path)) {
-        console.log(`skip  ${name} (already exists)`);
-        continue;
-      }
-      writeFileSync(path, contents);
-      written.push(name);
-      console.log(`write ${name}`);
-    }
+    const result = writeInitProject(options.dir, { provider: options.provider });
+    for (const name of result.skipped) console.log(`skip  ${name} (already exists)`);
+    for (const name of result.written) console.log(`write ${name}`);
     const nextSteps = options.provider
       ? `\nGrane project created. Your existing definitions stay where they are:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane validate" — metrics, dimensions and joins are imported from ${options.provider}\n     Skipped upstream definitions are listed with the reason (also under catalog.unsupported)\n  3. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/providers.md`
       : `\nGrane project created. First week on your own Postgres:\n  1. Create a read-only DB user and set DATABASE_URL (or connection.url)\n  2. Run "grane discover --write-relationships" to inspect schema and merge FKs\n  3. Define entities and about five metrics (see metrics.yml comments)\n     Already have dbt/MetricFlow, Cube or LookML? Re-run with --provider <path> instead\n  4. Run "grane validate"\n  5. Run "grane mcp doctor" then "grane mcp connect <client>"\n     Docs: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md`;
-    console.log(written.length > 0 ? nextSteps : "\nNothing to do.");
+    console.log(result.written.length > 0 ? nextSteps : "\nNothing to do.");
   });
 
 // ---------------------------------------------------------------- demo

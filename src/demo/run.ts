@@ -34,6 +34,8 @@ export interface RunDemoOptions extends ResolveDemoProjectOptions {
   serve?: boolean;
   port?: number;
   io?: DemoIo;
+  /** When false, skip the "connect a local agent" / question footer (setup prints its own). */
+  nextSteps?: boolean;
 }
 
 export interface DemoResult {
@@ -125,7 +127,9 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
       io.log("");
       printRefusal(io, "revenue by product_category", productCategoryStatus);
       printRefusal(io, "revenue by customers.email", emailStatus);
-      printNextSteps(io, resolved.projectDir, resolved.demoMarkdown, Boolean(options.serve));
+      if (options.nextSteps !== false) {
+        printNextSteps(io, resolved.projectDir, resolved.demoMarkdown, Boolean(options.serve));
+      }
     }
 
     if (options.connect) {

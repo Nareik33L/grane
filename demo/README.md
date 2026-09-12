@@ -3,9 +3,11 @@
 A small SaaS/e-commerce warehouse with a planted last-month revenue drop.
 
 ```bash
-# from the repo root
+# from the repo root — guided (demo vs your Postgres, then MCP connect)
+npm run setup
+# investigation only
 npm run demo
-# after grane-analytics@0.7.0 is on npm: npx grane-analytics demo
+# after grane-analytics@0.7.0 is on npm: npx grane-analytics setup
 # optional Postgres: docker compose up -d postgres --wait && npm run demo:postgres
 ```
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `grane setup` (`grane onboard`) is a guided first-run after `git clone` +
+  `npm install`: demo DuckDB or your own Postgres URL, validate, then
+  `mcp connect`. Interactive prompts by default; `--yes --path demo|own` is
+  the CI escape hatch. README "Try it" leads with this command.
 - CI sets `GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse`.
   `loadAvailableEngines` throws if a required engine is unavailable instead of
   skipping it. Local runs without the variable still skip missing warehouses.
