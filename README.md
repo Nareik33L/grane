@@ -33,7 +33,7 @@ npm install
 npm run setup
 ```
 
-That walks you through: demo shop **or** your own Postgres URL → write/validate project config → register Cursor / Claude / another MCP client → a question to ask the agent. Prompts are the default. CI / scripts can skip them:
+That walks you through: demo shop **or** your own warehouse (any connector Grane already supports) → write/validate project config → register Cursor / Claude / another MCP client → a question to ask the agent. Type `back` to return to the previous step. Prompts are the default. CI / scripts can skip them:
 
 ```bash
 npm run setup -- --yes --path demo --connect cursor
@@ -158,7 +158,7 @@ No dashboards, no chart builder, no built-in chatbot, no hosted data plane, no r
 
 ```bash
 npm install
-npm run setup                                            # guided demo or own Postgres + MCP
+npm run setup                                            # guided demo or own warehouse + MCP
 npm run demo
 npm run test:unit                                        # no database needed
 docker compose up -d postgres --wait

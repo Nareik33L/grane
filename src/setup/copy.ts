@@ -9,6 +9,7 @@ export const SETUP_BANNER = [
   "",
   "One path from a fresh clone to a question you can ask an agent.",
   "Nothing is sent to a Grane cloud — this stays on your machine.",
+  "Type back (or b) at any later prompt to return to the previous step.",
 ].join("\n");
 
 export function demoReadyLines(opts: { projectDir: string; clientLabel: string | null }): string[] {
