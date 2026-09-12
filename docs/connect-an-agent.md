@@ -36,7 +36,7 @@ deterministic infrastructure in the middle.
 
 ## Fast path
 
-**First time?** One guided command (demo shop or your Postgres, then MCP):
+**First time?** One guided command (demo shop or your warehouse, then MCP):
 
 ```bash
 npx grane-analytics setup

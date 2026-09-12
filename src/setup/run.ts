@@ -2,6 +2,8 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { writeInitProject } from "../cli/init-project.js";
 import { loadConfig } from "../config/load.js";
+import type { WarehouseType } from "../connectors/dialect.js";
+import { WAREHOUSE_TYPES } from "../connectors/dialect.js";
 import { DEMO_QUESTION, runDemo, type DemoIo, type DemoResult } from "../demo/run.js";
 import { GraneKernel } from "../kernel.js";
 import {
@@ -14,24 +16,27 @@ import {
   type ConnectResult,
 } from "../mcp/connect/index.js";
 import {
+  describeConnection,
   isGraneSourceTree,
-  maskDatabaseUrl,
   parseOwnDatabaseUrl,
   persistOwnConnection,
-  type SetupWarehouse,
+  type ConnectionDraft,
 } from "./connection.js";
 import { OWN_QUESTION, SETUP_BANNER, demoReadyLines, ownReadyLines, skipConnectHint } from "./copy.js";
 import { createReadlinePrompter, type Prompter } from "./prompts.js";
+import type { SetupIo, SetupPath } from "./types.js";
+import { promptSetupAnswers } from "./wizard.js";
 
-export type SetupPath = "demo" | "own";
-
-export interface SetupIo extends DemoIo {}
+export type { SetupIo, SetupPath };
 
 export interface RunSetupOptions {
   path?: SetupPath;
   yes?: boolean;
   dir?: string;
   url?: string;
+  engine?: WarehouseType;
+  connectionPath?: string;
+  connection?: Partial<ConnectionDraft>;
   provider?: string;
   connect?: string;
   skipConnect?: boolean;
@@ -52,7 +57,7 @@ export interface RunSetupOptions {
 export interface SetupResult {
   path: SetupPath;
   projectDir: string;
-  warehouse: "duckdb" | SetupWarehouse;
+  warehouse: WarehouseType;
   client: string | null;
   question: string;
   validated: boolean;
@@ -75,7 +80,7 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
 
   if (!yes && !tty && !options.prompt) {
     throw new Error(
-      'Not a terminal. Re-run with prompts, or use the escape hatch: grane setup --yes --path demo|own [--url …] [--connect cursor|--skip-connect]',
+      'Not a terminal. Re-run with prompts, or use the escape hatch: grane setup --yes --path demo|own [--url …] [--engine …] [--connect cursor|--skip-connect]',
     );
   }
   if (yes && !options.path) {
@@ -89,61 +94,102 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
     io.error(SETUP_BANNER);
   }
 
-  const path = options.path ?? (await prompt.select<SetupPath>(
-    "How do you want to start?",
-    [
-      {
-        value: "demo",
-        label: "Try Grane's demo shop",
-        hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
-      },
-      {
-        value: "own",
-        label: "Connect my own Postgres",
-        hint: "Read-only URL. We write grane.yml, validate, then connect an agent.",
-      },
-    ],
-    { defaultValue: "demo" },
-  ));
+  if (!yes) {
+    const answers = await promptSetupAnswers({
+      io,
+      prompt,
+      env,
+      skipConnect,
+      connect: options.connect,
+      resolveClientId: (name) => resolveClient(name).id,
+      listClients: () => listClients().map((c) => ({ id: c.id, label: c.label })),
+    });
+    if (answers.path === "demo") {
+      return runDemoPath({ ...options, io, cwd, env, client: answers.client, skipConnect });
+    }
+    return runOwnPath({
+      ...options,
+      io,
+      cwd,
+      env,
+      prompt,
+      yes: false,
+      client: answers.client,
+      skipConnect,
+      draft: answers.connection,
+      persist: true,
+    });
+  }
 
+  const path = options.path;
   if (path !== "demo" && path !== "own") {
     throw new Error(`Unknown --path "${String(path)}". Use demo or own.`);
   }
 
   const client = skipConnect
     ? null
-    : await resolveSetupClient(options, prompt, yes);
+    : options.connect
+      ? resolveClient(options.connect).id
+      : null;
 
   if (path === "demo") {
     return runDemoPath({ ...options, io, cwd, env, client, skipConnect });
   }
-  return runOwnPath({ ...options, io, cwd, env, prompt, yes, client, skipConnect });
+  const resolved = resolveYesConnection(options, env);
+  return runOwnPath({
+    ...options,
+    io,
+    cwd,
+    env,
+    prompt,
+    yes: true,
+    client,
+    skipConnect,
+    draft: resolved.draft,
+    persist: resolved.persist,
+  });
 }
 
-async function resolveSetupClient(
+function resolveYesConnection(
   options: RunSetupOptions,
-  prompt: Prompter,
-  yes: boolean,
-): Promise<string | null> {
-  if (options.connect) {
-    return resolveClient(options.connect).id;
+  env: NodeJS.ProcessEnv,
+): { draft: ConnectionDraft; persist: boolean } {
+  if (options.engine && !WAREHOUSE_TYPES.includes(options.engine)) {
+    throw new Error(`Unknown --engine "${options.engine}". Supported: ${WAREHOUSE_TYPES.join(", ")}.`);
   }
-  if (yes) return null;
-  const writable = listClients().filter((c) => c.id !== "generic");
-  const chosen = await prompt.select<string>(
-    "Which agent should Grane register with?",
-    [
-      ...writable.map((c) => ({
-        value: c.id,
-        label: c.label,
-        hint: c.id === "chatgpt" ? "No config file — prints HTTPS connector steps." : undefined,
-      })),
-      { value: "skip", label: "Skip for now", hint: "You can run grane mcp connect later." },
-    ],
-    { defaultValue: "cursor" },
+  if (options.url) {
+    const parsed = parseOwnDatabaseUrl(options.url, options.engine);
+    return { draft: { type: parsed.type, url: parsed.url, ...pickSchema(options) }, persist: true };
+  }
+  if (options.engine === "duckdb" && (options.connectionPath || options.connection?.path)) {
+    return {
+      draft: {
+        type: "duckdb",
+        path: options.connectionPath ?? options.connection?.path,
+        schema: options.connection?.schema ?? "main",
+        token: options.connection?.token,
+      },
+      persist: true,
+    };
+  }
+  if (options.engine && options.connection && Object.keys(options.connection).length > 0) {
+    return { draft: { ...options.connection, type: options.engine }, persist: true };
+  }
+  const fromEnv = env.DATABASE_URL?.trim();
+  if (fromEnv) {
+    const parsed = parseOwnDatabaseUrl(fromEnv, options.engine);
+    return { draft: { type: parsed.type, url: parsed.url }, persist: false };
+  }
+  throw new Error(
+    "Own-database setup needs a connection. Pass --url postgres://… (or mysql:// / clickhouse://), " +
+      "--engine duckdb --connection-path …, or set DATABASE_URL.",
   );
-  if (chosen === "skip") return null;
-  return resolveClient(chosen).id;
+}
+
+function pickSchema(options: RunSetupOptions): Partial<ConnectionDraft> {
+  if (options.connection?.schema) return { schema: options.connection.schema };
+  if (options.connection?.database) return { database: options.connection.database };
+  return {};
 }
 
 async function runDemoPath(opts: {
@@ -196,12 +242,13 @@ async function runOwnPath(opts: {
   prompt: Prompter;
   yes: boolean;
   dir?: string;
-  url?: string;
   provider?: string;
   offline?: boolean;
   json?: boolean;
   client: string | null;
   skipConnect: boolean;
+  draft?: ConnectionDraft;
+  persist: boolean;
   homeDir?: string;
   workspaceDir?: string;
   platform?: NodeJS.Platform;
@@ -222,16 +269,16 @@ async function runOwnPath(opts: {
     opts.io.log(`Using existing project at ${projectDir}`);
   }
 
-  const resolvedUrl = await resolveOwnUrl(opts);
-  if (resolvedUrl.parsed && resolvedUrl.persist) {
-    persistOwnConnection(projectDir, resolvedUrl.parsed);
-    opts.env.DATABASE_URL = resolvedUrl.parsed.url;
-    opts.io.log(`connection  ${resolvedUrl.parsed.type}  ${maskDatabaseUrl(resolvedUrl.parsed.url)}`);
-  } else if (resolvedUrl.parsed) {
-    opts.env.DATABASE_URL = resolvedUrl.parsed.url;
-    opts.io.log(`connection  ${resolvedUrl.parsed.type}  \${DATABASE_URL}`);
+  const draft = opts.draft;
+  if (draft && opts.persist) {
+    persistOwnConnection(projectDir, draft);
+    if (draft.url) opts.env.DATABASE_URL = draft.url;
+    opts.io.log(`connection  ${describeConnection(draft)}`);
+  } else if (draft) {
+    if (draft.url) opts.env.DATABASE_URL = draft.url;
+    opts.io.log(`connection  ${draft.type}  \${DATABASE_URL}`);
   } else {
-    opts.io.log("connection  postgres  ${DATABASE_URL}");
+    throw new Error("Own-database setup needs a connection.");
   }
 
   const live = !opts.offline;
@@ -247,7 +294,7 @@ async function runOwnPath(opts: {
   return {
     path: "own",
     projectDir,
-    warehouse: resolvedUrl.parsed?.type ?? "postgres",
+    warehouse: draft.type,
     client: opts.client,
     question: OWN_QUESTION,
     validated,
@@ -259,35 +306,6 @@ async function runOwnPath(opts: {
 function defaultOwnProjectDir(cwd: string): string {
   if (isGraneSourceTree(cwd)) return join(cwd, "my-analytics");
   return cwd;
-}
-
-async function resolveOwnUrl(opts: {
-  url?: string;
-  env: NodeJS.ProcessEnv;
-  prompt: Prompter;
-  yes: boolean;
-  io: SetupIo;
-}): Promise<{ parsed: ReturnType<typeof parseOwnDatabaseUrl> | null; persist: boolean }> {
-  if (opts.url) return { parsed: parseOwnDatabaseUrl(opts.url), persist: true };
-  const fromEnv = opts.env.DATABASE_URL?.trim();
-  if (opts.yes) {
-    if (fromEnv) return { parsed: parseOwnDatabaseUrl(fromEnv), persist: false };
-    throw new Error(
-      "Own-database setup needs a URL. Pass --url postgres://… or set DATABASE_URL.",
-    );
-  }
-  opts.io.log("");
-  opts.io.log("Use a read-only Postgres user. Superuser and migration roles are the wrong control.");
-  opts.io.log("mysql:// and clickhouse:// also write connection.type. Other engines: edit grane.yml.");
-  const entered = await opts.prompt.input("Postgres URL", {
-    defaultValue: fromEnv ? maskDatabaseUrl(fromEnv) : undefined,
-    allowEmpty: Boolean(fromEnv),
-  });
-  if (!entered || entered === (fromEnv ? maskDatabaseUrl(fromEnv) : "")) {
-    if (fromEnv) return { parsed: parseOwnDatabaseUrl(fromEnv), persist: false };
-    throw new Error("A Postgres URL is required (or set DATABASE_URL).");
-  }
-  return { parsed: parseOwnDatabaseUrl(entered), persist: true };
 }
 
 async function validateOwnProject(
@@ -328,9 +346,12 @@ async function validateOwnProject(
         "Live connection failed. Fix the URL or re-run with --offline to write config only.",
       );
     }
-    const keepGoing = await prompt.confirm("Config is written. Continue to MCP connect anyway?", true);
-    if (!keepGoing) {
-      throw new Error("Setup stopped. Fix the URL and re-run grane setup.");
+    const keepGoing = await prompt.confirm("Config is written. Continue to MCP connect anyway?", {
+      defaultYes: true,
+      allowBack: false,
+    });
+    if (keepGoing === false) {
+      throw new Error("Setup stopped. Fix the connection and re-run grane setup.");
     }
     return false;
   } finally {
@@ -384,3 +405,4 @@ function printReady(io: SetupIo, json: boolean | undefined, lines: string[]): vo
 }
 
 export { DEMO_QUESTION, OWN_QUESTION };
+export type { DemoIo };

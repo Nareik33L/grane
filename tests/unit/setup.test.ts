@@ -3,15 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeInitProject } from "../../src/cli/init-project.js";
+import { WAREHOUSE_TYPES } from "../../src/connectors/dialect.js";
 import { DEMO_QUESTION, type DemoResult } from "../../src/demo/run.js";
 import {
+  connectionFields,
+  inferWarehouseFromUrl,
   isGraneSourceTree,
   maskDatabaseUrl,
   parseOwnDatabaseUrl,
   persistOwnConnection,
 } from "../../src/setup/connection.js";
 import { OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
-import { scriptedPrompter } from "../../src/setup/prompts.js";
+import { BACK, scriptedPrompter } from "../../src/setup/prompts.js";
 import { runSetup } from "../../src/setup/run.js";
 
 const temps: string[] = [];
@@ -53,19 +56,33 @@ function stubDemo(projectDir: string): DemoResult {
   };
 }
 
-describe("parseOwnDatabaseUrl", () => {
-  it("accepts postgres and postgresql URLs", () => {
-    expect(parseOwnDatabaseUrl("postgres://ro:x@db:5432/app").type).toBe("postgres");
-    expect(parseOwnDatabaseUrl("postgresql://ro@db/app").type).toBe("postgres");
+describe("parseOwnDatabaseUrl / inferWarehouseFromUrl", () => {
+  it("infers every URL scheme that maps to a shipped connector", () => {
+    expect(inferWarehouseFromUrl("postgres://ro@db/app")).toBe("postgres");
+    expect(inferWarehouseFromUrl("postgresql://ro@db/app")).toBe("postgres");
+    expect(inferWarehouseFromUrl("mysql://ro@db/app")).toBe("mysql");
+    expect(inferWarehouseFromUrl("mariadb://ro@db/app")).toBe("mysql");
+    expect(inferWarehouseFromUrl("clickhouse://ro@db/app")).toBe("clickhouse");
+    expect(inferWarehouseFromUrl("redshift://ro@db/app")).toBe("redshift");
+    expect(inferWarehouseFromUrl("snowflake://xy12345/db")).toBe("snowflake");
+    expect(inferWarehouseFromUrl("databricks://host/sql")).toBe("databricks");
+    expect(inferWarehouseFromUrl("bigquery://project/dataset")).toBe("bigquery");
+    expect(inferWarehouseFromUrl("duckdb://localhost/file")).toBe("duckdb");
   });
 
-  it("writes mysql and clickhouse from URL without inventing engines", () => {
-    expect(parseOwnDatabaseUrl("mysql://ro:x@db:3306/app").type).toBe("mysql");
-    expect(parseOwnDatabaseUrl("clickhouse://ro:x@db:8123/app").type).toBe("clickhouse");
+  it("keeps postgres:// as redshift when the user already picked Redshift", () => {
+    expect(parseOwnDatabaseUrl("postgres://ro@db/app", "redshift").type).toBe("redshift");
   });
 
-  it("refuses cloud engines and junk", () => {
-    expect(() => parseOwnDatabaseUrl("snowflake://acct")).toThrow(/Unsupported URL scheme/);
+  it("accepts ClickHouse http(s) URLs when the engine is clickhouse", () => {
+    expect(parseOwnDatabaseUrl("http://ro:x@ch:8123", "clickhouse").type).toBe("clickhouse");
+  });
+
+  it("refuses a URL that does not match the chosen engine", () => {
+    expect(() => parseOwnDatabaseUrl("mysql://ro@db/app", "postgres")).toThrow(/looks like mysql/);
+  });
+
+  it("refuses junk", () => {
     expect(() => parseOwnDatabaseUrl("not-a-url")).toThrow(/Not a valid URL/);
     expect(() => parseOwnDatabaseUrl("")).toThrow(/required/);
   });
@@ -75,8 +92,28 @@ describe("parseOwnDatabaseUrl", () => {
   });
 });
 
+describe("connectionFields", () => {
+  it("covers every shipped warehouse type", () => {
+    expect(WAREHOUSE_TYPES).toEqual([
+      "postgres",
+      "mysql",
+      "snowflake",
+      "bigquery",
+      "duckdb",
+      "clickhouse",
+      "redshift",
+      "databricks",
+    ]);
+    for (const type of WAREHOUSE_TYPES) {
+      const fields = connectionFields(type);
+      expect(fields.length).toBeGreaterThan(0);
+      expect(fields.some((f) => f.required)).toBe(true);
+    }
+  });
+});
+
 describe("persistOwnConnection", () => {
-  it("rewrites the connection block to the given URL", () => {
+  it("rewrites the connection block to a Postgres URL", () => {
     const dir = tempDir();
     writeInitProject(dir);
     persistOwnConnection(dir, { type: "postgres", url: "postgres://ro:x@db:5432/app" });
@@ -84,6 +121,33 @@ describe("persistOwnConnection", () => {
     expect(yaml).toMatch(/type:\s*postgres/);
     expect(yaml).toContain('url: "postgres://ro:x@db:5432/app"');
     expect(yaml).not.toContain("${DATABASE_URL}");
+  });
+
+  it("persists DuckDB path, Snowflake account fields, and BigQuery project", () => {
+    const dir = tempDir();
+    writeInitProject(dir);
+    persistOwnConnection(dir, { type: "duckdb", path: "warehouse.duckdb", schema: "main" });
+    expect(readFileSync(join(dir, "grane.yml"), "utf8")).toMatch(/type:\s*duckdb/);
+    expect(readFileSync(join(dir, "grane.yml"), "utf8")).toContain('path: "warehouse.duckdb"');
+
+    persistOwnConnection(dir, {
+      type: "snowflake",
+      account: "xy12345",
+      user: "ro",
+      password: "s3cret",
+      warehouse: "COMPUTE_WH",
+      database: "ANALYTICS",
+      schema: "PUBLIC",
+    });
+    const snow = readFileSync(join(dir, "grane.yml"), "utf8");
+    expect(snow).toMatch(/type:\s*snowflake/);
+    expect(snow).toContain('account: "xy12345"');
+    expect(snow).not.toContain("url:");
+
+    persistOwnConnection(dir, { type: "bigquery", project: "my-proj", dataset: "analytics", location: "US" });
+    const bq = readFileSync(join(dir, "grane.yml"), "utf8");
+    expect(bq).toMatch(/type:\s*bigquery/);
+    expect(bq).toContain('project: "my-proj"');
   });
 });
 
@@ -282,5 +346,139 @@ describe("runSetup", () => {
     });
     expect(readFileSync(join(dir, "grane.yml"), "utf8")).toContain("keep-me");
     expect(readFileSync(join(dir, "grane.yml"), "utf8")).toContain("postgres://ro@localhost:5432/kept");
+  });
+
+  it("goes back from own-data to the demo path", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir: demoDir,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: quiet,
+      prompt: scriptedPrompter({ select: ["own", BACK, "demo", "skip"] }),
+      runDemoFn: async () => stubDemo(demoDir),
+    });
+    expect(result.path).toBe("demo");
+    expect(result.warehouse).toBe("duckdb");
+  });
+
+  it("goes back from a warehouse field to pick a different engine", async () => {
+    const dir = tempDir();
+    const logs: string[] = [];
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir,
+      skipConnect: true,
+      offline: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      env: { ...process.env },
+      io: { log: (line) => logs.push(line), error: () => undefined },
+      prompt: scriptedPrompter({
+        select: ["own", "mysql", "postgres"],
+        input: ["back", "postgres://ro@localhost:5432/app", ""],
+      }),
+    });
+    expect(result.path).toBe("own");
+    expect(result.warehouse).toBe("postgres");
+    expect(readFileSync(join(dir, "grane.yml"), "utf8")).toContain("postgres://ro@localhost:5432/app");
+    expect(logs.join("\n")).toMatch(/self_certifiable|certified/);
+  });
+
+  it("goes back from the MCP step to change the client", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir: demoDir,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: quiet,
+      prompt: scriptedPrompter({ select: ["demo", "skip", "cursor"], confirm: [BACK, true] }),
+      runDemoFn: async () => stubDemo(demoDir),
+    });
+    expect(result.client).toBe("cursor");
+  });
+
+  it("interactive own path configures MySQL from a URL", async () => {
+    const dir = tempDir();
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir,
+      skipConnect: true,
+      offline: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      env: { ...process.env },
+      io: quiet,
+      prompt: scriptedPrompter({
+        select: ["own", "mysql"],
+        input: ["mysql://ro:x@localhost:3306/shop", "shop"],
+      }),
+    });
+    expect(result.warehouse).toBe("mysql");
+    const yaml = readFileSync(join(dir, "grane.yml"), "utf8");
+    expect(yaml).toMatch(/type:\s*mysql/);
+    expect(yaml).toContain("mysql://ro:x@localhost:3306/shop");
+  });
+
+  it("interactive own path configures Snowflake fields and says self_certifiable", async () => {
+    const dir = tempDir();
+    const logs: string[] = [];
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir,
+      skipConnect: true,
+      offline: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      env: { ...process.env },
+      io: { log: (line) => logs.push(line), error: () => undefined },
+      prompt: scriptedPrompter({
+        select: ["own", "snowflake"],
+        input: ["xy12345", "ro", "s3cret", "COMPUTE_WH", "ANALYTICS", "PUBLIC", "GRANE_READONLY"],
+      }),
+    });
+    expect(result.warehouse).toBe("snowflake");
+    const yaml = readFileSync(join(dir, "grane.yml"), "utf8");
+    expect(yaml).toMatch(/type:\s*snowflake/);
+    expect(yaml).toContain('account: "xy12345"');
+    expect(yaml).not.toContain("url:");
+    expect(logs.join("\n")).toMatch(/self_certifiable — not CI-certified/);
+  });
+
+  it("--yes own path accepts DuckDB --connection-path and ClickHouse --url", async () => {
+    const duck = tempDir();
+    const duckResult = await runSetup({
+      yes: true,
+      path: "own",
+      dir: duck,
+      engine: "duckdb",
+      connectionPath: "warehouse.duckdb",
+      skipConnect: true,
+      offline: true,
+      stdinIsTty: false,
+      env: { ...process.env },
+      io: quiet,
+    });
+    expect(duckResult.warehouse).toBe("duckdb");
+    expect(readFileSync(join(duck, "grane.yml"), "utf8")).toMatch(/type:\s*duckdb/);
+
+    const ch = tempDir();
+    const chResult = await runSetup({
+      yes: true,
+      path: "own",
+      dir: ch,
+      url: "clickhouse://ro@localhost:8123/analytics",
+      skipConnect: true,
+      offline: true,
+      stdinIsTty: false,
+      env: { ...process.env },
+      io: quiet,
+    });
+    expect(chResult.warehouse).toBe("clickhouse");
+    expect(readFileSync(join(ch, "grane.yml"), "utf8")).toMatch(/type:\s*clickhouse/);
   });
 });

@@ -3,9 +3,13 @@
 ## Unreleased
 
 - `grane setup` (`grane onboard`) is a guided first-run after `git clone` +
-  `npm install`: demo DuckDB or your own Postgres URL, validate, then
+  `npm install`: demo DuckDB or your own warehouse, validate, then
   `mcp connect`. Interactive prompts by default; `--yes --path demo|own` is
   the CI escape hatch. README "Try it" leads with this command.
+- `grane setup` interactive steps accept `back` / `b` to return to the
+  previous prompt. Own-data path offers every shipped warehouse
+  (`postgres`, `mysql`, `duckdb`, `clickhouse`, `snowflake`, `bigquery`,
+  `databricks`, `redshift`) with certified vs self_certifiable hints.
 - CI sets `GRANE_CERT_REQUIRE=postgres,duckdb,mysql,clickhouse`.
   `loadAvailableEngines` throws if a required engine is unavailable instead of
   skipping it. Local runs without the variable still skip missing warehouses.

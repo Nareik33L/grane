@@ -5,7 +5,7 @@ warehouse. Postgres is the default. DuckDB is an optional extra, not the
 starting point.
 
 If you have not used Grane yet, run the guided setup (demo shop or your
-Postgres), then ask the printed question:
+warehouse), then ask the printed question:
 
 ```bash
 npx grane-analytics setup   # after 0.7.0 is on npm

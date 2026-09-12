@@ -17,6 +17,7 @@ import { promoteColumn } from "../explore/promote.js";
 import { usageRanked } from "../explore/usage.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
+import { WAREHOUSE_TYPES, type WarehouseType } from "../connectors/dialect.js";
 import { runSetup } from "../setup/run.js";
 import { parseFilterSpec } from "./args.js";
 import { writeInitProject } from "./init-project.js";
@@ -66,12 +67,14 @@ function fail(err: unknown): never {
 program
   .command("setup")
   .alias("onboard")
-  .description("Guided setup: demo shop or your Postgres, then connect an MCP client")
+  .description("Guided setup: demo shop or your warehouse, then connect an MCP client")
   .option("--yes", "non-interactive; requires --path")
   .option("--non-interactive", "alias for --yes")
   .option("--path <kind>", "demo | own")
   .option("--dir <dir>", "project directory (demo destination, or where to write grane.yml)")
-  .option("--url <url>", "Postgres URL for --path own (mysql:// and clickhouse:// also write connection.type)")
+  .option("--engine <type>", "own-path warehouse: postgres, mysql, duckdb, clickhouse, snowflake, bigquery, databricks, redshift")
+  .option("--url <url>", "own-path URL (postgres://, mysql://, clickhouse://, redshift://, …)")
+  .option("--connection-path <path>", "own-path DuckDB file / :memory: / md:…")
   .option(
     "--provider <path>",
     "existing dbt/MetricFlow, Cube, LookML, … project to import (own path)",
@@ -86,7 +89,9 @@ program
       nonInteractive?: boolean;
       path?: string;
       dir?: string;
+      engine?: string;
       url?: string;
+      connectionPath?: string;
       provider?: string;
       connect?: string;
       skipConnect?: boolean;
@@ -99,11 +104,17 @@ program
           throw new Error(`Unknown --path "${path}". Use demo or own.`);
         }
         const json = Boolean(options.json);
+        const engine = options.engine as WarehouseType | undefined;
+        if (engine && !WAREHOUSE_TYPES.includes(engine)) {
+          throw new Error(`Unknown --engine "${options.engine}". Supported: ${WAREHOUSE_TYPES.join(", ")}.`);
+        }
         const result = await runSetup({
           path: path === "demo" || path === "own" ? path : undefined,
           yes: Boolean(options.yes || options.nonInteractive),
           dir: options.dir,
+          engine,
           url: options.url,
+          connectionPath: options.connectionPath,
           provider: options.provider,
           connect: options.connect,
           skipConnect: options.skipConnect,
