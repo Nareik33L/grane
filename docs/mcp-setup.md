@@ -7,6 +7,7 @@ Claude, Gemini, database setup, HTTPS vs stdio), see
 ## Connect from the CLI
 
 ```bash
+grane setup                  # first-run wizard: demo or your DB, then this connect step
 grane mcp doctor
 grane mcp connect claude     # also: cursor, gemini, vscode, chatgpt, windsurf, claude-code
 grane mcp print-config cursor

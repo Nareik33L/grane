@@ -1,4 +1,4 @@
-export { CLIENT_IDS, type ClientId, type Transport, type ConfigScope } from "./types.js";
+export { CLIENT_IDS, type ClientId, type Transport, type ConfigScope, type ConnectResult } from "./types.js";
 export { CLIENTS, resolveClient, listClients } from "./clients.js";
 export { resolveGraneLaunch, stdioArgs, connectionEnv } from "./launch.js";
 export { buildServerEntry, resolveTransport, defaultHttpUrl } from "./entry.js";

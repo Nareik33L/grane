@@ -1,5 +1,9 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
+import { writeInitProject } from "../../src/cli/init-project.js";
 import { graneYml } from "../../src/cli/templates.js";
 
 describe("grane init templates", () => {
@@ -22,5 +26,16 @@ describe("grane init templates", () => {
   it("quotes provider paths that are not plain YAML scalars", () => {
     const doc = parseYaml(graneYml("../my project: v2")) as { providers: { path: string }[] };
     expect(doc.providers[0]?.path).toBe("../my project: v2");
+  });
+
+  it("writeInitProject scaffolds YAML and skips existing files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-init-"));
+    const first = writeInitProject(dir);
+    expect(first.written).toEqual(["grane.yml", "metrics.yml", "dimensions.yml", "relationships.yml"]);
+    expect(readFileSync(join(dir, "grane.yml"), "utf8")).toContain("type: postgres");
+    const second = writeInitProject(dir);
+    expect(second.written).toEqual([]);
+    expect(second.skipped).toHaveLength(4);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
