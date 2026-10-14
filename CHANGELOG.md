@@ -19,15 +19,27 @@
   warehouse is runtime-certified. Before/after compile evidence vs pre-V2
   `7a7ffc6` is committed (`docs/v2-compat-evidence.md`). Import/validate never
   pin or overwrite originals. Unsupported YAML is rejected with a How-to-fix
-  error. Real-world dbt/Cube/LookML/Malloy/Ossie corpora are documented.
+  error. Hand-built dbt/Cube/LookML/Malloy/Ossie fixtures plus a pinned
+  public `dbt-labs/jaffle_shop` (jaffle-shop-classic, Apache-2.0) are documented.
   [docs/release-checklist.md](docs/release-checklist.md) lists credentialed
   `certify-cloud` on the exact RC commit and QA's independent RC cert — do
   not run those from this PR. npm publish stays on hold.
+  The configured base is never read from HEAD's committed tree (a feature
+  branch that commits `base_branch: feature` cannot become the base). Base
+  comes from `base_branch` on `origin/HEAD` / `main` / `master` (a pin is
+  checked against that value, not used to discover it); otherwise
+  `grane setup` is required. With no committed
+  `base_branch`, `origin/HEAD` disagreeing with local `main`/`master` is
+  refused. `runGit` strips inherited `GIT_*` and sets
+  `GIT_NO_REPLACE_OBJECTS=1`; `refs/replace/*` and `.git/info/grafts` are
+  refused. `.grane/` must be a regular directory (not a symlink).
   Committed `project.base_branch` wins over `origin/HEAD` (disagreement is
   refused); working-tree YAML cannot redirect the base or silence audit.
-  `runGit` strips inherited `GIT_*`. Approve requires the proposal commit
-  reachable from base (forged `Grane-Proposal` trailers are refused).
-  fail_closed audit refuses a symlink or `/dev/null`.
+  Approve requires the proposal commit reachable from base (forged
+  `Grane-Proposal` trailers are refused). fail_closed audit refuses a
+  symlink or `/dev/null`. Gate-7 cases (including these) are wired into
+  `traps.ts`. One pinned public project (`dbt-labs/jaffle_shop` /
+  jaffle-shop-classic @ `fd7bfaca`, Apache-2.0) is imported/validated.
 - **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
   CRITICAL gate. Unexpected errors inside a security scenario score
   `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection

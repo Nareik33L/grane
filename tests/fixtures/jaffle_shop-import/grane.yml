@@ -1,0 +1,10 @@
+# Wrapper so the pinned public jaffle_shop tree can be loadConfig'd /
+# validated. Not part of upstream jaffle_shop.
+project:
+  name: jaffle-shop-import
+  timezone: UTC
+connection:
+  type: duckdb
+  path: ":memory:"
+providers:
+  - path: ../jaffle_shop

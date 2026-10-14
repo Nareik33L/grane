@@ -318,7 +318,7 @@ entities:
       configuredBaseBranch(missingBase.dir);
       return securityCritical("configuredBaseBranch fell back to HEAD without origin/HEAD, main, or master");
     } catch (err) {
-      const refuse = mustRefuse(err, /project.base_branch|configured base branch/i, "missing base");
+      const refuse = mustRefuse(err, /established base|configured base branch|grane setup/i, "missing base");
       if (refuse) return refuse;
     }
   } finally {
@@ -327,6 +327,9 @@ entities:
 
   const repo = initAuthoringRepo({ branch: "develop", yaml: developYaml });
   try {
+    git(repo.dir, ["remote", "add", "origin", "git@github.com:Nareik33L/grane.git"]);
+    git(repo.dir, ["update-ref", "refs/remotes/origin/develop", repo.mainSha]);
+    git(repo.dir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"]);
     if (configuredBaseBranch(repo.dir) !== "develop") {
       return securityCritical(`configured base was ${configuredBaseBranch(repo.dir)}, expected develop`);
     }

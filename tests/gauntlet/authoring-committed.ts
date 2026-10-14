@@ -2,7 +2,7 @@
  * Gate-7 attack paths: committed config (not working tree), GIT_* isolation,
  * regular-file audit, ancestor-only merge, fail-closed query/discovery.
  */
-import { existsSync, mkdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDiscovery } from "../../src/authoring/discover.js";
@@ -395,5 +395,217 @@ export async function runActivePinSymlinkRefused(): Promise<Verdict> {
     return thrownSecurity(err, "active.json symlink");
   } finally {
     repo.cleanup();
+  }
+}
+
+/**
+ * Item 1: a feature branch that *commits* `base_branch: feature` must not
+ * become the configured base. Never read base_branch from HEAD's tree.
+ */
+export async function runFeatureCommitCannotRedirectBase(): Promise<Verdict> {
+  const repo = initAuthoringRepo();
+  try {
+    git(repo.dir, ["checkout", "-b", "feature"]);
+    writeFileSync(
+      join(repo.dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC, base_branch: feature }
+connection: { type: postgres, schema: public }
+audit: { enabled: true, fail_closed: true, path: .grane/audit.jsonl }
+entities:
+  order: { table: orders, primary_key: id }
+`,
+    );
+    git(repo.dir, ["add", "grane.yml"]);
+    git(repo.dir, ["commit", "-m", "claim feature is the base"]);
+    const resolved = configuredBaseBranch(repo.dir);
+    if (resolved === "feature") {
+      return securityCritical("committed base_branch on HEAD/feature redirected the configured base");
+    }
+    if (resolved !== "main") {
+      return securityCritical(`configured base was ${resolved}, expected main`);
+    }
+    try {
+      writeActivePin(repo.dir, {
+        ref: "feature",
+        commit: git(repo.dir, ["rev-parse", "HEAD"]),
+        approved_by: "gauntlet",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      });
+      return securityCritical("first pin accepted feature after a feature-branch base_branch commit");
+    } catch (err) {
+      const refuse = mustRefuse(err, /pin ref must be "main"|not HEAD/i, "feature-commit pin");
+      if (refuse) return refuse;
+    }
+    return {
+      code: "PASS — POLICY",
+      detail: "HEAD-committed base_branch: feature does not redirect the configured base",
+    };
+  } catch (err) {
+    return thrownSecurity(err, "feature-commit base_branch");
+  } finally {
+    repo.cleanup();
+  }
+}
+
+/**
+ * Item 2: with no committed base_branch, origin/HEAD disagreeing with local
+ * main/master is refused.
+ */
+export async function runOriginHeadDisagreesWithLocalMain(): Promise<Verdict> {
+  const repo = initAuthoringRepo();
+  try {
+    git(repo.dir, ["branch", "develop", "main"]);
+    git(repo.dir, ["remote", "add", "origin", "git@github.com:Nareik33L/grane.git"]);
+    git(repo.dir, ["update-ref", "refs/remotes/origin/develop", repo.mainSha]);
+    git(repo.dir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"]);
+    try {
+      configuredBaseBranch(repo.dir);
+      return securityCritical(
+        "configuredBaseBranch accepted origin/HEAD that disagrees with local main when no base_branch is committed",
+      );
+    } catch (err) {
+      const refuse = mustRefuse(
+        err,
+        /origin\/HEAD is "develop"|no project\.base_branch is committed/i,
+        "origin/HEAD vs local main",
+      );
+      if (refuse) return refuse;
+    }
+    return {
+      code: "PASS — POLICY",
+      detail: "origin/HEAD disagreeing with local main (no committed base_branch) is refused",
+    };
+  } catch (err) {
+    return thrownSecurity(err, "origin/HEAD vs local main");
+  } finally {
+    repo.cleanup();
+  }
+}
+
+/**
+ * Item 3: git replace / grafts that make the proposal look like a parent of
+ * main are refused. GIT_NO_REPLACE_OBJECTS=1 is set on every spawn.
+ */
+export async function runGitReplaceAndGraftsRefused(): Promise<Verdict> {
+  const replaceRepo = initAuthoringRepo();
+  try {
+    const proposal = createProposal(replaceRepo.dir, {
+      slug: "replace",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": EXTRA_METRIC },
+    });
+    const tree = git(replaceRepo.dir, ["rev-parse", `${replaceRepo.mainSha}^{tree}`]);
+    const fake = git(replaceRepo.dir, [
+      "commit-tree",
+      tree,
+      "-p",
+      replaceRepo.mainSha,
+      "-p",
+      proposal.commit,
+      "-m",
+      "replace graft",
+    ]);
+    git(replaceRepo.dir, ["replace", replaceRepo.mainSha, fake]);
+    try {
+      configuredBaseBranch(replaceRepo.dir);
+      return securityCritical("configuredBaseBranch accepted a repo with refs/replace");
+    } catch (err) {
+      const refuse = mustRefuse(err, /refs\/replace|git replace/i, "git replace");
+      if (refuse) return refuse;
+    }
+    try {
+      approveProposal(replaceRepo.dir, proposal.id, { tty: false, approved_by: "gauntlet" });
+      return securityCritical("approve followed git replace to treat the proposal as a parent of main");
+    } catch (err) {
+      const refuse = mustRefuse(err, /refs\/replace|git replace|Merge the GitHub PR/i, "git replace approve");
+      if (refuse) return refuse;
+    }
+  } catch (err) {
+    return thrownSecurity(err, "git replace");
+  } finally {
+    replaceRepo.cleanup();
+  }
+
+  const graftRepo = initAuthoringRepo();
+  try {
+    const proposal = createProposal(graftRepo.dir, {
+      slug: "graft",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": EXTRA_METRIC },
+    });
+    mkdirSync(join(graftRepo.dir, ".git", "info"), { recursive: true });
+    writeFileSync(join(graftRepo.dir, ".git", "info", "grafts"), `${graftRepo.mainSha} ${proposal.commit}\n`);
+    try {
+      configuredBaseBranch(graftRepo.dir);
+      return securityCritical("configuredBaseBranch accepted a repo with .git/info/grafts");
+    } catch (err) {
+      const refuse = mustRefuse(err, /grafts/i, "grafts");
+      if (refuse) return refuse;
+    }
+    try {
+      approveProposal(graftRepo.dir, proposal.id, { tty: false, approved_by: "gauntlet" });
+      return securityCritical("approve followed .git/info/grafts to treat the proposal as a parent of main");
+    } catch (err) {
+      const refuse = mustRefuse(err, /grafts|Merge the GitHub PR/i, "grafts approve");
+      if (refuse) return refuse;
+    }
+    return {
+      code: "PASS — POLICY",
+      detail: "git replace refs and .git/info/grafts are refused",
+    };
+  } catch (err) {
+    return thrownSecurity(err, "grafts");
+  } finally {
+    graftRepo.cleanup();
+  }
+}
+
+/**
+ * Item 6: a symlinked `.grane/` directory is refused so pin/audit cannot
+ * live outside the project.
+ */
+export async function runGraneDirSymlinkRefused(): Promise<Verdict> {
+  const repo = initAuthoringRepo();
+  const outside = mkdtempSync(join(tmpdir(), "grane-dir-outside-"));
+  try {
+    rmSync(join(repo.dir, ".grane"), { recursive: true, force: true });
+    writeFileSync(
+      join(outside, "active.json"),
+      `${JSON.stringify({
+        ref: "main",
+        commit: repo.mainSha,
+        approved_by: "gauntlet",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      })}\n`,
+    );
+    symlinkSync(outside, join(repo.dir, ".grane"));
+    try {
+      readActivePin(repo.dir);
+      return securityCritical("readActivePin followed a symlinked .grane/ directory");
+    } catch (err) {
+      const refuse = mustRefuse(err, /symlink|regular directory/i, ".grane symlink read");
+      if (refuse) return refuse;
+    }
+    try {
+      writeActivePin(repo.dir, {
+        ref: "main",
+        commit: repo.mainSha,
+        approved_by: "gauntlet",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      });
+      return securityCritical("writeActivePin accepted a symlinked .grane/ directory");
+    } catch (err) {
+      const refuse = mustRefuse(err, /symlink|regular directory|fail_closed/i, ".grane symlink write");
+      if (refuse) return refuse;
+    }
+    return {
+      code: "PASS — POLICY",
+      detail: "symlinked .grane/ directory is refused",
+    };
+  } catch (err) {
+    return thrownSecurity(err, ".grane dir symlink");
+  } finally {
+    repo.cleanup();
+    rmSync(outside, { recursive: true, force: true });
   }
 }

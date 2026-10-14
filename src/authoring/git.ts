@@ -121,7 +121,14 @@ function envWithoutInheritedGit(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEn
     env[key] = value;
   }
   env.GIT_OPTIONAL_LOCKS = "0";
-  if (overrides) Object.assign(env, overrides);
+  env.GIT_NO_REPLACE_OBJECTS = "1";
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (key === "GIT_NO_REPLACE_OBJECTS") continue;
+      env[key] = value;
+    }
+  }
+  env.GIT_NO_REPLACE_OBJECTS = "1";
   return env;
 }
 
@@ -158,7 +165,38 @@ function gitRoot(projectDir: string): string {
         `Proposals are GitHub PRs; approval is merging the PR. Grane will not invent a repo or write to a missing one.`,
     );
   }
-  return git(projectDir, ["rev-parse", "--show-toplevel"]).trim();
+  const root = git(projectDir, ["rev-parse", "--show-toplevel"]).trim();
+  assertTrustedGitHistory(root);
+  return root;
+}
+
+/**
+ * Refuse history rewriting via `git replace` or a non-empty `.git/info/grafts`.
+ * `GIT_NO_REPLACE_OBJECTS=1` is also set on every spawn so a replace ref
+ * cannot fake ancestry (`git replace` making a proposal look like a parent
+ * of the base). Shallow clones (`.git/shallow`) are allowed: they omit
+ * parents, they do not add them.
+ */
+function assertTrustedGitHistory(root: string): void {
+  const replace = runGit(root, ["for-each-ref", "--format=%(refname)", "refs/replace"], { allowFail: true });
+  if (replace.stdout.trim()) {
+    throw configError(
+      `Refusing git replace objects under refs/replace/. ` +
+        `Delete them (\`git replace -d <rev>\`) before using Grane authoring. ` +
+        `Replace refs can make a proposal look like a parent of the base.`,
+    );
+  }
+  const gitDir = runGit(root, ["rev-parse", "--absolute-git-dir"], { allowFail: true }).stdout.trim();
+  if (!gitDir) return;
+  const grafts = join(gitDir, "info", "grafts");
+  if (existsSync(grafts)) {
+    const body = readFileSync(grafts, "utf8").trim();
+    if (body) {
+      throw configError(
+        `Refusing git grafts at .git/info/grafts. Remove that file before using Grane authoring.`,
+      );
+    }
+  }
 }
 
 function porcelainPath(line: string): string {
@@ -278,21 +316,29 @@ function parseBaseBranchFromYamlContents(contents: Record<string, string>): stri
   return null;
 }
 
+function normalizeBranchRef(ref: string): string {
+  return ref.replace(/^refs\/heads\//, "");
+}
+
 /**
- * `project.base_branch` from the committed tree at the conventional base
- * (`origin/HEAD`, else `main`/`master`). Never the working-tree YAML.
- * When those refs are absent, HEAD's committed tree is the last resort.
+ * Established refs only: origin/HEAD, main, master.
+ * Never HEAD and never `.grane/active.json` — a feature branch that commits
+ * `base_branch: feature`, or a hand-edited pin with `ref: feature`, must not
+ * become the configured base. A valid pin is checked against this base.
  */
-function committedExplicitBaseBranch(projectDir: string): string | null {
-  const root = gitRoot(projectDir);
+function establishedBaseRefs(root: string): string[] {
   const refs: string[] = [];
   if (originHeadBranch(root)) refs.push("origin/HEAD");
   for (const name of ["main", "master"]) {
     if (localHeadsBranch(root, name)) refs.push(`refs/heads/${name}`);
   }
-  if (refs.length === 0) refs.push("HEAD");
+  return refs;
+}
+
+function committedExplicitBaseBranch(projectDir: string): string | null {
+  const root = gitRoot(projectDir);
   const seen = new Set<string>();
-  for (const ref of refs) {
+  for (const ref of establishedBaseRefs(root)) {
     const probe = runGit(root, ["rev-parse", "--verify", `${ref}^{commit}`], { allowFail: true });
     if (probe.status !== 0) continue;
     const commit = probe.stdout.trim();
@@ -318,28 +364,39 @@ function isUsableBaseName(name: string): boolean {
 }
 
 /**
- * GitHub PR / pin base. Committed `project.base_branch` wins. When it is set
- * and `origin/HEAD` names a different branch, refuse — do not silently pick
- * either. `origin/HEAD` (else local `main` / `master`) is the fallback only
- * when no `base_branch` is committed. Working-tree `grane.yml` is never read.
- * Never falls back to the current HEAD branch name.
+ * GitHub PR / pin base. Trusted sources only (never HEAD, never a pin file,
+ * never the working tree):
+ * 1. `project.base_branch` from the committed tree at origin/HEAD, main, or
+ *    master
+ * 2. origin/HEAD, else local main/master, only when no base_branch is set
+ *
+ * A valid pin's `ref` must equal this value (`assertServablePin`); the pin
+ * is not a source of the base, so a hand-edit cannot redirect it.
+ * origin/HEAD disagreeing with committed base_branch, or (when base_branch is
+ * unset) with local main/master, is refused. No established base → refuse;
+ * run `grane setup` after main/master or origin/HEAD exists.
  */
 export function configuredBaseBranch(projectDir: string): string {
   const root = gitRoot(projectDir);
   const originHead = originHeadBranch(root);
+  const localConventional = localHeadsBranch(root, "main")
+    ? "main"
+    : localHeadsBranch(root, "master")
+      ? "master"
+      : null;
   const explicit = committedExplicitBaseBranch(projectDir);
   if (explicit) {
     if (!isUsableBaseName(explicit)) {
       throw configError(
         `Committed project.base_branch "${explicit}" is not a usable branch name. ` +
-          `Set project.base_branch in the committed grane.yml to an existing local refs/heads/ branch.`,
+          `Set project.base_branch on the established base (main/master/origin/HEAD) and commit it.`,
       );
     }
     if (originHead && originHead !== explicit) {
       throw configError(
         `Refusing to resolve the configured base: origin/HEAD is "${originHead}" but committed ` +
           `project.base_branch is "${explicit}". Point origin/HEAD at the configured base, or ` +
-          `change project.base_branch on that base and commit it. Working-tree edits are ignored.`,
+          `change project.base_branch on that base and commit it. Working-tree and HEAD edits are ignored.`,
       );
     }
     if (!localHeadsBranch(root, explicit)) {
@@ -350,14 +407,19 @@ export function configuredBaseBranch(projectDir: string): string {
     }
     return explicit;
   }
-  if (originHead) return originHead;
-  for (const name of ["main", "master"]) {
-    if (localHeadsBranch(root, name)) return name;
+  if (originHead && localConventional && originHead !== localConventional) {
+    throw configError(
+      `Refusing to resolve the configured base: origin/HEAD is "${originHead}" but local ` +
+        `"${localConventional}" exists and no project.base_branch is committed on that established base. ` +
+        `Point origin/HEAD at ${localConventional}, or set project.base_branch and commit it.`,
+    );
   }
+  if (originHead) return originHead;
+  if (localConventional) return localConventional;
   throw configError(
-    `Cannot determine the configured base branch (no committed project.base_branch, origin/HEAD, ` +
-      `refs/heads/main, or refs/heads/master). Set project.base_branch in grane.yml to an existing ` +
-      `local branch and commit it.`,
+    `Cannot determine the configured base branch (no established base). ` +
+      `Grane will not read project.base_branch from HEAD or a feature branch. ` +
+      `Create refs/heads/main (or master), set origin/HEAD, or run \`grane setup\` after that base exists.`,
   );
 }
 
@@ -458,6 +520,20 @@ function gitPath(root: string, projectDir: string, rel: string): string {
   return fromRoot;
 }
 
+/** Pin/audit state must live inside the project, not a redirected `.grane/`. */
+export function assertRegularGraneDir(projectDir: string): void {
+  const dir = join(projectDir, ".grane");
+  try {
+    const st = lstatSync(dir);
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw configError(`Refusing .grane/: must be a regular directory, not a symlink or special file.`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+}
+
 function assertRegularPinFile(path: string): void {
   try {
     const st = lstatSync(path);
@@ -473,6 +549,7 @@ function assertRegularPinFile(path: string): void {
 }
 
 export function readActivePin(projectDir: string): ActivePin | null {
+  assertRegularGraneDir(projectDir);
   const path = join(projectDir, ACTIVE_PIN_PATH);
   assertRegularPinFile(path);
   if (!existsSync(path)) return null;
@@ -629,10 +706,6 @@ function previouslyApprovedCommits(root: string, pin: ActivePin | null): Set<str
   return out;
 }
 
-function normalizeBranchRef(ref: string): string {
-  return ref.replace(/^refs\/heads\//, "");
-}
-
 /**
  * The pin ref is the GitHub PR base, never a proposal branch. On the first pin it
  * must match `configuredBaseBranch()` (not HEAD); afterwards it must keep the existing pin's ref.
@@ -651,7 +724,16 @@ function assertPinRef(projectDir: string, requested: string): string {
       `Existing pin ref "${existing.ref}" is a proposal branch and cannot be used. Delete ${ACTIVE_PIN_PATH} and pin the GitHub PR base.`,
     );
   }
-  const expected = existing?.ref ?? configuredBaseBranch(projectDir);
+  const expected = configuredBaseBranch(projectDir);
+  if (existing) {
+    const existingRef = normalizeBranchRef(existing.ref);
+    if (existingRef !== expected && existing.ref !== `refs/heads/${expected}`) {
+      throw configError(
+        `Existing pin ref "${existing.ref}" is not the configured base branch "${expected}". ` +
+          `The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+      );
+    }
+  }
   if (ref !== expected) {
     throw configError(
       `Refusing to pin against "${requested}". The pin ref must be "${expected}" (the approved/active base branch, not HEAD).`,
@@ -685,6 +767,7 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   assertServablePin(projectDir, next);
   const audit = pinAuditConfig(projectDir);
   preflightAuditWrite(audit.config, audit.dir);
+  assertRegularGraneDir(projectDir);
   const path = join(projectDir, ACTIVE_PIN_PATH);
   assertRegularPinFile(path);
   const previous = existsSync(path) ? readFileSync(path) : null;
@@ -729,7 +812,7 @@ export interface ActiveRef {
 export function resolveActiveRef(projectDir: string): ActiveRef {
   const root = gitRoot(projectDir);
   const pin = readActivePin(projectDir);
-  const branch = pin?.ref ?? configuredBaseBranch(projectDir);
+  const branch = configuredBaseBranch(projectDir);
   if (branch.startsWith(PROPOSAL_BRANCH_PREFIX)) {
     throw configError(
       `Active ref is proposal branch "${branch}". Check out the base branch (the GitHub PR base) first. ` +

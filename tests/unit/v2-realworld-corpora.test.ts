@@ -30,12 +30,20 @@ const CORPORA: Array<{
   { rel: "tests/fixtures/lookml-shop", kind: "lookml", source: /Looker|LookML/i },
   { rel: "tests/fixtures/malloy-shop", kind: "malloy", source: /Malloy/i },
   { rel: "tests/fixtures/ossie-shop", kind: "ossie", source: /Ossie/i },
+  {
+    rel: "tests/fixtures/jaffle_shop",
+    kind: "dbt",
+    source: /dbt-labs\/jaffle|jaffle-shop-classic|Apache-2\.0|fd7bfaca/i,
+  },
 ];
 
 describe("representative real-world corpora", () => {
   it("docs/v2-authoring.md documents every corpus source", () => {
     const docs = readFileSync(join(ROOT, "docs/v2-authoring.md"), "utf8");
     expect(docs).toMatch(/## Real-world corpora/);
+    expect(docs).toMatch(/Hand-built representative shapes/);
+    expect(docs).toMatch(/Pinned public project/);
+    expect(docs).toContain("tests/fixtures/jaffle_shop-import");
     for (const corpus of CORPORA) {
       expect(docs, corpus.rel).toContain(corpus.rel);
       expect(docs, `${corpus.rel} source`).toMatch(corpus.source);
@@ -76,5 +84,21 @@ describe("representative real-world corpora", () => {
       const names = Object.keys(contribution.metrics);
       expect(names.length, `${rel} imported no metrics`).toBeGreaterThan(0);
     }
+  });
+
+  it("pins dbt-labs/jaffle_shop (Apache-2.0) and runs detect/import/validate", () => {
+    const fixture = join(ROOT, "tests/fixtures/jaffle_shop");
+    const source = readFileSync(join(fixture, "SOURCE.md"), "utf8");
+    expect(source).toMatch(/fd7bfacae4f497ff044a6a0275268676bf1b64c3/);
+    expect(source).toMatch(/Apache-2\.0/);
+    expect(readFileSync(join(fixture, "LICENSE"), "utf8")).toMatch(/Apache License/);
+    expect(detectConnectorKinds(fixture)).toContain("dbt");
+    const contribution = loadAutoProvider({ path: fixture }, { projectDir: fixture });
+    expect(contribution.warnings.join("\n")).toMatch(/no MetricFlow/i);
+    expect(Object.keys(contribution.metrics)).toHaveLength(0);
+    const loaded = loadConfig(join(ROOT, "tests/fixtures/jaffle_shop-import"));
+    expect(loaded.config.providers[0]?.path).toMatch(/jaffle_shop/);
+    const report = validateModel(new SemanticModel(loaded.config));
+    expect(report.ok).toBe(true);
   });
 });

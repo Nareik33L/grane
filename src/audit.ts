@@ -242,6 +242,20 @@ export function resolveAuditPath(projectDir: string | undefined, configured: str
   return join(projectDir, configured);
 }
 
+function assertRegularGraneDir(projectDir: string | undefined): void {
+  if (!projectDir) return;
+  const dir = join(projectDir, ".grane");
+  try {
+    const st = lstatSync(dir);
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new Error(`.grane/ is a symlink or special file; a regular directory is required`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+}
+
 /**
  * fail_closed audit must append to a regular file. Symlinks and devices
  * (`/dev/null`) would silently discard the trail.
@@ -309,6 +323,7 @@ export function recordAudit(
 ): void {
   if (!config.audit.enabled) return;
   try {
+    assertRegularGraneDir(projectDir);
     appendAudit(event, {
       path: resolveAuditPath(projectDir, config.audit.path),
       stdout: config.audit.stdout,
@@ -325,6 +340,7 @@ export function recordAudit(
 export function preflightAuditWrite(config: GraneConfig, projectDir: string | undefined): void {
   if (!config.audit.enabled || !config.audit.fail_closed) return;
   try {
+    assertRegularGraneDir(projectDir);
     const path = resolveAuditPath(projectDir, config.audit.path);
     if (path) {
       const parent = dirname(path);

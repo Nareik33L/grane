@@ -26,9 +26,13 @@ import {
   runActivePinSymlinkRefused,
   runAuditPathMustBeRegularFile,
   runFailClosedQueryAndDiscovery,
+  runFeatureCommitCannotRedirectBase,
   runForgedProposalTrailerRefused,
   runGitEnvStripped,
+  runGitReplaceAndGraftsRefused,
+  runGraneDirSymlinkRefused,
   runOriginHeadDisagreesWithBaseBranch,
+  runOriginHeadDisagreesWithLocalMain,
   runWorkingTreeAuditDisableIgnored,
   runWorkingTreeBaseBranchIgnored,
 } from "../gauntlet/authoring-committed.js";
@@ -156,6 +160,26 @@ describe("V2-14 authoring gauntlet", () => {
 
   it("active.json symlink is refused", async () => {
     const verdict = await runActivePinSymlinkRefused();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("HEAD-committed base_branch: feature does not redirect the configured base", async () => {
+    const verdict = await runFeatureCommitCannotRedirectBase();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("refuses origin/HEAD that disagrees with local main when no base_branch is committed", async () => {
+    const verdict = await runOriginHeadDisagreesWithLocalMain();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("refuses git replace refs and .git/info/grafts", async () => {
+    const verdict = await runGitReplaceAndGraftsRefused();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("symlinked .grane/ directory is refused", async () => {
+    const verdict = await runGraneDirSymlinkRefused();
     expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
   });
 });

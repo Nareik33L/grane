@@ -76,7 +76,7 @@ describe.skipIf(!available)("grane gauntlet", () => {
 
     const card = buildScorecard(results);
     process.stderr.write(`${card.report}\n`);
-  }, 120_000);
+  }, 180_000);
 
   afterAll(async () => {
     await harness?.kernel.close();

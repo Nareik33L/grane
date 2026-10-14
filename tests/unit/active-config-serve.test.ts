@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -488,7 +488,7 @@ describe("first pin is the configured base branch, not HEAD", () => {
     expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("feature");
   });
 
-  it("refuses when there is no origin/HEAD, main, or master, unless project.base_branch names a local branch", () => {
+  it("refuses when there is no established base; HEAD-committed base_branch is not enough", () => {
     const dir = tempDir();
     git(dir, ["init", "-b", "develop"]);
     git(dir, ["config", "user.email", "test@grane.dev"]);
@@ -498,8 +498,7 @@ describe("first pin is the configured base branch, not HEAD", () => {
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-m", "initial on develop"]);
     expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("develop");
-    expect(() => configuredBaseBranch(dir)).toThrow(/Cannot determine the configured base branch/);
-    expect(() => configuredBaseBranch(dir)).toThrow(/project.base_branch/);
+    expect(() => configuredBaseBranch(dir)).toThrow(/Cannot determine the configured base branch|established base/);
 
     writeFileSync(
       join(dir, "grane.yml"),
@@ -510,7 +509,12 @@ entities:
 `,
     );
     git(dir, ["add", "grane.yml"]);
-    git(dir, ["commit", "-m", "set project.base_branch"]);
+    git(dir, ["commit", "-m", "set project.base_branch on HEAD only"]);
+    expect(() => configuredBaseBranch(dir)).toThrow(/established base|grane setup/);
+
+    git(dir, ["remote", "add", "origin", "git@github.com:Nareik33L/grane.git"]);
+    git(dir, ["update-ref", "refs/remotes/origin/develop", git(dir, ["rev-parse", "HEAD"])]);
+    git(dir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"]);
     expect(configuredBaseBranch(dir)).toBe("develop");
     const commit = git(dir, ["rev-parse", "HEAD"]);
     const pin = writeActivePin(dir, {
@@ -521,6 +525,65 @@ entities:
     });
     expect(pin.ref).toBe("develop");
     expect(loadServingConfig(dir).pin?.ref).toBe("develop");
+  });
+
+  it("does not read base_branch from a feature branch's committed tree", () => {
+    const dir = initRepo();
+    git(dir, ["checkout", "-b", "feature"]);
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC, base_branch: feature }
+connection: { type: postgres, schema: public }
+entities:
+  order: { table: orders, primary_key: id }
+`,
+    );
+    git(dir, ["add", "grane.yml"]);
+    git(dir, ["commit", "-m", "claim feature is the base"]);
+    expect(configuredBaseBranch(dir)).toBe("main");
+    expect(() =>
+      writeActivePin(dir, {
+        ref: "feature",
+        commit: git(dir, ["rev-parse", "HEAD"]),
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      }),
+    ).toThrow(/not HEAD|pin ref must be "main"/);
+  });
+
+  it("refuses origin/HEAD that disagrees with local main when no base_branch is committed", () => {
+    const dir = initRepo();
+    git(dir, ["branch", "develop", "main"]);
+    git(dir, ["remote", "add", "origin", "git@github.com:Nareik33L/grane.git"]);
+    git(dir, ["update-ref", "refs/remotes/origin/develop", git(dir, ["rev-parse", "main"])]);
+    git(dir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"]);
+    expect(() => configuredBaseBranch(dir)).toThrow(/origin\/HEAD is "develop"|no project\.base_branch is committed/);
+  });
+
+  it("refuses git replace objects", () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "main"]);
+    const tree = git(dir, ["rev-parse", `${main}^{tree}`]);
+    const fake = git(dir, ["commit-tree", tree, "-p", main, "-m", "replace"]);
+    git(dir, ["replace", main, fake]);
+    expect(() => configuredBaseBranch(dir)).toThrow(/refs\/replace|git replace/);
+  });
+
+  it("refuses a symlinked .grane/ directory", () => {
+    const dir = initRepo();
+    const outside = tempDir();
+    rmSync(join(dir, ".grane"), { recursive: true, force: true });
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(dir, ".grane"));
+    expect(() => readActivePin(dir)).toThrow(/symlink|regular directory/);
+    expect(() =>
+      writeActivePin(dir, {
+        ref: "main",
+        commit: git(dir, ["rev-parse", "main"]),
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      }),
+    ).toThrow(/symlink|regular directory|fail_closed/);
   });
 });
 

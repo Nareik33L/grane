@@ -159,24 +159,46 @@ write.
 
 ## `project.base_branch`
 
-`project.base_branch` is read from the **committed** config at the conventional
-base (`origin/HEAD`, else `main` / `master`, else `HEAD`'s committed tree).
-Working-tree edits to `grane.yml` do **not** redirect the base.
+The configured base comes only from an **already-established** trusted source:
+
+1. `project.base_branch` committed on the tree of `origin/HEAD`, `main`, or
+   `master` (never `HEAD`, never the working-tree `grane.yml`, never a
+   hand-edited pin), or
+2. `origin/HEAD`, else local `main` / `master`, when no `base_branch` is
+   committed on those trees.
+
+A valid pin's `ref` must equal that base; the pin is not used to *discover*
+the base (a hand-edit of `ref` cannot redirect it). Checking out a feature
+branch that commits `base_branch: feature` does **not** make `feature` the
+base. If no base is established (no `origin/HEAD`, no local `main`/`master`),
+Grane **refuses** and asks you to create that ref or run `grane setup` after
+it exists.
 
 When committed `project.base_branch` is set, it wins. If `origin/HEAD` names a
-different branch, Grane refuses rather than silently picking either.
-`origin/HEAD` (else local `main` / `master`) is the fallback **only** when no
-`base_branch` is committed. The base is **never** inferred from the current
-`HEAD` branch name.
+different branch, Grane refuses. When `base_branch` is unset, `origin/HEAD`
+disagreeing with local `main`/`master` is also refused. `origin/HEAD` (else
+local `main` / `master`) is the fallback **only** when no `base_branch` is
+committed on an established base.
 
 ```yaml
 project:
   name: shop
   timezone: UTC
-  base_branch: develop    # committed value; required when origin/HEAD, main, and master are absent
+  base_branch: develop    # must be committed on main/master/origin/HEAD, not on a feature HEAD
 ```
 
 The first pin must be a commit on that base. Feature-branch HEADs are refused.
+
+## Trusted git history and `.grane/`
+
+Authoring shells every `git` spawn with inherited `GIT_*` stripped and
+`GIT_NO_REPLACE_OBJECTS=1`. A repo with `refs/replace/*` or a non-empty
+`.git/info/grafts` is refused — `git replace` (or grafts) must not make a
+proposal look like a parent of the base. Shallow clones are allowed.
+
+`.grane/` must be a regular directory (`lstat`, not a symlink) so the pin
+and audit trail cannot live outside the project. `active.json` and the
+audit file must be regular files, not symlinks or devices (`/dev/null`).
 
 ## Temporal `group_by` warning on existing YAML
 
@@ -261,14 +283,16 @@ tells the user how to fix it (see validate issue codes such as
 `grane setup --import` and `grane validate` never write `.grane/active.json`
 and never overwrite the user's original YAML.
 
-Representative real-world corpora (dbt/MetricFlow, Cube, LookML, Malloy,
-Ossie, and multi-entity Grane YAML) are listed under
-[Real-world corpora](#real-world-corpora).
+Import/validate corpora include hand-built representative provider shapes
+plus one pinned public project (`dbt-labs/jaffle_shop` / jaffle-shop-classic).
+See [Real-world corpora](#real-world-corpora).
 
 ## Real-world corpora
 
-These trees are used for import/validate compat, not only hand-built
-single-metric fixtures. Sources:
+Import/validate compat uses two kinds of tree.
+
+**Hand-built representative shapes** (not upstream checkouts; used for
+MetricFlow/Cube/LookML/Malloy/Ossie parser coverage):
 
 | Tree | Kind | Source |
 | --- | --- | --- |
@@ -279,6 +303,12 @@ single-metric fixtures. Sources:
 | `tests/fixtures/lookml-shop` | LookML | Looker-style view. |
 | `tests/fixtures/malloy-shop` | Malloy | `source` / `measure` / `dimension`. |
 | `tests/fixtures/ossie-shop` | Ossie | Semantic-model datasets. |
+
+**Pinned public project** (source + license credited; fixed commit):
+
+| Tree | Kind | Source |
+| --- | --- | --- |
+| `tests/fixtures/jaffle_shop`, `tests/fixtures/jaffle_shop-import` | dbt | [dbt-labs/jaffle-shop-classic](https://github.com/dbt-labs/jaffle-shop-classic) `@ fd7bfacae4f497ff044a6a0275268676bf1b64c3` (Apache-2.0). Historical URL: `dbt-labs/jaffle_shop`. Classic jaffle has no MetricFlow `semantic_models`; import detects `dbt` and yields the empty-graph warning. The Grane wrapper at `jaffle_shop-import` loads that path via `providers:` and `validate` stays clean. |
 
 ## Warehouse categories
 
