@@ -42,11 +42,18 @@ export const CLIENTS: ClientAdapter[] = [
             `Enter the MCP URL: ${url ?? "https://your-host/mcp"}`,
             "Or add the HTTP entry below, then fully restart Claude Desktop.",
             "Start a new chat so Grane tools appear.",
+            "If authoring is enabled, open the “Set up Grane” prompt to define metrics in plain English.",
           ],
           configPath,
         );
       }
-      return withConfig(restartChat("Claude Desktop"), configPath);
+      return withConfig(
+        [
+          ...restartChat("Claude Desktop"),
+          "If authoring is enabled, open the “Set up Grane” prompt to define metrics in plain English.",
+        ],
+        configPath,
+      );
     },
   },
   {
@@ -70,6 +77,7 @@ export const CLIENTS: ClientAdapter[] = [
         [
           "Reload MCP in Cursor Settings → MCP, or run Developer: Reload Window.",
           "Start a new chat so the agent picks up Grane's tools.",
+          "If authoring is enabled, open the “Set up Grane” prompt to define metrics in plain English.",
         ],
         configPath,
       ),

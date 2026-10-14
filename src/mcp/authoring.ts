@@ -39,6 +39,12 @@ export const AUTHORING_MCP_TOOLS = [
   "submit_proposal",
 ] as const;
 
+export {
+  AUTHORING_MCP_PROMPTS,
+  SETUP_GRANE_PROMPT_NAME,
+  SETUP_GRANE_PROMPT_TITLE,
+} from "./prompts/setup-grane.js";
+
 export type AuthoringMcpTool = (typeof AUTHORING_MCP_TOOLS)[number];
 
 /**
