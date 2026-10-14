@@ -57,9 +57,18 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
           return;
         }
         if (diff.semantic) {
-          console.log(
-            `metrics +${diff.semantic.metrics.added.length} ~${diff.semantic.metrics.changed.length} -${diff.semantic.metrics.removed.length}`,
-          );
+          const line = (label: string, names: { added: string[]; changed: string[]; removed: string[] }) =>
+            `${label} +${names.added.join(",") || "0"} ~${names.changed.join(",") || "0"} -${names.removed.join(",") || "0"}`;
+          console.log(line("metrics", diff.semantic.metrics));
+          console.log(line("entities", diff.semantic.entities));
+          const restored = diff.semantic.merge.restored;
+          const restoredBits = (["metrics", "entities", "dimensions", "relationships"] as const)
+            .filter((key) => restored[key].length > 0)
+            .map((key) => `${key}=${restored[key].join(",")}`);
+          if (restoredBits.length > 0) console.log(`merge restored  ${restoredBits.join(" ")}`);
+          if (diff.semantic.merge.lost_comments.length > 0) {
+            console.log(`lost comments  ${diff.semantic.merge.lost_comments.join(", ")}`);
+          }
         }
         if (diff.unified.trim()) console.log(diff.unified);
         else console.log("No file diff.");

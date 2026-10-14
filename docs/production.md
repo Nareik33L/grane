@@ -115,7 +115,10 @@ SHA is reachable from the configured base branch. **Reject** deletes the
 proposal ref only. None of these commands merge, reset, or move `main`.
 Each action writes one audit line. With `audit.fail_closed`, Grane proves
 the audit path is writable before creating a proposal branch or writing
-the pin.
+the pin. `proposals diff` flags removed metrics and entities, keys the
+YAML merge restored from the base, and comments dropped by that merge.
+Approve, rollback, and reject refuse a nested demo authoring repo
+(`.grane-demo` from setup `--dir`).
 
 There is no SSO, OIDC, or SAML in this release. Rotate tokens in the
 environment and in `grane.yml`.

@@ -10,7 +10,9 @@
   the log write before any write tool/CLI action; if a proposal branch was
   created and the audit then fails, the branch is deleted. Approve and
   rollback do not move `main` and keep the proposal parent at the original
-  SHA.
+  SHA. `proposals diff` reports removed metrics and entities, keys restored
+  by the YAML merge, and files that lost comments. Approve, rollback, and
+  reject refuse a nested demo authoring repo created by setup `--dir`.
 - **Active-config pin (V2-12).** `.grane/active.json` is `{ref, commit,
   approved_by, approved_at}`. `grane serve` loads that commit's YAML tree
   when the pin exists; uncommitted edits do not affect serving. Projects

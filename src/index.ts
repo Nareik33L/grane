@@ -18,6 +18,7 @@ export {
   ACTIVE_PIN_PATH,
   type ActivePin,
 } from "./authoring/git.js";
+export { DEMO_AUTHORING_MARKER, isDemoAuthoringProject } from "./authoring/demo-marker.js";
 export {
   graneConfigSchema,
   type GraneConfig,

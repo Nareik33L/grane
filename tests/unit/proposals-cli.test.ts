@@ -10,6 +10,7 @@ import {
   approveProposal,
   createProposal,
   deleteProposalBranch,
+  diffProposal,
   diffProposalAction,
   listProposals,
   listProposalsAction,
@@ -18,6 +19,8 @@ import {
   rollbackPin,
   writeActivePin,
 } from "../../src/authoring/git.js";
+import { DEMO_AUTHORING_MARKER, isDemoAuthoringProject } from "../../src/authoring/demo-marker.js";
+import { writeDemoAuthoringProject, ensureDemoAuthoringGitRepo } from "../../src/setup/demo-postgres.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { buildMcpServer } from "../../src/mcp/server.js";
 import { getDialect } from "../../src/connectors/dialect.js";
@@ -358,6 +361,133 @@ describe("authoring fail-closed preflight", () => {
     expect(() => submitProposal(kernel, session.id, "nope")).toThrow(/fail_closed|validate|Draft/);
     expect(listProposals(dir)).toEqual([]);
     expect(git(dir, ["rev-parse", "main"])).toBe(main);
+  });
+});
+
+describe("proposals diff semantic merge report", () => {
+  it("flags removed metrics and entities, merge-restored keys, and lost comments", () => {
+    const dir = initRepo();
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC }
+connection: { type: postgres, schema: public }
+entities:
+  # shop orders
+  order: { table: orders, primary_key: id }
+  legacy: { table: old_orders, primary_key: id }
+`,
+    );
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  # keep this total
+  orders:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+`,
+    );
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "base with comments"]);
+
+    const proposal = createProposal(dir, {
+      slug: "swap",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: {
+        "grane.yml": `project: { name: shop, timezone: UTC }
+connection: { type: postgres, schema: public }
+entities:
+  customer: { table: customers, primary_key: id }
+`,
+        "metrics.yml": `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+    status: experimental
+`,
+      },
+    });
+    const message = git(dir, ["log", "-1", "--format=%B", proposal.commit]);
+    expect(message).toMatch(/Grane-Merge-Restored:/);
+    expect(message).toMatch(/metrics=orders/);
+    expect(message).toMatch(/entities=legacy,order|entities=order,legacy/);
+    expect(message).toMatch(/Grane-Lost-Comments:/);
+
+    const diff = diffProposal(dir, proposal.id);
+    expect(diff.semantic?.metrics.added).toEqual(["revenue"]);
+    expect(diff.semantic?.metrics.removed).toEqual([]);
+    expect(diff.semantic?.entities.added).toEqual(["customer"]);
+    expect(diff.semantic?.entities.removed).toEqual([]);
+    expect(diff.semantic?.merge.restored.metrics).toEqual(["orders"]);
+    expect(diff.semantic?.merge.restored.entities.sort()).toEqual(["legacy", "order"]);
+    expect(diff.semantic?.merge.lost_comments).toEqual(expect.arrayContaining(["grane.yml", "metrics.yml"]));
+    expect(git(dir, ["show", `${proposal.commit}:metrics.yml`])).toMatch(/orders:/);
+    expect(git(dir, ["show", `${proposal.commit}:grane.yml`])).toMatch(/legacy:/);
+
+    const cli = runCli(dir, ["proposals", "diff", proposal.id]);
+    expect(cli.status).toBe(0);
+    expect(cli.stdout).toMatch(/merge restored/);
+    expect(cli.stdout).toMatch(/lost comments/);
+    expect(cli.stdout).toMatch(/orders/);
+  });
+
+  it("name-diff removed lists metrics and entities deleted on the proposal commit", () => {
+    const dir = initRepo();
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `${INITIAL_YML}  leftover: { table: leftovers, primary_key: id }\n`,
+    );
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  orders:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+`,
+    );
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "base with extras"]);
+    git(dir, ["checkout", "-b", "grane/proposal/20261014-drop"]);
+    writeFileSync(join(dir, "grane.yml"), INITIAL_YML);
+    writeFileSync(join(dir, "metrics.yml"), "metrics: {}\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "drop leftover\n\nGrane-Proposal: 20261014-drop"]);
+    git(dir, ["checkout", "main"]);
+
+    const diff = diffProposal(dir, "20261014-drop");
+    expect(diff.semantic?.metrics.removed).toEqual(["orders"]);
+    expect(diff.semantic?.entities.removed).toEqual(["leftover"]);
+    const cli = runCli(dir, ["proposals", "diff", "20261014-drop", "--json"]);
+    expect(cli.status).toBe(0);
+    const payload = JSON.parse(cli.stdout) as { semantic: { metrics: { removed: string[] }; entities: { removed: string[] } } };
+    expect(payload.semantic.metrics.removed).toEqual(["orders"]);
+    expect(payload.semantic.entities.removed).toEqual(["leftover"]);
+  });
+});
+
+describe("nested demo --dir cannot approve or rollback", () => {
+  it("refuses approve, rollback, reject, and pin writes in a setup --dir demo repo", () => {
+    const dir = tempDir();
+    writeDemoAuthoringProject(dir);
+    ensureDemoAuthoringGitRepo(dir, { log: () => undefined, error: () => undefined });
+    expect(existsSync(join(dir, DEMO_AUTHORING_MARKER))).toBe(true);
+    expect(isDemoAuthoringProject(dir)).toBe(true);
+    expect(() => approveProposal(dir, "any", { tty: true })).toThrow(/nested demo authoring/);
+    expect(() => rollbackPin(dir, { approved_by: "octocat" })).toThrow(/nested demo authoring/);
+    expect(() => rejectProposal(dir, "any", { yes: true })).toThrow(/nested demo authoring/);
+    expect(() =>
+      writeActivePin(dir, {
+        ref: "main",
+        commit: git(dir, ["rev-parse", "HEAD"]),
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      }),
+    ).toThrow(/nested demo authoring/);
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(runCli(dir, ["proposals", "approve", "x"]).status).not.toBe(0);
+    expect(runCli(dir, ["proposals", "rollback"]).status).not.toBe(0);
   });
 });
 

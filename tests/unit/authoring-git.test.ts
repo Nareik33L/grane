@@ -112,7 +112,10 @@ describe("git proposal library", () => {
     expect(diff.unified).toContain("revenue");
     expect(diff.semantic?.metrics.added).toEqual(["revenue"]);
     expect(diff.semantic?.metrics.removed).toEqual([]);
+    expect(diff.semantic?.entities).toEqual({ added: [], changed: [], removed: [] });
     expect(diff.semantic?.dimensions).toEqual({ added: [], changed: [], removed: [] });
+    expect(diff.semantic?.merge.restored.metrics).toEqual([]);
+    expect(diff.semantic?.merge.lost_comments).toEqual([]);
   });
 
   it("produces a GitHub PR-creation payload and gh command without writing the active branch", () => {

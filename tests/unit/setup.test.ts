@@ -523,6 +523,7 @@ audit:
     expect(result.question).toBe(DEMO_AUTHORING_QUESTION);
     expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
     expect(readActivePin(dir)).toBeNull();
+    expect(existsSync(join(dir, ".grane-demo"))).toBe(true);
     const yaml = readFileSync(join(dir, "grane.yml"), "utf8");
     expect(yaml).toMatch(/type:\s*postgres/);
     expect(yaml).toMatch(/authoring:\n\s+enabled:\s*true/);

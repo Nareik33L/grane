@@ -8,7 +8,13 @@ import { preflightAuditWrite, recordPinAudit, recordProposalAudit } from "../aud
 import { findProjectDir, isAdopterTestYaml, loadConfig, type LoadedConfig } from "../config/load.js";
 import { graneConfigSchema, type GraneConfig } from "../config/schema.js";
 import { configError } from "../errors.js";
-import { combineSemanticYaml } from "./yaml-merge.js";
+import { isDemoAuthoringProject, DEMO_AUTHORING_MARKER } from "./demo-marker.js";
+import {
+  combineSemanticYamlWithReport,
+  emptyRestored,
+  SEMANTIC_YAML_KEYS,
+  type SemanticYamlRestored,
+} from "./yaml-merge.js";
 
 const FULL_SHA = /^[0-9a-fA-F]{40}$/;
 
@@ -53,10 +59,17 @@ export interface NameDiff {
   removed: string[];
 }
 
+export interface SemanticMergeReport {
+  restored: SemanticYamlRestored;
+  lost_comments: string[];
+}
+
 export interface SemanticProposalDiff {
   metrics: NameDiff;
   dimensions: NameDiff;
   relationships: NameDiff;
+  entities: NameDiff;
+  merge: SemanticMergeReport;
 }
 
 export interface ProposalDiff {
@@ -279,6 +292,14 @@ export function configuredBaseBranch(projectDir: string): string {
         ? `, and project.base_branch "${explicit}" is not an existing local refs/heads/ branch`
         : "") +
       `). Set project.base_branch in grane.yml to an existing local branch.`,
+  );
+}
+
+function assertNotDemoAuthoring(projectDir: string, action: string): void {
+  if (!isDemoAuthoringProject(projectDir)) return;
+  throw configError(
+    `Refusing to ${action} in a nested demo authoring repo (${DEMO_AUTHORING_MARKER}). ` +
+      `Setup --dir is for proposal branches only; approve, rollback, and pin from a real project.`,
   );
 }
 
@@ -561,6 +582,7 @@ function assertPinnableCommit(root: string, rev: string, ref: string, approved: 
 }
 
 export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
+  assertNotDemoAuthoring(projectDir, "write the active pin");
   const parsed = activePinSchema.parse(pin);
   const ref = assertPinRef(projectDir, parsed.ref);
   const root = gitRoot(projectDir);
@@ -665,9 +687,37 @@ function commitOnProposalBranch(
   }
 }
 
-function proposalMessage(id: string, title: string, baseBranch: string, baseCommit: string, body?: string): string {
+function formatRestoredTrailer(restored: SemanticYamlRestored): string | undefined {
+  const parts = SEMANTIC_YAML_KEYS
+    .filter((key) => restored[key].length > 0)
+    .map((key) => `${key}=${restored[key].join(",")}`);
+  return parts.length > 0 ? parts.join(";") : undefined;
+}
+
+function parseRestoredTrailer(raw: string | undefined): SemanticYamlRestored {
+  const restored = emptyRestored();
+  if (!raw) return restored;
+  for (const part of raw.split(";")) {
+    const [key, names] = part.split("=");
+    if (!key || !names || !(SEMANTIC_YAML_KEYS as readonly string[]).includes(key)) continue;
+    restored[key as keyof SemanticYamlRestored] = names
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+  return restored;
+}
+
+function proposalMessage(
+  id: string,
+  title: string,
+  baseBranch: string,
+  baseCommit: string,
+  body?: string,
+  merge?: { restored: SemanticYamlRestored; lost_comments: string[] },
+): string {
   const subject = body ?? `feat(authoring): propose ${id}`;
-  return [
+  const lines = [
     subject.split("\n")[0],
     "",
     title,
@@ -675,10 +725,16 @@ function proposalMessage(id: string, title: string, baseBranch: string, baseComm
     `Grane-Proposal: ${id}`,
     `Grane-Base: ${baseBranch}`,
     `Grane-Base-Commit: ${baseCommit}`,
+  ];
+  const restored = merge ? formatRestoredTrailer(merge.restored) : undefined;
+  if (restored) lines.push(`Grane-Merge-Restored: ${restored}`);
+  if (merge?.lost_comments.length) lines.push(`Grane-Lost-Comments: ${merge.lost_comments.join(",")}`);
+  lines.push(
     "",
     "AI-generated metrics in this proposal are experimental until the GitHub PR is merged.",
     "Merging (anyone with merge rights) marks them governed.",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function parseTrailer(message: string, key: string): string | undefined {
@@ -705,9 +761,16 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
     throw configError("Proposal has no draft files to commit.");
   }
   const staged: Record<string, string> = {};
+  const mergeRestored = emptyRestored();
+  const lostComments: string[] = [];
   for (const [rel, contents] of entries) {
     const path = gitPath(root, projectDir, rel);
-    staged[path] = combineSemanticYaml(fileAtCommit(root, active.commit, path), contents, rel);
+    const report = combineSemanticYamlWithReport(fileAtCommit(root, active.commit, path), contents, rel);
+    staged[path] = report.contents;
+    for (const key of SEMANTIC_YAML_KEYS) {
+      mergeRestored[key] = [...new Set([...mergeRestored[key], ...report.restored[key]])].sort();
+    }
+    if (report.lost_comments) lostComments.push(path);
   }
   const title = input.title?.trim() || `Grane proposal: ${id}`;
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
@@ -717,7 +780,10 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
     branch,
     active.commit,
     staged,
-    proposalMessage(id, title, active.branch, active.commit, input.message),
+    proposalMessage(id, title, active.branch, active.commit, input.message, {
+      restored: mergeRestored,
+      lost_comments: lostComments,
+    }),
   );
   const headAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   const activeAfter = git(root, ["rev-parse", active.branch]).trim();
@@ -732,7 +798,12 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
 function loadCommitMaps(
   root: string,
   commit: string,
-): { metrics: Record<string, unknown>; dimensions: Record<string, unknown>; relationships: Record<string, unknown> } {
+): {
+  metrics: Record<string, unknown>;
+  dimensions: Record<string, unknown>;
+  relationships: Record<string, unknown>;
+  entities: Record<string, unknown>;
+} {
   const dest = mkdtempSync(join(tmpdir(), "grane-proposal-tree-"));
   try {
     const names = git(root, ["ls-tree", "-r", "--name-only", commit])
@@ -750,6 +821,7 @@ function loadCommitMaps(
       metrics: loaded.config.metrics,
       dimensions: loaded.config.dimensions,
       relationships: loaded.config.relationships,
+      entities: loaded.config.entities,
     };
   } finally {
     rmSync(dest, { recursive: true, force: true });
@@ -770,6 +842,25 @@ function nameDiff(before: Record<string, unknown>, after: Record<string, unknown
   return { added, changed, removed };
 }
 
+function yamlCommentLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("#") || /(?:^|\s)#.+$/.test(line));
+}
+
+function lostCommentFiles(root: string, baseCommit: string, proposalCommit: string, files: string[]): string[] {
+  const lost: string[] = [];
+  for (const file of files) {
+    const before = runGit(root, ["show", `${baseCommit}:${file}`], { allowFail: true });
+    const after = runGit(root, ["show", `${proposalCommit}:${file}`], { allowFail: true });
+    if (before.status !== 0 || after.status !== 0) continue;
+    const kept = new Set(yamlCommentLines(after.stdout));
+    if (yamlCommentLines(before.stdout).some((line) => !kept.has(line))) lost.push(file);
+  }
+  return lost;
+}
+
 export function diffProposal(projectDir: string, idOrBranch: string): ProposalDiff {
   const root = gitRoot(projectDir);
   const branch = resolveProposalBranch(root, idOrBranch);
@@ -783,6 +874,12 @@ export function diffProposal(projectDir: string, idOrBranch: string): ProposalDi
   try {
     const before = loadCommitMaps(root, active.commit);
     const after = loadCommitMaps(root, proposal);
+    const message = git(root, ["log", "-1", "--format=%B", proposal]);
+    const trailerLost = (parseTrailer(message, "Grane-Lost-Comments") ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const lost_comments = [...new Set([...trailerLost, ...lostCommentFiles(root, active.commit, proposal, files)])].sort();
     return {
       unified,
       files,
@@ -790,6 +887,11 @@ export function diffProposal(projectDir: string, idOrBranch: string): ProposalDi
         metrics: nameDiff(before.metrics, after.metrics),
         dimensions: nameDiff(before.dimensions, after.dimensions),
         relationships: nameDiff(before.relationships, after.relationships),
+        entities: nameDiff(before.entities, after.entities),
+        merge: {
+          restored: parseRestoredTrailer(parseTrailer(message, "Grane-Merge-Restored")),
+          lost_comments,
+        },
       },
     };
   } catch (err) {
@@ -976,6 +1078,7 @@ export function approveProposal(
   idOrBranch: string,
   options: { tty?: boolean; approved_by?: string } = {},
 ): ActivePin {
+  assertNotDemoAuthoring(projectDir, "approve");
   const approval = readMergedApproval(projectDir, idOrBranch, { against: "base" });
   if (!options.tty && !approval.merged) {
     const reason =
@@ -1026,6 +1129,7 @@ export function rejectProposal(
   idOrBranch: string,
   options: { tty?: boolean; yes?: boolean } = {},
 ): { id: string; branch: string; commit: string } {
+  assertNotDemoAuthoring(projectDir, "reject");
   if (!options.tty && !options.yes) {
     const reason = `reject requires a human TTY or --yes.`;
     recordProposalLine(projectDir, { operation: "reject", reason });
@@ -1052,6 +1156,7 @@ export function rollbackPin(
   projectDir: string,
   options: { to?: string; approved_by?: string } = {},
 ): ActivePin {
+  assertNotDemoAuthoring(projectDir, "rollback");
   gitRoot(projectDir);
   const pin = readActivePin(projectDir);
   if (!pin) {
