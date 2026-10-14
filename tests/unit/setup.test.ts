@@ -7,7 +7,7 @@ import { ACTIVE_PIN_PATH, readActivePin } from "../../src/authoring/git.js";
 import { writeInitProject } from "../../src/cli/init-project.js";
 import { loadConfig } from "../../src/config/load.js";
 import { WAREHOUSE_TYPES } from "../../src/connectors/dialect.js";
-import { DEMO_QUESTION, type DemoResult } from "../../src/demo/run.js";
+import { DEFAULT_DEMO_POSTGRES, DEMO_QUESTION, demoPostgresUrl, type DemoResult } from "../../src/demo/run.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { formatValidateReport } from "../../src/validate/format.js";
 import {
@@ -27,7 +27,12 @@ import {
   type RunSetupOptions,
   type SetupResult,
 } from "../../src/setup/run.js";
-import { DEMO_AUTHORING_QUESTION } from "../../src/setup/demo-postgres.js";
+import { DEMO_AUTHORING_QUESTION, assertNotExistingGitRepo } from "../../src/setup/demo-postgres.js";
+import {
+  MAIN_WIZARD_DEMO_TRANSCRIPT,
+  MAIN_WIZARD_OWN_TRANSCRIPT,
+  MAIN_WIZARD_PATH_COPY,
+} from "../fixtures/setup-wizard-main.js";
 import {
   DEMO_ENGINE_QUESTION,
   DEMO_YAML_QUESTION,
@@ -527,6 +532,39 @@ audit:
     expect(git.stdout.trim()).toBe("main");
     const branches = spawnSync("git", ["branch"], { cwd: dir, encoding: "utf8" }).stdout;
     expect(branches).not.toMatch(/grane\/proposal/);
+  });
+
+  it("demo authoring refuses --dir that is already a git repository", async () => {
+    const dir = tempDir();
+    const git = spawnSync("git", ["init", "-b", "main"], { cwd: dir, encoding: "utf8" });
+    expect(git.status).toBe(0);
+    expect(() => assertNotExistingGitRepo(dir)).toThrow(/already a git repository/);
+    await expect(
+      runSetup({
+        yes: true,
+        path: "demo",
+        postgres: true,
+        authoring: true,
+        dir,
+        skipConnect: true,
+        stdinIsTty: false,
+        homeDir: tempDir(),
+        workspaceDir: tempDir(),
+        io: quiet,
+      }),
+    ).rejects.toThrow(/already a git repository/);
+  });
+
+  it("demo postgres url uses GRANE_DEMO_DATABASE_URL and ignores DATABASE_URL", () => {
+    expect(
+      demoPostgresUrl({ DATABASE_URL: "postgres://prod.example/db", GRANE_DEMO_DATABASE_URL: undefined }),
+    ).toBe(DEFAULT_DEMO_POSTGRES);
+    expect(
+      demoPostgresUrl({
+        DATABASE_URL: "postgres://prod.example/db",
+        GRANE_DEMO_DATABASE_URL: "postgres://demo.example/shop",
+      }),
+    ).toBe("postgres://demo.example/shop");
   });
 
   it("demo authoring without --postgres is refused", async () => {
@@ -1061,39 +1099,33 @@ describe("SetupResult.warehouse null handling", () => {
 });
 
 describe("wizard existing-YAML fork", () => {
-  it("freezes demo/own path copy as byte-identical to today", () => {
-    expect(PATH_QUESTION).toBe("How do you want to start?");
-    expect(PATH_CHOICES).toEqual([
-      {
-        value: "demo",
-        label: "Try Grane's demo shop",
-        hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
-      },
-      {
-        value: "own",
-        label: "Connect my own data",
-        hint: "Any warehouse Grane already supports. We write grane.yml, validate, then connect an agent.",
-      },
-    ]);
-    expect(pathReviewLine("demo")).toBe("demo shop (DuckDB)");
-    expect(pathReviewLine("own")).toBe("own data");
+  it("freezes demo/own path copy as byte-identical to main", () => {
     expect({
       PATH_QUESTION,
       PATH_CHOICES,
       demoReview: pathReviewLine("demo"),
       ownReview: pathReviewLine("own"),
-    }).toMatchSnapshot();
+    }).toEqual(MAIN_WIZARD_PATH_COPY);
   });
 
-  it("demo path after answering no matches the frozen wizard transcript", async () => {
+  it("demo path after answering no matches main plus a defaulted warehouse question", async () => {
     const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["no", "demo"] }));
     const answers = await promptSetupAnswers(wizardOpts(prompt, io));
     expect(answers.path).toBe("demo");
+    expect(answers.demoEngine).toBe("duckdb");
     expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
-    expect(transcript.slice(1)).toMatchSnapshot();
+    const afterExisting = transcript.slice(1);
+    const [pathStep, warehouseStep, ...rest] = afterExisting;
+    expect(pathStep).toEqual(MAIN_WIZARD_DEMO_TRANSCRIPT[0]);
+    expect(warehouseStep).toMatchObject({
+      kind: "select",
+      question: DEMO_ENGINE_QUESTION,
+      defaultValue: "duckdb",
+    });
+    expect(rest).toEqual(MAIN_WIZARD_DEMO_TRANSCRIPT.slice(1));
   });
 
-  it("own path after answering no matches the frozen wizard transcript", async () => {
+  it("own path after answering no matches the main fixture transcript", async () => {
     const { prompt, io, transcript } = recordingPrompter(
       scriptedPrompter({
         select: ["no", "own", "postgres"],
@@ -1104,7 +1136,7 @@ describe("wizard existing-YAML fork", () => {
     expect(answers.path).toBe("own");
     expect(answers.engine).toBe("postgres");
     expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
-    expect(transcript.slice(1)).toMatchSnapshot();
+    expect(transcript.slice(1)).toEqual(MAIN_WIZARD_OWN_TRANSCRIPT);
   });
 
   it("answering yes never enters path, warehouse, or client steps", async () => {

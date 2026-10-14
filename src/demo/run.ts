@@ -18,10 +18,17 @@ import { join } from "node:path";
 
 export const DEMO_QUESTION = "Why did revenue fall last month?";
 
-export const DEMO_POSTGRES =
-  process.env.DATABASE_URL ??
-  process.env.GRANE_DEMO_DATABASE_URL ??
+export const DEFAULT_DEMO_POSTGRES =
   "postgres://grane_readonly:grane_readonly@localhost:5433/grane_demo";
+
+/** Demo Postgres DSN. Ignores stray DATABASE_URL (that is the adopter warehouse). */
+export function demoPostgresUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.GRANE_DEMO_DATABASE_URL?.trim();
+  return explicit || DEFAULT_DEMO_POSTGRES;
+}
+
+/** Default demo Postgres DSN (no env). Prefer {@link demoPostgresUrl} at call time. */
+export const DEMO_POSTGRES = DEFAULT_DEMO_POSTGRES;
 
 export interface DemoIo {
   log: (line: string) => void;
@@ -72,7 +79,7 @@ export async function runDemo(options: RunDemoOptions = {}): Promise<DemoResult>
     loaded.config.connection = {
       ...loaded.config.connection,
       type: "postgres",
-      url: DEMO_POSTGRES,
+      url: demoPostgresUrl(),
       schema: "public",
     };
   }

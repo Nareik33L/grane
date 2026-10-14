@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeInitProject } from "../cli/init-project.js";
-import { DEMO_POSTGRES } from "../demo/run.js";
+import { demoPostgresUrl } from "../demo/run.js";
 import { persistOwnConnection } from "./connection.js";
 import type { SetupIo } from "./types.js";
 
@@ -28,7 +28,7 @@ export function writeDemoAuthoringProject(
   const dir = resolve(projectDir);
   mkdirSync(dir, { recursive: true });
   writeInitProject(dir);
-  const url = options.url ?? DEMO_POSTGRES;
+  const url = options.url ?? demoPostgresUrl();
   persistOwnConnection(dir, {
     type: "postgres",
     url,
@@ -59,8 +59,21 @@ export function persistAuthoringEnabled(projectDir: string): void {
  * Nested `git init` in the project directory so proposals never land on a
  * parent repo (including the Grane source tree). Commits the starter YAML.
  */
+/** Refuse --dir that is already a git repository (proposals must not land there). */
+export function assertNotExistingGitRepo(dir: string): void {
+  const resolved = resolve(dir);
+  if (!existsSync(resolved)) return;
+  if (existsSync(join(resolved, ".git"))) {
+    throw new Error(
+      `Refusing --dir ${resolved}: it is already a git repository. ` +
+        `Pass an empty folder so proposal branches cannot land on an existing repo.`,
+    );
+  }
+}
+
 export function ensureDemoAuthoringGitRepo(projectDir: string, io: SetupIo): void {
   const dir = resolve(projectDir);
+  assertNotExistingGitRepo(dir);
   git(dir, ["init", "-b", "main"]);
   const hasHead = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: dir, encoding: "utf8" });
   if ((hasHead.status ?? 1) === 0) {

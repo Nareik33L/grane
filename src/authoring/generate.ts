@@ -38,10 +38,10 @@ function parseColumn(ref: string): { table: string; column: string } | null {
 }
 
 /**
- * Glossary terms (e.g. "revenue") bind to a unique revenue-like column when
- * there is no revenue_like_columns ambiguity. Demo shop `orders.net_amount`
- * is the usual case — asking would be guessing among one candidate.
- * Several unique sources: prefer `orders`, otherwise refuse to guess.
+ * Glossary terms bind to a unique revenue-like column when there is no
+ * revenue_like_columns ambiguity. One candidate is not a guess. Several
+ * unique sources: return null so detectAmbiguities asks rather than picking
+ * a table by name.
  */
 function uniqueRevenueLikeSource(
   session: AuthoringSession,
@@ -63,10 +63,6 @@ function uniqueRevenueLikeSource(
     (item) => item.column === slug || item.column.replace(/_/g, "") === compact,
   );
   if (named.length === 1) return named[0]!;
-  if (slug === "revenue") {
-    const orders = sources.find((item) => item.table === "orders");
-    if (orders) return orders;
-  }
   return sources.length === 1 ? sources[0]! : null;
 }
 

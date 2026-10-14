@@ -315,7 +315,7 @@ describe("generateDraftYaml", () => {
     expect(files["entities.yml"]).not.toMatch(/inventory_levels|event_stream/);
   });
 
-  it("binds a glossary term to the unique revenue-like column (no revenue_like ambiguity)", () => {
+  it("binds a glossary term to the unique revenue-like column when there is only one", () => {
     const dir = tempDir();
     const schema: DatabaseSchema = {
       schemaName: "public",
@@ -329,6 +329,35 @@ describe("generateDraftYaml", () => {
             { name: "id", dataType: "integer", nullable: false },
             { name: "net_amount", dataType: "numeric", nullable: false },
             { name: "completed_at", dataType: "timestamptz", nullable: true },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue on the demo shop." }],
+    });
+    const { files } = generateDraftYaml({ session, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/revenue:/);
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
+    expect(files["metrics.yml"]).toMatch(/description:\s*Completed order revenue on the demo shop\./);
+    expect(files["entities.yml"]).toMatch(/primary_key:\s*id/);
+  });
+
+  it("does not prefer a table named orders when several unique revenue-like columns exist", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
           ],
         },
         {
@@ -346,14 +375,26 @@ describe("generateDraftYaml", () => {
     };
     const session = createSession(dir, {
       warehouse_ref: { type: "postgres", locator: "db" },
-      glossary_answers: [{ term: "revenue", answer: "Completed order revenue on the demo shop." }],
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
     });
-    const { files } = generateDraftYaml({ session, schema, inferred: {} });
-    expect(files["metrics.yml"]).toMatch(/revenue:/);
-    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
-    expect(files["metrics.yml"]).toMatch(/description:\s*Completed order revenue on the demo shop\./);
-    expect(files["metrics.yml"]).not.toMatch(/products\.price/);
-    expect(files["entities.yml"]).toMatch(/primary_key:\s*id/);
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/Nothing to propose/);
+
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+      resolved_ambiguities: [
+        {
+          id: "amb-revenue-like",
+          kind: "revenue_like_columns",
+          question: "Which column is governed revenue?",
+          candidates: ["orders.net_amount", "products.price"],
+          chosen: "products.price",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: resolved, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{products\.price\}/);
+    expect(files["metrics.yml"]).not.toMatch(/orders\.net_amount/);
   });
 
   it("includes the glossary answer as the metric description", () => {

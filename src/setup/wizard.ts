@@ -76,7 +76,7 @@ export const DEMO_YAML_CHOICES: Choice<DemoYaml>[] = [
   },
 ];
 
-/** Demo/own copy frozen by the V2-04 snapshot in setup.test.ts. */
+/** Demo/own copy frozen by tests/fixtures/setup-wizard-main.ts (captured from main). */
 export const PATH_CHOICES: Choice<"demo" | "own">[] = [
   {
     value: "demo",

@@ -21,6 +21,7 @@ import {
   quoteTableColumn,
   resolvedTimeColumn,
   revenueLikeAmbiguityId,
+  CROSS_TABLE_REVENUE_LIKE_ID,
   semiAdditiveGroupByAmbiguity,
   semiAdditiveGroupById,
 } from "../../src/authoring/ambiguity.js";
@@ -213,6 +214,29 @@ describe("revenue-like columns", () => {
     });
     expect(amb?.question).toMatch(/will not guess/i);
     assertQuestionHasNoSamples(amb!.question);
+  });
+
+  it("asks which unique revenue-like column when several tables each have one", () => {
+    const found = detectAmbiguities({
+      schema: schemaOf([
+        table("orders", [
+          { name: "id", dataType: "integer", nullable: false },
+          { name: "net_amount", dataType: "numeric" },
+        ]),
+        table("products", [
+          { name: "id", dataType: "integer", nullable: false },
+          { name: "price", dataType: "numeric" },
+        ]),
+      ]),
+    });
+    const amb = found.find((item) => item.id === CROSS_TABLE_REVENUE_LIKE_ID);
+    expect(amb).toMatchObject({
+      id: CROSS_TABLE_REVENUE_LIKE_ID,
+      kind: "revenue_like_columns",
+      candidates: ["orders.net_amount", "products.price"],
+    });
+    expect(amb?.question).toMatch(/will not guess/i);
+    expect(amb?.question).not.toMatch(/orders/);
   });
 
   it("does not open an ambiguity for a single revenue-like column", () => {

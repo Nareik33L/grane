@@ -34,5 +34,6 @@ export {
   writeDemoAuthoringProject,
   persistAuthoringEnabled,
   ensureDemoAuthoringGitRepo,
+  assertNotExistingGitRepo,
 } from "./demo-postgres.js";
 export type { DemoEngine, DemoYaml } from "./types.js";

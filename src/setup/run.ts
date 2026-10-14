@@ -45,6 +45,7 @@ import {
 } from "./copy.js";
 import {
   DEMO_AUTHORING_QUESTION,
+  assertNotExistingGitRepo,
   ensureDemoAuthoringGitRepo,
   writeDemoAuthoringProject,
 } from "./demo-postgres.js";
@@ -404,6 +405,7 @@ async function runDemoAuthoringPath(opts: {
   }
   opts.io.log("");
   opts.io.log("Preparing demo Postgres authoring (discovery → proposal PR). No pin, no production YAML writes.");
+  assertNotExistingGitRepo(projectDir);
   const written = writeDemoAuthoringProject(projectDir);
   ensureDemoAuthoringGitRepo(projectDir, opts.io);
   if (opts.runDemoAuthoringFn) {

@@ -49,7 +49,19 @@ export interface ValidationReport {
   relationshipCount: number;
 }
 
-export function validateModel(model: SemanticModel, schema?: DatabaseSchema): ValidationReport {
+export interface ValidateOptions {
+  /**
+   * Authoring/generated drafts: temporal semi-additive group_by is an error.
+   * Existing unpinned YAML: warning only (no-pin = today).
+   */
+  generated?: boolean;
+}
+
+export function validateModel(
+  model: SemanticModel,
+  schema?: DatabaseSchema,
+  options?: ValidateOptions,
+): ValidationReport {
   const issues: ValidationIssue[] = [];
   const tableColumns = buildSchemaIndex(schema);
 
@@ -196,7 +208,13 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
       : [];
     const metricIssues = [
       ...reserved,
-      ...validateMetric(model, metric, checkColumnFactory(issues, tableColumns), columnType),
+      ...validateMetric(
+        model,
+        metric,
+        checkColumnFactory(issues, tableColumns),
+        columnType,
+        Boolean(options?.generated),
+      ),
     ];
     issues.push(...metricIssues);
     const ok = metricIssues.every((i) => i.severity !== "error");
@@ -259,6 +277,7 @@ function validateMetric(
   metric: Metric,
   checkColumn: CheckColumn,
   columnType: (table: string, column: string) => string | null,
+  generated: boolean,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const subject = `metric:${metric.name}`;
@@ -391,7 +410,7 @@ function validateMetric(
       const temporalKeys = temporalSemiAdditiveGroupByKeys(metric, columnType);
       if (temporalKeys.length > 0) {
         issues.push({
-          severity: "error",
+          severity: generated ? "error" : "warning",
           code: "temporal_semi_additive_group_by",
           subject,
           message: temporalSemiAdditiveGroupByMessage(metric, temporalKeys),

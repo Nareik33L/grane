@@ -11,6 +11,7 @@ import { RelationshipGraph, describeJoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
 import type { RelationshipConfig } from "../config/schema.js";
 import type { OpenAmbiguity, ResolvedAmbiguity } from "./session.js";
+import { compareOrdinal } from "./yaml-merge.js";
 
 /**
  * Ambiguity classes V2-10 detects. Authoring asks; it does not guess.
@@ -60,6 +61,9 @@ export interface DetectAmbiguitiesInput {
 export function revenueLikeAmbiguityId(table: string): string {
   return `amb-revenue-like-${table}`;
 }
+
+/** Cross-table unique revenue-like columns — not a warehouse-specific table name. */
+export const CROSS_TABLE_REVENUE_LIKE_ID = "amb-revenue-like";
 
 export function dateColumnsAmbiguityId(table: string): string {
   return `amb-date-${table}`;
@@ -319,18 +323,34 @@ function detectPrimaryKeys(schema: DatabaseSchema): OpenAmbiguity[] {
 
 function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {
   const out: OpenAmbiguity[] = [];
+  const uniqueSources: string[] = [];
   for (const table of schema.tables) {
-    const candidates = table.columns
-      .filter((column) => looksRevenueLike(column.name, column.dataType))
-      .map((column) => `${table.name}.${column.name}`);
-    if (candidates.length < 2) continue;
+    const revenueCols = table.columns.filter((column) => looksRevenueLike(column.name, column.dataType));
+    const candidates = revenueCols.map((column) => `${table.name}.${column.name}`);
+    if (candidates.length >= 2) {
+      out.push({
+        id: revenueLikeAmbiguityId(table.name),
+        kind: "revenue_like_columns",
+        question:
+          `Which column on ${quoteIdent(table.name)} is governed revenue? ` +
+          `Grane will not guess. Candidates are column names only.`,
+        candidates,
+      });
+      continue;
+    }
+    const unique = revenueCols.filter((column) => !looksNonAdditive(column.name, column.dataType));
+    if (unique.length === 1 && tablePrimaryKey(table)) {
+      uniqueSources.push(`${table.name}.${unique[0]!.name}`);
+    }
+  }
+  if (uniqueSources.length >= 2) {
     out.push({
-      id: revenueLikeAmbiguityId(table.name),
+      id: CROSS_TABLE_REVENUE_LIKE_ID,
       kind: "revenue_like_columns",
       question:
-        `Which column on ${quoteIdent(table.name)} is governed revenue? ` +
-        `Grane will not guess. Candidates are column names only.`,
-      candidates,
+        "Which column is governed revenue? Several tables have a single revenue-like column. " +
+        "Grane will not guess.",
+      candidates: [...uniqueSources].sort(compareOrdinal),
     });
   }
   return out;
