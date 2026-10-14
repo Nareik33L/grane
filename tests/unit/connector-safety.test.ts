@@ -39,6 +39,7 @@ import {
   type ExecutedRows,
   type WarehouseConnector,
 } from "../../src/connectors/types.js";
+import { runDiscoveryQuery } from "../../src/authoring/discover.js";
 import { executeCompiled } from "../../src/execute/executor.js";
 import type { CompiledQuery } from "../../src/compile/compiler.js";
 import { GraneError } from "../../src/errors.js";
@@ -57,6 +58,7 @@ const CONNECTOR_QUERY_FILES = [
   "src/connectors/clickhouse.ts",
   "src/connectors/databricks.ts",
   "src/execute/executor.ts",
+  "src/authoring/discover.ts",
 ];
 
 const LOCAL_WRITE_REGEX = /\/\^[^/\n]*(insert\|update\|delete)/i;
@@ -368,6 +370,14 @@ describe.skipIf(!duckOk)("DuckDB connector safety", () => {
     });
   });
 
+  it("discovery refuses a write before touching the engine", async () => {
+    const c = new DuckDbConnector({ type: "duckdb", path: ":memory:", schema: "main" });
+    connectors.push(c);
+    await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
   it("cancels a deliberately slow query via timeout_ms", async () => {
     const c = new DuckDbConnector({ type: "duckdb", path: ":memory:", schema: "main" });
     connectors.push(c);
@@ -455,6 +465,13 @@ describe.skipIf(!pgEnv)("Postgres connector safety", () => {
     });
   });
 
+  it("discovery refuses a write before the engine", async () => {
+    const c = live();
+    await expect(runDiscoveryQuery(c, "INSERT INTO pg_catalog.pg_class VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
   it("runs inside a READ ONLY UTC transaction", async () => {
     const c = live();
     const result = await c.query(
@@ -492,6 +509,13 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
   it("refuses a write before the engine", async () => {
     const c = live();
     await expect(c.query("INSERT INTO t VALUES (1)", [], LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("discovery refuses a write before the engine", async () => {
+    const c = live();
+    await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
   });
@@ -552,6 +576,13 @@ describe.skipIf(!chEnv)("ClickHouse connector safety", () => {
   it("refuses a write before the engine", async () => {
     const c = live();
     await expect(c.query("INSERT INTO t VALUES (1)", [], LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("discovery refuses a write before the engine", async () => {
+    const c = live();
+    await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
   });

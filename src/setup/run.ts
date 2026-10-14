@@ -9,6 +9,7 @@ import {
   resolveActiveRef,
   writeActivePin,
 } from "../authoring/git.js";
+import { createDiscovery } from "../authoring/discover.js";
 import { findProjectDir, loadConfig } from "../config/load.js";
 import type { WarehouseType } from "../connectors/dialect.js";
 import { WAREHOUSE_TYPES } from "../connectors/dialect.js";
@@ -440,7 +441,20 @@ async function runImportPath(opts: {
   });
   const live = !opts.offline;
   try {
-    const schema = live ? await kernel.introspectSchema() : undefined;
+    const schema = live
+      ? await (async () => {
+          const snapshot = await createDiscovery({
+            config: loaded.config,
+            connector: kernel.getConnector(),
+            projectDir,
+            sessionId: null,
+            agent: "setup-import",
+            sampling: false,
+          }).introspectSchema();
+          kernel.setSchema(snapshot);
+          return snapshot;
+        })()
+      : undefined;
     const report = kernel.validate(schema);
     for (const line of formatValidateReport(report, {
       providers: kernel.serverInfo().semantic_providers,

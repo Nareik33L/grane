@@ -397,6 +397,18 @@ export const auditConfigSchema = z.object({
 export type AuditConfig = z.infer<typeof auditConfigSchema>;
 
 /**
+ * Authoring / discovery (V2). Sampling is a setup decision; default on.
+ * `src/authoring/discover.ts` clamps `sample_rows` to a hard cap.
+ */
+export const authoringConfigSchema = z.object({
+  /** Sample column values during discovery. Default on with caps. */
+  sampling: z.boolean().default(true),
+  /** Requested sample rows. The discovery service clamps this to the hard cap. */
+  sample_rows: z.number().int().positive().default(20),
+});
+export type AuthoringConfig = z.infer<typeof authoringConfigSchema>;
+
+/**
  * Extra semantic inputs. Native YAML in the Grane project is always loaded.
  * `providers` are universal connectors: point them at a dbt, Cube, LookML,
  * Apache Ossie, or generic fragment path. Omit `type` to auto-detect.
@@ -426,6 +438,7 @@ export const graneConfigSchema = z.object({
   exploration: explorationConfigSchema.prefault({}),
   auth: authConfigSchema.prefault({}),
   audit: auditConfigSchema.prefault({}),
+  authoring: authoringConfigSchema.prefault({}),
   providers: z.array(semanticProviderConfigSchema).default([]),
   entities: z.record(z.string(), entityConfigSchema).default({}),
   metrics: z.record(z.string(), metricConfigSchema).default({}),

@@ -14,6 +14,8 @@ export {
   type AuthConfig,
   type AgentConfig,
   type AuditConfig,
+  authoringConfigSchema,
+  type AuthoringConfig,
 } from "./config/schema.js";
 export { SemanticModel, type Metric, type Dimension } from "./model/model.js";
 export { RelationshipGraph } from "./model/graph.js";
@@ -80,5 +82,13 @@ export {
   type DiscoveryAuditEvent,
   type HttpAuditContext,
 } from "./audit.js";
+export {
+  createDiscovery,
+  runDiscoveryQuery,
+  assertDiscoverySql,
+  DISCOVERY_SAMPLE_ROW_HARD_CAP,
+  type Discovery,
+  type ColumnProfile,
+} from "./authoring/discover.js";
 export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

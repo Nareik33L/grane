@@ -2,7 +2,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { RelationshipConfig } from "../config/schema.js";
+import { inferRelationships } from "../connectors/types.js";
 import { configError } from "../errors.js";
+
+export { inferRelationships };
 
 export interface InferredRelationship {
   from: string;

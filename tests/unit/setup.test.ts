@@ -263,6 +263,71 @@ describe("runSetup", () => {
     ).rejects.toThrow(/demo or own/);
   });
 
+  it("live import inspect emits a discovery audit event and does not pin", async () => {
+    let duckOk = false;
+    try {
+      await import("@duckdb/node-api");
+      duckOk = true;
+    } catch {
+      duckOk = false;
+    }
+    if (!duckOk) return;
+
+    const dir = tempDir();
+    const warehouse = join(dir, "shop.duckdb");
+    const mod = (await import("@duckdb/node-api")) as {
+      DuckDBInstance: {
+        create: (path: string) => Promise<{
+          connect: () => Promise<{
+            runAndReadAll: (sql: string) => Promise<unknown>;
+            closeSync?: () => void;
+            disconnectSync?: () => void;
+          }>;
+          closeSync?: () => void;
+        }>;
+      };
+    };
+    const instance = await mod.DuckDBInstance.create(warehouse);
+    const conn = await instance.connect();
+    await conn.runAndReadAll("CREATE TABLE items (id INTEGER, name VARCHAR)");
+    conn.closeSync?.();
+    conn.disconnectSync?.();
+    instance.closeSync?.();
+
+    writeInitProject(dir);
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `project:
+  name: import-inspect
+  timezone: UTC
+connection:
+  type: duckdb
+  path: ${warehouse}
+  schema: main
+audit:
+  enabled: true
+  path: .grane/audit.jsonl
+`,
+    );
+    const result = await runSetup({
+      importDir: dir,
+      stdinIsTty: false,
+      stdoutIsTty: false,
+      io: quiet,
+    });
+    expect(result.path).toBe("import");
+    expect(result.validated).toBe(true);
+    expect(result.warehouse).toBe("duckdb");
+    expect(readActivePin(dir)).toBeNull();
+    const events = readFileSync(join(dir, ".grane", "audit.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { kind: string; operation: string; agent: string | null; read_only: boolean });
+    expect(events.some((event) => event.kind === "discovery" && event.operation === "introspect")).toBe(true);
+    expect(events.every((event) => event.kind !== "discovery" || event.read_only === true)).toBe(true);
+    expect(events.find((event) => event.kind === "discovery")?.agent).toBe("setup-import");
+  });
+
   it("non-interactive --import validates and inspects without pinning", async () => {
     const dir = tempDir();
     writeInitProject(dir);
