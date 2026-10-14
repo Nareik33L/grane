@@ -82,6 +82,14 @@ audit:
   # stdout: true        # also emit JSON lines on stderr (container logs; MCP-safe)
   # fail_closed: true   # refuse the query if the audit append fails (regulated)
 
+# V2 authoring MCP tools (off by default). grane serve --authoring also
+# enables them. mode: local = stdio only; shared = HTTP too (authenticated agent).
+# authoring:
+#   enabled: false
+#   mode: local               # or shared
+#   sampling: true
+#   sample_rows: 20
+
 # HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
 # Required for production HTTP. stdio (local Cursor/Claude) stays trusted.
 # Prefer token_sha256 so this file never holds a secret if committed:

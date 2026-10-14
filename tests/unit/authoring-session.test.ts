@@ -11,6 +11,7 @@ import {
   loadSession,
   saveSession,
   sessionPath,
+  warehouseLocator,
   type AuthoringSession,
 } from "../../src/authoring/session.js";
 import { loadConfig } from "../../src/config/load.js";
@@ -53,6 +54,7 @@ function sampleSession(overrides: Partial<AuthoringSession> = {}): Omit<Authorin
         candidates: ["orders.net_amount", "orders.gross_amount"],
       },
     ],
+    resolved_ambiguities: [],
     draft_yaml: {
       "grane.yml": "project:\n  name: shop\n",
       "metrics.yml": "metrics:\n  revenue:\n    entity: order\n    type: sum\n    sql: ${orders.net_amount}\n",
@@ -99,6 +101,7 @@ describe("authoring session store", () => {
     expect(first.discovered_snapshot_hash).toBeNull();
     expect(first.glossary_answers).toEqual([]);
     expect(first.open_ambiguities).toEqual([]);
+    expect(first.resolved_ambiguities).toEqual([]);
     expect(first.draft_yaml).toEqual({});
     expect(first.created_at).toBe(first.updated_at);
 
@@ -151,6 +154,16 @@ describe("authoring session store", () => {
     expect(() => createSession(dir, { ...input, id: "../escape" })).toThrow(/Invalid authoring session id/);
     expect(() => createSession(dir, { ...input, id: "foo/bar" })).toThrow(/Invalid authoring session id/);
     expect(() => loadSession(dir, "..")).toThrow(/Invalid authoring session id/);
+  });
+
+  it("warehouseLocator never includes password or user", () => {
+    expect(
+      warehouseLocator({
+        type: "postgres",
+        url: "postgres://grane:SUPERSECRET@db.internal:5432/shop",
+      }),
+    ).toBe("db.internal:5432/shop");
+    expect(warehouseLocator({ type: "duckdb", path: "/data/shop.duckdb" })).toBe("/data/shop.duckdb");
   });
 });
 

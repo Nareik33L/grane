@@ -57,7 +57,7 @@ export {
   type WarehouseCertification,
   type WarehouseServerInfo,
 } from "./connectors/certification.js";
-export { buildMcpServer } from "./mcp/server.js";
+export { buildMcpServer, CORE_MCP_TOOLS, AUTHORING_MCP_TOOLS, authoringToolsEnabled } from "./mcp/server.js";
 export { serveStdio, serveHttp, installHttpProcessShutdown, type HttpMcpHandle, type ServeHttpOptions } from "./mcp/transport.js";
 export {
   CLIENT_IDS,

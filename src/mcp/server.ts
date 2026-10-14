@@ -4,6 +4,14 @@ import type { GraneKernel } from "../kernel.js";
 import { semanticQuerySchema, type TrustLevel } from "../query/model.js";
 import { GraneError } from "../errors.js";
 import { mcpTrustText } from "../query/trust.js";
+import {
+  authoringToolsEnabled,
+  registerAuthoringTools,
+  type BuildMcpServerOptions,
+} from "./authoring.js";
+
+export type { BuildMcpServerOptions, McpTransport } from "./authoring.js";
+export { AUTHORING_MCP_TOOLS, CORE_MCP_TOOLS, authoringToolsEnabled } from "./authoring.js";
 
 /**
  * The Grane MCP surface. Deliberately small and difficult to misuse:
@@ -41,8 +49,9 @@ function refuse(err: unknown): ToolResult {
   };
 }
 
-export function buildMcpServer(kernel: GraneKernel): McpServer {
+export function buildMcpServer(kernel: GraneKernel, options: BuildMcpServerOptions = {}): McpServer {
   const info = kernel.serverInfo();
+  const authoringOn = authoringToolsEnabled(kernel.config, options);
   const explorationHint = kernel.config.exploration.enabled
     ? " Exploration is enabled: catalog() also lists permitted raw warehouse columns. " +
       "You may pass raw_dimensions (table.column) or raw_metrics to investigate fields that are not governed. " +
@@ -62,7 +71,10 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
         explorationHint +
         " If Grane refuses a request (e.g. undefined_metric), report that rather than inventing a definition. " +
         "When you present query results, the first sentence of your reply must be the trust headline. " +
-        "Put that same headline in any chart title. Never present mixed or exploratory numbers as approved business truth.",
+        "Put that same headline in any chart title. Never present mixed or exploratory numbers as approved business truth." +
+        (authoringOn
+          ? " Authoring tools are enabled: use authoring_start, then discover_schema / profile_column (never write SQL), then propose_definitions and submit_proposal. Draft definitions are experimental and cannot be queried until a GitHub PR is merged."
+          : ""),
     },
   );
 
@@ -169,6 +181,10 @@ export function buildMcpServer(kernel: GraneKernel): McpServer {
       }
     },
   );
+
+  if (authoringOn) {
+    registerAuthoringTools(server, kernel, options);
+  }
 
   return server;
 }

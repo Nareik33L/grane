@@ -397,10 +397,21 @@ export const auditConfigSchema = z.object({
 export type AuditConfig = z.infer<typeof auditConfigSchema>;
 
 /**
- * Authoring / discovery (V2). Sampling is a setup decision; default on.
+ * Authoring / discovery (V2). Off until setup or `grane serve --authoring`.
  * `src/authoring/discover.ts` clamps `sample_rows` to a hard cap.
+ *
+ * `mode` is the setup choice: `local` exposes authoring MCP tools on stdio
+ * only; `shared` also exposes them on HTTP, where every call still requires
+ * an authenticated agent.
  */
 export const authoringConfigSchema = z.object({
+  /** Register authoring MCP tools. Default off; `grane serve --authoring` also enables them. */
+  enabled: z.boolean().default(false),
+  /**
+   * Where enabled authoring tools may be advertised without `--authoring`.
+   * `local` = stdio only; `shared` = stdio and HTTP.
+   */
+  mode: z.enum(["local", "shared"]).default("local"),
   /** Sample column values during discovery. Default on with caps. */
   sampling: z.boolean().default(true),
   /** Requested sample rows. The discovery service clamps this to the hard cap. */
