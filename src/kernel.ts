@@ -19,6 +19,13 @@ import type { HttpAuditContext, SemanticAuditEvent } from "./audit.js";
 
 export const GRANE_VERSION = "0.7.0";
 
+export interface ActiveConfigPin {
+  ref: string;
+  commit: string;
+  approved_by: string;
+  approved_at: string;
+}
+
 export interface ServerInfo {
   name: "grane";
   version: string;
@@ -29,6 +36,8 @@ export interface ServerInfo {
   exploration: { enabled: boolean };
   semantic_providers: string[];
   agent: string | null;
+  /** Present only when `.grane/active.json` pinned the served tree. */
+  active?: { ref: string; commit: string };
 }
 
 export interface CatalogMetric {
@@ -88,6 +97,8 @@ export interface Catalog {
   entities: CatalogEntity[];
   unsupported: CatalogUnsupported[];
   exploration: CatalogExploration;
+  /** Present only when serve loaded a pinned commit. */
+  active?: ActiveConfigPin;
 }
 
 export interface ExplainResult {
@@ -126,6 +137,8 @@ export interface KernelOptions {
   connector?: WarehouseConnector | null;
   /** HTTP correlation copied onto every audit event from this kernel. */
   http?: HttpAuditContext | null;
+  /** Pin `grane serve` loaded. Absent / null = working-tree config (today). */
+  activePin?: ActiveConfigPin | null;
 }
 
 /**
@@ -139,6 +152,7 @@ export class GraneKernel {
   readonly providerWarnings: string[];
   readonly agent: AgentGrant | null;
   readonly http: HttpAuditContext | null;
+  readonly activePin: ActiveConfigPin | null;
   private readonly now: Date | undefined;
   private connector: WarehouseConnector | null = null;
   private schemaCache: DatabaseSchema | null = null;
@@ -151,6 +165,7 @@ export class GraneKernel {
     this.providerWarnings = options.providerWarnings ?? [];
     this.agent = options.agent ?? null;
     this.http = options.http ?? null;
+    this.activePin = options.activePin ?? null;
     this.now = options.now;
     this.connector = options.connector ?? null;
   }
@@ -203,6 +218,9 @@ export class GraneKernel {
       exploration: { enabled: this.config.exploration.enabled },
       semantic_providers: [...new Set(semantic_providers)],
       agent: this.agent?.id ?? null,
+      ...(this.activePin
+        ? { active: { ref: this.activePin.ref, commit: this.activePin.commit } }
+        : {}),
     };
   }
 
@@ -288,7 +306,23 @@ export class GraneKernel {
         reason: u.reason,
         source: { provider: u.provider, ...(u.path ? { path: u.path } : {}) },
       }));
-    return { server: this.serverInfo(), metrics, dimensions, entities, unsupported };
+    return {
+      server: this.serverInfo(),
+      metrics,
+      dimensions,
+      entities,
+      unsupported,
+      ...(this.activePin
+        ? {
+            active: {
+              ref: this.activePin.ref,
+              commit: this.activePin.commit,
+              approved_by: this.activePin.approved_by,
+              approved_at: this.activePin.approved_at,
+            },
+          }
+        : {}),
+    };
   }
 
   async catalog(search?: string): Promise<Catalog> {
@@ -352,6 +386,7 @@ export class GraneKernel {
       agent: grant,
       connector: this.connector,
       http: this.http,
+      activePin: this.activePin,
     });
   }
 
@@ -365,6 +400,7 @@ export class GraneKernel {
       agent: this.agent,
       connector: this.connector,
       http,
+      activePin: this.activePin,
     });
   }
 

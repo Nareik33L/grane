@@ -26,6 +26,14 @@ export interface LoadedConfig {
   warnings: string[];
 }
 
+export interface LoadConfigOptions {
+  /**
+   * Project-root YAML basenames → contents. When set, `loadConfig` does not
+   * read the working tree (used to serve a pinned commit).
+   */
+  yamlContents?: Record<string, string>;
+}
+
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
 const UNSUPPORTED_MAP = {
   entity: "entities",
@@ -114,17 +122,22 @@ function nativeContribution(config: GraneConfig): SemanticContribution {
   return contribution;
 }
 
-export function loadConfig(projectDir: string): LoadedConfig {
+export function loadConfig(projectDir: string, options: LoadConfigOptions = {}): LoadedConfig {
   const dir = findProjectDir(projectDir);
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
-    .filter((f) => !isAdopterTestYaml(f))
-    .filter((f) => statSync(join(dir, f)).isFile())
-    .sort();
+  const files = options.yamlContents
+    ? Object.keys(options.yamlContents)
+        .filter((f) => (f.endsWith(".yml") || f.endsWith(".yaml")) && !f.includes("/") && !f.includes("\\"))
+        .filter((f) => !isAdopterTestYaml(f))
+        .sort()
+    : readdirSync(dir)
+        .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+        .filter((f) => !isAdopterTestYaml(f))
+        .filter((f) => statSync(join(dir, f)).isFile())
+        .sort();
 
   const merged: Record<string, unknown> = {};
   for (const file of files) {
-    const raw = readFileSync(join(dir, file), "utf8");
+    const raw = options.yamlContents ? options.yamlContents[file]! : readFileSync(join(dir, file), "utf8");
     let doc: unknown;
     try {
       doc = parseYaml(raw);

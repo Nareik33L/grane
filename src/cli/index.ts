@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { Command } from "commander";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig } from "../config/load.js";
+import { loadServingConfig } from "../authoring/git.js";
 import { formatValidateReport } from "../validate/format.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
@@ -50,6 +51,16 @@ function loadKernel(): GraneKernel {
   return new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
     providerWarnings: loaded.warnings,
+  });
+}
+
+/** `grane serve` honours `.grane/active.json` when present; otherwise today's working tree. */
+function loadServingKernel(): GraneKernel {
+  const loaded = loadServingConfig(projectDir());
+  return new GraneKernel(loaded.config, {
+    projectDir: loaded.projectDir,
+    providerWarnings: loaded.warnings,
+    activePin: loaded.pin,
   });
 }
 
@@ -543,7 +554,7 @@ program
     "enable V2 authoring MCP tools (also authoring.enabled in grane.yml)",
   )
   .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean; authoring?: boolean }) => {
-    const kernel = loadKernel();
+    const kernel = loadServingKernel();
     let handle: HttpMcpHandle | undefined;
     try {
       if (options.stdio) {
@@ -577,6 +588,9 @@ program
           ? `Rate limit    ${kernel.config.limits.rate_limit_rps} rps`
           : `Rate limit    off`,
       );
+      if (catalog.active) {
+        console.log(`Active        ${catalog.active.ref} @ ${catalog.active.commit.slice(0, 7)}`);
+      }
       console.log(`Metrics       ${catalog.metrics.length}`);
       console.log(`Dimensions    ${catalog.dimensions.length}`);
       if (catalog.exploration.enabled) {

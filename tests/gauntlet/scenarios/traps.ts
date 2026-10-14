@@ -6,6 +6,7 @@
 
 import { toGrant } from "../../../src/auth/agents.js";
 import { runAuthoringActivateGauntlet } from "../authoring-activate.js";
+import { runTamperedActivePinGauntlet } from "../active-pin-tamper.js";
 import { GOLD, GOLD_SQL } from "../gold.js";
 import { gauntletConfig } from "../model.js";
 import { BLOCKED_COLUMNS } from "../data.js";
@@ -31,6 +32,7 @@ export function trapScenarios(): Scenario[] {
     ...readonlyTraps(),
     ...agentTraps(),
     ...authoringActivateTraps(),
+    ...tamperedPinTraps(),
   ];
 }
 
@@ -830,6 +832,24 @@ function authoringActivateTraps(): Scenario[] {
       expectedSqlBehaviour: "n/a — no warehouse SQL.",
       expectation: { kind: "refuse", reason: "no activate tool", statuses: ["config_error"] },
       custom: async () => runAuthoringActivateGauntlet(),
+    }),
+  ];
+}
+
+function tamperedPinTraps(): Scenario[] {
+  return [
+    sc({
+      id: "mcp/tampered-active-json-fails-closed",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "Someone hand-edits .grane/active.json (commit, ref, or approved_by).",
+      interpretation:
+        "A tampered pin must fail closed. Serve must not load an unmerged proposal commit, a proposal-branch/tag/HEAD/other-branch ref, an abbreviated SHA, or commit=main.",
+      expectedSqlBehaviour: "n/a — no warehouse SQL.",
+      expectation: { kind: "refuse", reason: "tampered pin", statuses: ["config_error"] },
+      custom: async () => runTamperedActivePinGauntlet(),
     }),
   ];
 }

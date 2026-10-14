@@ -1,7 +1,15 @@
 /** Grane public API. */
 
-export { GraneKernel, GRANE_VERSION } from "./kernel.js";
+export { GraneKernel, GRANE_VERSION, type ActiveConfigPin } from "./kernel.js";
 export { loadConfig, findProjectDir } from "./config/load.js";
+export {
+  loadServingConfig,
+  readActivePin,
+  configuredBaseBranch,
+  resolveActiveRef,
+  ACTIVE_PIN_PATH,
+  type ActivePin,
+} from "./authoring/git.js";
 export {
   graneConfigSchema,
   type GraneConfig,
@@ -88,11 +96,14 @@ export {
   recordAudit,
   recordDiscoveryAudit,
   recordAuthoringAudit,
+  recordPinAudit,
   discoveryAuditEvent,
   authoringAuditEvent,
+  pinAuditEvent,
   type AuditEvent,
   type DiscoveryAuditEvent,
   type AuthoringAuditEvent,
+  type PinAuditEvent,
   type HttpAuditContext,
 } from "./audit.js";
 export {

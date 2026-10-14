@@ -91,6 +91,20 @@ Each agent sets exactly one of the two.
 stdio (Cursor, Claude Desktop launching `grane serve --stdio`) does not use
 these tokens — the agent is a local child process.
 
+## Active config pin
+
+When `.grane/active.json` is present, `grane serve` loads YAML from that
+git commit (`ref`, `commit`, `approved_by`, `approved_at`) instead of the
+working tree. Uncommitted edits do not change what agents query. `catalog`
+includes `active.commit`. Without a pin, serve is unchanged. The pin `ref`
+must be the configured base branch under `refs/heads/` (not `HEAD`, a tag,
+another branch, or a proposal ref) and `commit` must be a full 40-character
+hex SHA. The configured base is `origin/HEAD`, else local `main` / `master`,
+else `project.base_branch` — never `HEAD`. A malformed pin, a commit that
+is not in the repository, or a tampered ref refuses to start. Pin load,
+refuse (with reason), and write are appended to the audit log. MCP and
+authoring tools cannot write the pin.
+
 There is no SSO, OIDC, or SAML in this release. Rotate tokens in the
 environment and in `grane.yml`.
 

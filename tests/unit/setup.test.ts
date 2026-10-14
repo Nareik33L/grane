@@ -975,6 +975,23 @@ audit:
     expect(snapshotYaml(dir)).toEqual(before);
   });
 
+  it("import path pins the configured base branch tip, not a feature-branch HEAD", async () => {
+    const dir = initImportRepo();
+    const main = git(dir, ["rev-parse", "main"]);
+    git(dir, ["checkout", "-b", "feature"]);
+    git(dir, ["commit", "--allow-empty", "-m", "feature empty"]);
+    const feature = git(dir, ["rev-parse", "HEAD"]);
+    expect(feature).not.toBe(main);
+
+    const result = await importRun(dir);
+    expect(result.validated).toBe(true);
+    const pin = readActivePin(dir);
+    expect(pin?.ref).toBe("main");
+    expect(pin?.commit).toBe(main);
+    expect(pin?.commit).not.toBe(feature);
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("feature");
+  });
+
   it("import path refuses activation when stdin/stdout is not a TTY", async () => {
     const dir = initImportRepo();
     const before = snapshotYaml(dir);
