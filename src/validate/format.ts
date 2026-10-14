@@ -25,7 +25,9 @@ export function formatValidateReport(
   }
   const nonMetricIssues = report.issues.filter((i) => !i.subject.startsWith("metric:"));
   if (nonMetricIssues.length > 0) {
-    if (lines.length > 0) lines.push("");
+    // Match `grane validate` on main: always a blank line before non-metric
+    // issues, including when the model has zero metrics.
+    lines.push("");
     for (const issue of nonMetricIssues) {
       lines.push(`${issue.severity.toUpperCase()} ${issue.subject}: ${issue.message}`);
     }

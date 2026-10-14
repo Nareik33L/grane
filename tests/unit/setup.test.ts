@@ -20,7 +20,13 @@ import {
 } from "../../src/setup/connection.js";
 import { OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
 import { BACK, scriptedPrompter, type Prompter } from "../../src/setup/prompts.js";
-import { formatSetupWarehouse, runSetup, serializeSetupResult, type SetupResult } from "../../src/setup/run.js";
+import {
+  formatSetupWarehouse,
+  runSetup,
+  serializeSetupResult,
+  type RunSetupOptions,
+  type SetupResult,
+} from "../../src/setup/run.js";
 import {
   EXISTING_YAML_QUESTION,
   PATH_CHOICES,
@@ -64,6 +70,28 @@ function snapshotYaml(dir: string): Record<string, string> {
     if (existsSync(path)) out[name] = readFileSync(path, "utf8");
   }
   return out;
+}
+
+function importRun(dir: string, extra: RunSetupOptions = {}): Promise<SetupResult> {
+  const prompt = extra.prompt ?? scriptedPrompter({ select: ["yes"], confirm: [true, true] });
+  return runSetup({
+    stdinIsTty: true,
+    stdoutIsTty: true,
+    dir,
+    cwd: dir,
+    skipConnect: true,
+    offline: true,
+    activateOffline: true,
+    homeDir: tempDir(),
+    workspaceDir: tempDir(),
+    io: quiet,
+    prompt,
+    runDemoFn: async () => {
+      throw new Error("runDemo must not run on the import path");
+    },
+    ...extra,
+    prompt,
+  });
 }
 
 afterEach(() => {
@@ -534,18 +562,16 @@ describe("runSetup", () => {
     const before = snapshotYaml(dir);
     const head = git(dir, ["rev-parse", "HEAD"]);
     const logs: string[] = [];
-    const result = await runSetup({
-      stdinIsTty: true,
-      dir,
-      cwd: dir,
-      skipConnect: true,
-      offline: true,
-      homeDir: tempDir(),
-      workspaceDir: tempDir(),
+    const confirms: string[] = [];
+    const inner = scriptedPrompter({ select: ["yes"], confirm: [true, true] });
+    const result = await importRun(dir, {
       io: { log: (line) => logs.push(line), error: () => undefined },
-      prompt: scriptedPrompter({ select: ["yes"] }),
-      runDemoFn: async () => {
-        throw new Error("runDemo must not run on the import path");
+      prompt: {
+        ...inner,
+        async confirm(question, opts) {
+          confirms.push(question);
+          return inner.confirm(question, opts);
+        },
       },
     });
     expect(result.path).toBe("import");
@@ -572,6 +598,7 @@ describe("runSetup", () => {
     expect(logs.join("\n")).toContain("Existing YAML loaded, validated, and activated");
     expect(logs.join("\n")).toContain("Engine   postgres");
     expect(logs.join("\n")).toMatch(/activate\s+.grane\/active.json/);
+    expect(confirms.some((question) => question === `Activate pin main@${head}?`)).toBe(true);
   });
 
   it("import path prints the same validate messages as grane validate and does not pin", async () => {
@@ -600,20 +627,7 @@ describe("runSetup", () => {
 
     const logs: string[] = [];
     await expect(
-      runSetup({
-        stdinIsTty: true,
-        dir,
-        cwd: dir,
-        skipConnect: true,
-        offline: true,
-        homeDir: tempDir(),
-        workspaceDir: tempDir(),
-        io: { log: (line) => logs.push(line), error: () => undefined },
-        prompt: scriptedPrompter({ select: ["yes"] }),
-        runDemoFn: async () => {
-          throw new Error("runDemo must not run on the import path");
-        },
-      }),
+      importRun(dir, { io: { log: (line) => logs.push(line), error: () => undefined } }),
     ).rejects.toThrow(/Validate failed/);
     expect(logs.join("\n")).toContain(expected.join("\n"));
     expect(logs.join("\n")).toContain("ERROR revenue");
@@ -635,22 +649,7 @@ describe("runSetup", () => {
       loadMessage = (err as Error).message;
     }
     expect(loadMessage).toMatch(/Unknown top-level key "bogus"/);
-    await expect(
-      runSetup({
-        stdinIsTty: true,
-        dir,
-        cwd: dir,
-        skipConnect: true,
-        offline: true,
-        homeDir: tempDir(),
-        workspaceDir: tempDir(),
-        io: quiet,
-        prompt: scriptedPrompter({ select: ["yes"] }),
-        runDemoFn: async () => {
-          throw new Error("runDemo must not run on the import path");
-        },
-      }),
-    ).rejects.toThrow(loadMessage);
+    await expect(importRun(dir)).rejects.toThrow(loadMessage);
     expect(readActivePin(dir)).toBeNull();
     expect(snapshotYaml(dir)).toEqual(before);
   });
@@ -659,24 +658,67 @@ describe("runSetup", () => {
     const dir = tempDir();
     writeInitProject(dir);
     const before = snapshotYaml(dir);
-    await expect(
-      runSetup({
-        stdinIsTty: true,
-        dir,
-        cwd: dir,
-        skipConnect: true,
-        offline: true,
-        homeDir: tempDir(),
-        workspaceDir: tempDir(),
-        io: quiet,
-        prompt: scriptedPrompter({ select: ["yes"] }),
-        runDemoFn: async () => {
-          throw new Error("runDemo must not run on the import path");
-        },
-      }),
-    ).rejects.toThrow(/No git repository/);
+    await expect(importRun(dir)).rejects.toThrow(/No git repository/);
     expect(snapshotYaml(dir)).toEqual(before);
     expect(readActivePin(dir)).toBeNull();
+  });
+
+  it("import path declining activation writes no pin", async () => {
+    const dir = initImportRepo();
+    const before = snapshotYaml(dir);
+    await expect(
+      importRun(dir, { prompt: scriptedPrompter({ select: ["yes"], confirm: [true, false] }) }),
+    ).rejects.toThrow(/Activation declined/);
+    expect(readActivePin(dir)).toBeNull();
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(snapshotYaml(dir)).toEqual(before);
+  });
+
+  it("import path refuses activation when stdin/stdout is not a TTY", async () => {
+    const dir = initImportRepo();
+    const before = snapshotYaml(dir);
+    await expect(
+      importRun(dir, { stdinIsTty: false, stdoutIsTty: false }),
+    ).rejects.toThrow(/Activation requires a TTY/);
+    expect(readActivePin(dir)).toBeNull();
+    expect(snapshotYaml(dir)).toEqual(before);
+  });
+
+  it("import path refuses activation when --offline without --activate-offline", async () => {
+    const dir = initImportRepo();
+    const before = snapshotYaml(dir);
+    const logs: string[] = [];
+    await expect(
+      importRun(dir, {
+        activateOffline: false,
+        io: { log: (line) => logs.push(line), error: () => undefined },
+      }),
+    ).rejects.toThrow(/--offline skipped live schema checks/);
+    expect(logs.join("\n")).toContain("Catalog");
+    expect(readActivePin(dir)).toBeNull();
+    expect(snapshotYaml(dir)).toEqual(before);
+  });
+
+  it("import path refuses when ignored YAML differs from the pinned HEAD tree", async () => {
+    const dir = initImportRepo();
+    writeFileSync(join(dir, ".gitignore"), ".grane/\n*.local.yml\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "ignore local yaml"]);
+    writeFileSync(join(dir, "secrets.local.yml"), "entities: {}\n");
+    const before = snapshotYaml(dir);
+    await expect(importRun(dir)).rejects.toThrow(/secrets\.local\.yml/);
+    expect(readActivePin(dir)).toBeNull();
+    expect(snapshotYaml(dir)).toEqual(before);
+    expect(readFileSync(join(dir, "secrets.local.yml"), "utf8")).toBe("entities: {}\n");
+  });
+
+  it("import path refuses a dirty working tree instead of pinning uncommitted YAML", async () => {
+    const dir = initImportRepo();
+    writeFileSync(join(dir, "metrics.yml"), "metrics: {}\n# uncommitted\n");
+    const committed = git(dir, ["show", "HEAD:metrics.yml"]);
+    await expect(importRun(dir)).rejects.toThrow(/Working tree is dirty/);
+    expect(readActivePin(dir)).toBeNull();
+    expect(git(dir, ["show", "HEAD:metrics.yml"])).toBe(committed);
   });
 
   it("goes back from the path step to the existing-YAML question", async () => {

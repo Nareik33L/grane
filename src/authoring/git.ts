@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import { loadConfig } from "../config/load.js";
+import { isAdopterTestYaml, loadConfig } from "../config/load.js";
 import { configError } from "../errors.js";
 
 /**
@@ -138,6 +138,67 @@ function porcelainPath(line: string): string {
 function isRuntimeStatePath(path: string): boolean {
   const normalised = path.replaceAll("\\", "/");
   return normalised === ".grane" || normalised.startsWith(".grane/");
+}
+
+function isProjectYamlName(filename: string): boolean {
+  return (filename.endsWith(".yml") || filename.endsWith(".yaml")) && !isAdopterTestYaml(filename);
+}
+
+/** Basenames `loadConfig` would merge from `projectDir` (non-recursive). */
+export function projectYamlBasenames(projectDir: string): string[] {
+  const dir = resolve(projectDir);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => isProjectYamlName(name) && statSync(join(dir, name)).isFile())
+    .sort();
+}
+
+function commitProjectYamlBasenames(root: string, commit: string, relProject: string): string[] {
+  const prefix = relProject ? `${relProject.replace(/\/$/, "")}/` : "";
+  const listing = git(root, ["ls-tree", "-r", "--name-only", commit]);
+  const names: string[] = [];
+  for (const path of listing.split("\n").map((line) => line.trim()).filter(Boolean)) {
+    if (prefix) {
+      if (!path.startsWith(prefix)) continue;
+      const rest = path.slice(prefix.length);
+      if (rest.includes("/") || !isProjectYamlName(rest)) continue;
+      names.push(rest);
+      continue;
+    }
+    if (path.includes("/") || !isProjectYamlName(path)) continue;
+    names.push(path);
+  }
+  return [...new Set(names)].sort();
+}
+
+/**
+ * Import pins `commit`. Refuse if any YAML `loadConfig` would read (including
+ * untracked or gitignored files) differs from that commit.
+ */
+export function assertProjectYamlMatchesCommit(projectDir: string, commit: string): void {
+  const root = gitRoot(projectDir);
+  const absProject = resolve(projectDir);
+  let relProject = relative(root, absProject).replaceAll("\\", "/");
+  if (relProject === "." || relProject === "") relProject = "";
+  resolveCommit(root, commit);
+
+  const names = [
+    ...new Set([...projectYamlBasenames(absProject), ...commitProjectYamlBasenames(root, commit, relProject)]),
+  ].sort();
+  for (const name of names) {
+    const diskPath = join(absProject, name);
+    const gitPath = relProject ? `${relProject}/${name}` : name;
+    const disk = existsSync(diskPath) && statSync(diskPath).isFile() ? readFileSync(diskPath, "utf8") : null;
+    const shown = runGit(root, ["show", `${commit}:${gitPath}`], { allowFail: true });
+    const committed = shown.status === 0 ? shown.stdout : null;
+    if (disk !== committed) {
+      throw configError(
+        `Refusing to activate: "${name}" does not match commit ${commit.slice(0, 7)}. ` +
+          `Import pins that commit, not the working tree (untracked and ignored *.yml count). ` +
+          `Commit, revert, or remove the file so the project directory matches HEAD.`,
+      );
+    }
+  }
 }
 
 export function assertCleanWorktree(projectDir: string): void {

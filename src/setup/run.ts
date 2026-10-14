@@ -4,11 +4,12 @@ import { writeInitProject } from "../cli/init-project.js";
 import {
   ACTIVE_PIN_PATH,
   assertCleanWorktree,
+  assertProjectYamlMatchesCommit,
   readActivePin,
   resolveActiveRef,
   writeActivePin,
 } from "../authoring/git.js";
-import { loadConfig } from "../config/load.js";
+import { findProjectDir, loadConfig } from "../config/load.js";
 import type { WarehouseType } from "../connectors/dialect.js";
 import { WAREHOUSE_TYPES } from "../connectors/dialect.js";
 import { DEMO_QUESTION, runDemo, type DemoIo, type DemoResult } from "../demo/run.js";
@@ -56,6 +57,8 @@ export interface RunSetupOptions {
   connect?: string;
   skipConnect?: boolean;
   offline?: boolean;
+  /** Import path only: allow pinning after `--offline` (no live schema checks). */
+  activateOffline?: boolean;
   json?: boolean;
   cwd?: string;
   homeDir?: string;
@@ -65,6 +68,7 @@ export interface RunSetupOptions {
   io?: SetupIo;
   prompt?: Prompter;
   stdinIsTty?: boolean;
+  stdoutIsTty?: boolean;
   runDemoFn?: (options: Parameters<typeof runDemo>[0]) => Promise<DemoResult>;
   connectMcpFn?: typeof connectMcp;
 }
@@ -122,6 +126,7 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
   const cwd = resolve(options.cwd ?? process.cwd());
   const env = options.env ?? process.env;
   const tty = options.stdinIsTty ?? Boolean(process.stdin.isTTY);
+  const stdoutTty = options.stdoutIsTty ?? Boolean(process.stdout.isTTY);
   const yes = Boolean(options.yes);
   const skipConnect = Boolean(options.skipConnect);
 
@@ -162,6 +167,11 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
         json: options.json,
         skipConnect,
         client: answers.client,
+        prompt,
+        stdinTty: tty,
+        stdoutTty,
+        offline: options.offline,
+        activateOffline: options.activateOffline,
       });
     }
     return runOwnPath({
@@ -375,16 +385,28 @@ async function runImportPath(opts: {
   dir?: string;
   json?: boolean;
   offline?: boolean;
+  activateOffline?: boolean;
   skipConnect: boolean;
   client: string | null;
+  prompt: Prompter;
+  stdinTty: boolean;
+  stdoutTty: boolean;
   homeDir?: string;
   workspaceDir?: string;
   platform?: NodeJS.Platform;
   connectMcpFn?: RunSetupOptions["connectMcpFn"];
 }): Promise<SetupResult> {
   const startDir = resolve(opts.dir ?? opts.cwd);
-  const loaded = loadConfig(startDir);
-  const projectDir = loaded.projectDir;
+  const projectDir = findProjectDir(startDir);
+  try {
+    const preview = resolveActiveRef(projectDir);
+    assertCleanWorktree(projectDir);
+    assertProjectYamlMatchesCommit(projectDir, preview.commit);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("No git repository")) throw err;
+  }
+  const loaded = loadConfig(projectDir);
   const kernel = new GraneKernel(loaded.config, {
     projectDir,
     providerWarnings: loaded.warnings,
@@ -431,6 +453,24 @@ async function runImportPath(opts: {
 
     assertCleanWorktree(projectDir);
     const active = resolveActiveRef(projectDir);
+    assertProjectYamlMatchesCommit(projectDir, active.commit);
+    if (opts.offline && !opts.activateOffline) {
+      throw new Error(
+        `Refusing to activate: --offline skipped live schema checks. Re-run without --offline, or pass --activate-offline to pin ${active.branch}@${active.commit} anyway.`,
+      );
+    }
+    if (!opts.stdinTty || !opts.stdoutTty) {
+      throw new Error(
+        `Activation requires a TTY. Refusing to write ${ACTIVE_PIN_PATH} for ${active.branch}@${active.commit}.`,
+      );
+    }
+    const activate = await opts.prompt.confirm(`Activate pin ${active.branch}@${active.commit}?`, {
+      defaultYes: false,
+      allowBack: false,
+    });
+    if (activate !== true) {
+      throw new Error("Activation declined. Pin was not written.");
+    }
     const existing = readActivePin(projectDir);
     const previous =
       existing && existing.commit !== active.commit ? existing.commit : (existing?.previous_commit ?? null);

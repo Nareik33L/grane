@@ -83,6 +83,10 @@ program
   .option("--connect <client>", "register an MCP client (cursor, claude, …)")
   .option("--skip-connect", "do not register an MCP client")
   .option("--offline", "skip live database checks (own path)")
+  .option(
+    "--activate-offline",
+    "import path: allow pinning after --offline (no live schema checks)",
+  )
   .option("--json", "print a JSON summary")
   .action(
     async (options: {
@@ -97,6 +101,7 @@ program
       connect?: string;
       skipConnect?: boolean;
       offline?: boolean;
+      activateOffline?: boolean;
       json?: boolean;
     }) => {
       try {
@@ -120,6 +125,7 @@ program
           connect: options.connect,
           skipConnect: options.skipConnect,
           offline: options.offline,
+          activateOffline: options.activateOffline,
           json,
           io: json
             ? { log: (line) => console.error(line), error: (line) => console.error(line) }
