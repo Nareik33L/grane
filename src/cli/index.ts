@@ -7,6 +7,7 @@ import { formatValidateReport } from "../validate/format.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
 import { serveHttp, serveStdio, installHttpProcessShutdown, type HttpMcpHandle } from "../mcp/transport.js";
+import { authoringToolsEnabled } from "../mcp/server.js";
 import { isLoopbackHost } from "../mcp/http-bind.js";
 import { registerMcpCommands } from "./mcp.js";
 import { GraneError } from "../errors.js";
@@ -531,12 +532,16 @@ program
     "--allow-anonymous",
     "allow unauthenticated HTTP on a non-loopback address (no auth.agents)",
   )
-  .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean }) => {
+  .option(
+    "--authoring",
+    "enable V2 authoring MCP tools (also authoring.enabled in grane.yml)",
+  )
+  .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean; authoring?: boolean }) => {
     const kernel = loadKernel();
     let handle: HttpMcpHandle | undefined;
     try {
       if (options.stdio) {
-        await serveStdio(kernel);
+        await serveStdio(kernel, { authoring: options.authoring });
         return; // Keeps running until stdin closes.
       }
       const port = Number(options.port);
@@ -544,6 +549,7 @@ program
       handle = await serveHttp(kernel, port, {
         host,
         allowAnonymous: options.allowAnonymous,
+        authoring: options.authoring,
       });
       installHttpProcessShutdown(handle, kernel);
       const catalog = await kernel.catalog();
@@ -571,6 +577,11 @@ program
         console.log(`Explorable    ${catalog.exploration.columns.length} columns`);
       }
       console.log(`Bind          ${handle.host}:${handle.port}`);
+      console.log(
+        authoringToolsEnabled(kernel.config, { authoring: options.authoring, transport: "http" })
+          ? `Authoring     on (${kernel.config.authoring.mode}${options.authoring ? ", --authoring" : ""})`
+          : `Authoring     off`,
+      );
       console.log(`Status        ready\n`);
       const reach = isLoopbackHost(handle.host) || handle.host === "0.0.0.0" || handle.host === "::"
         ? handle.host === "0.0.0.0" || handle.host === "::"

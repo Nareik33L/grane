@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { warehouseTypeSchema } from "../config/schema.js";
+import { warehouseTypeSchema, type ConnectionConfig } from "../config/schema.js";
 import { configError } from "../errors.js";
 
 /**
@@ -37,6 +37,11 @@ export const openAmbiguitySchema = z.object({
 });
 export type OpenAmbiguity = z.infer<typeof openAmbiguitySchema>;
 
+export const resolvedAmbiguitySchema = openAmbiguitySchema.extend({
+  chosen: z.string().min(1),
+});
+export type ResolvedAmbiguity = z.infer<typeof resolvedAmbiguitySchema>;
+
 /**
  * Versioned authoring session. Breaking field changes bump `version`;
  * additive optional fields may stay on the current version.
@@ -50,6 +55,8 @@ export const authoringSessionSchema = z.object({
   discovered_snapshot_hash: z.string().nullable().default(null),
   glossary_answers: z.array(glossaryAnswerSchema).default([]),
   open_ambiguities: z.array(openAmbiguitySchema).default([]),
+  /** Additive: resolved items leave `open_ambiguities`. */
+  resolved_ambiguities: z.array(resolvedAmbiguitySchema).default([]),
   /** Draft YAML files keyed by project-relative path (`metrics.yml`, …). */
   draft_yaml: z.record(z.string(), z.string()).default({}),
 });
@@ -63,6 +70,7 @@ export interface CreateSessionInput {
   discovered_snapshot_hash?: string | null;
   glossary_answers?: GlossaryAnswer[];
   open_ambiguities?: OpenAmbiguity[];
+  resolved_ambiguities?: ResolvedAmbiguity[];
   draft_yaml?: Record<string, string>;
 }
 
@@ -139,9 +147,52 @@ export function createSession(projectDir: string, input: CreateSessionInput): Au
     discovered_snapshot_hash: input.discovered_snapshot_hash ?? null,
     glossary_answers: input.glossary_answers ?? [],
     open_ambiguities: input.open_ambiguities ?? [],
+    resolved_ambiguities: input.resolved_ambiguities ?? [],
     draft_yaml: input.draft_yaml ?? {},
   });
   return saveSession(projectDir, session);
+}
+
+/** Persist a patch. Never accepts extra keys (samples, tokens, URLs). */
+export function updateSession(
+  projectDir: string,
+  id: string,
+  patch: Partial<Pick<AuthoringSession, "warehouse_ref" | "discovered_snapshot_hash" | "glossary_answers" | "open_ambiguities" | "resolved_ambiguities" | "draft_yaml">>,
+): AuthoringSession {
+  const current = loadSession(projectDir, id);
+  return saveSession(projectDir, {
+    ...current,
+    ...patch,
+    id: current.id,
+    version: current.version,
+    created_at: current.created_at,
+    updated_at: new Date().toISOString(),
+  });
+}
+
+/** Secret-free warehouse locator for session state. Never includes password or token. */
+export function warehouseLocator(connection: ConnectionConfig): string {
+  if (connection.path) return connection.path;
+  if (connection.host && connection.database) {
+    const port = connection.port ? `:${connection.port}` : "";
+    return `${connection.host}${port}/${connection.database}`;
+  }
+  if (connection.account && connection.database) return `${connection.account}/${connection.database}`;
+  if (connection.project && (connection.dataset || connection.schema)) {
+    return `${connection.project}/${connection.dataset || connection.schema}`;
+  }
+  if (connection.url) {
+    try {
+      const parsed = new URL(connection.url);
+      parsed.username = "";
+      parsed.password = "";
+      const path = parsed.pathname.replace(/\/$/, "");
+      return path ? `${parsed.host}${path}` : parsed.host;
+    } catch {
+      return connection.type;
+    }
+  }
+  return connection.type;
 }
 
 /** Write `session` as `.grane/authoring/<id>.json`. Returns the validated document. */

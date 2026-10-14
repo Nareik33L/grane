@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { GraneKernel } from "../kernel.js";
-import { buildMcpServer } from "./server.js";
+import { assertHttpAuthoringAgents, buildMcpServer, type BuildMcpServerOptions } from "./server.js";
 import { recordAudit, httpFields } from "../audit.js";
 import { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "../auth/agents.js";
 import { anonymousHttpWarning, assertAnonymousHttpBind } from "./http-bind.js";
@@ -31,11 +31,13 @@ export interface ServeHttpOptions {
   onWarning?: (message: string) => void;
   /** How long `close()` waits for in-flight requests. Default `limits.timeout_ms + 5s`. */
   drainTimeoutMs?: number;
+  /** CLI `grane serve --authoring`. */
+  authoring?: boolean;
 }
 
 /** Serve MCP over stdio (for local agents like Cursor or Claude Desktop). */
-export async function serveStdio(kernel: GraneKernel): Promise<void> {
-  const server = buildMcpServer(kernel);
+export async function serveStdio(kernel: GraneKernel, options: Pick<BuildMcpServerOptions, "authoring"> = {}): Promise<void> {
+  const server = buildMcpServer(kernel, { authoring: options.authoring, transport: "stdio" });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
@@ -110,6 +112,7 @@ export async function serveHttp(
   const allowAnonymous = Boolean(options.allowAnonymous);
   const hasAgents = httpAuthRequired(kernel.config);
   assertAnonymousHttpBind({ host, allowAnonymous, hasAgents });
+  assertHttpAuthoringAgents(kernel.config, { authoring: options.authoring, transport: "http" });
 
   const requireAuth = hasAgents;
   const poolSize = connectionPoolSize(kernel.config.connection);
@@ -231,7 +234,7 @@ export async function serveHttp(
       }
 
       const body = await readJsonBody(req);
-      const server = buildMcpServer(bound);
+      const server = buildMcpServer(bound, { authoring: options.authoring, transport: "http" });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,

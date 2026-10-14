@@ -8,7 +8,7 @@ import { getDialect } from "../../src/connectors/dialect.js";
 import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneError } from "../../src/errors.js";
 import { loadConfig } from "../../src/config/load.js";
-import { appendAudit, recordAudit, recordDiscoveryAudit } from "../../src/audit.js";
+import { appendAudit, authoringAuditEvent, recordAudit, recordDiscoveryAudit, recordAuthoringAudit } from "../../src/audit.js";
 import { attributeCompiledSql } from "../../src/execute/executor.js";
 
 const secretRow = "SECRET_ROW_PAYLOAD";
@@ -450,6 +450,44 @@ describe("discovery audit log", () => {
       expect((err as GraneError).refusal.status).toBe("config_error");
       expect((err as GraneError).message).toMatch(/fail_closed/);
     }
+  });
+
+  it("authoring audit events never include samples, drafts, or tokens", () => {
+    const dir = tempProject();
+    const config = auditedConfig(dir);
+    recordAuthoringAudit(config, dir, {
+      ts: "2026-10-14T15:00:00.000Z",
+      operation: "proposal_created",
+      session_id: "sess-1",
+      agent: "anonymous",
+      duration_ms: 9,
+      commit: "a".repeat(40),
+      branch: "grane/proposal/20261014-add-gmv",
+      pr: "acme/shop#grane/proposal/20261014-add-gmv",
+      samples: [sampleValue],
+      token: "SECRET_TOKEN",
+      draft_yaml: { "metrics.yml": sampleValue },
+    } as Parameters<typeof recordAuthoringAudit>[2]);
+    const event = readJsonl(join(dir, ".grane", "audit.jsonl"))[0]!;
+    expect(event.kind).toBe("authoring");
+    expect(event.operation).toBe("proposal_created");
+    expect(event.commit).toBe("a".repeat(40));
+    expect(event.branch).toBe("grane/proposal/20261014-add-gmv");
+    expect(event.pr).toBe("acme/shop#grane/proposal/20261014-add-gmv");
+    expect(event.agent).toBe("anonymous");
+    expect(event).not.toHaveProperty("samples");
+    expect(event).not.toHaveProperty("token");
+    expect(event).not.toHaveProperty("draft_yaml");
+    expect(event).not.toHaveProperty("query");
+    expect(JSON.stringify(event)).not.toContain(sampleValue);
+    expect(JSON.stringify(event)).not.toContain("SECRET_TOKEN");
+    expect(authoringAuditEvent({
+      operation: "profile_column",
+      session_id: null,
+      agent: null,
+      duration_ms: 1,
+      refusal: { status: "column_not_permitted", message: "excluded" },
+    }).refusal?.status).toBe("column_not_permitted");
   });
 
   it("keeps query audit JSON bytes identical after adding discovery events", () => {
