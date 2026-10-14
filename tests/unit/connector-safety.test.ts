@@ -404,6 +404,41 @@ describe.skipIf(!duckOk)("DuckDB connector safety", () => {
     expect(String(result.rows[0]?.tz).toUpperCase()).toBe("UTC");
   });
 
+  it("file access_mode READ_ONLY rejects CREATE TABLE at the engine", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-cs-"));
+    const path = join(dir, "ro.duckdb");
+    const mod = (await import("@duckdb/node-api")) as {
+      DuckDBInstance: {
+        create: (path: string, opts?: Record<string, string>) => Promise<{
+          connect: () => Promise<{
+            runAndReadAll: (sql: string) => Promise<unknown>;
+            closeSync?: () => void;
+          }>;
+          closeSync?: () => void;
+        }>;
+      };
+    };
+    const writer = await mod.DuckDBInstance.create(path);
+    const wconn = await writer.connect();
+    await wconn.runAndReadAll("CREATE TABLE t (id INTEGER)");
+    wconn.closeSync?.();
+    writer.closeSync?.();
+
+    const ro = await mod.DuckDBInstance.create(path, { access_mode: "READ_ONLY" });
+    const rconn = await ro.connect();
+    try {
+      await rconn.runAndReadAll("INSERT INTO t VALUES (1)");
+      throw new Error("DuckDB accepted INSERT with access_mode=READ_ONLY");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      expect(message).not.toMatch(/accepted INSERT/);
+      expect(message).toMatch(/read.?only|cannot|permission|write/i);
+    } finally {
+      rconn.closeSync?.();
+      ro.closeSync?.();
+    }
+  });
+
   it("opens file databases READ_ONLY and introspects classifiable types", async () => {
     const dir = mkdtempSync(join(tmpdir(), "grane-cs-"));
     const path = join(dir, "w.duckdb");
@@ -472,6 +507,13 @@ describe.skipIf(!pgEnv)("Postgres connector safety", () => {
     });
   });
 
+  it("READ ONLY transaction rejects SELECT FOR UPDATE at the engine", async () => {
+    const c = live();
+    const sql = "SELECT oid FROM pg_class FOR UPDATE LIMIT 1";
+    expect(isWriteSql(sql)).toBe(false);
+    await expect(c.query(sql, [], LIMITS)).rejects.toThrow(/read-only|cannot execute/i);
+  });
+
   it("runs inside a READ ONLY UTC transaction", async () => {
     const c = live();
     const result = await c.query(
@@ -518,6 +560,13 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
     await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
+  });
+
+  it("SESSION TRANSACTION READ ONLY rejects SELECT FOR UPDATE at the engine", async () => {
+    const c = live();
+    const sql = "SELECT 1 AS id FROM (SELECT 1 AS id) AS t FOR UPDATE";
+    expect(isWriteSql(sql)).toBe(false);
+    await expect(c.query(sql, [], LIMITS)).rejects.toThrow(/read.?only|1792/i);
   });
 
   it("runs with SESSION TRANSACTION READ ONLY and UTC", async () => {
@@ -585,6 +634,25 @@ describe.skipIf(!chEnv)("ClickHouse connector safety", () => {
     await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
+  });
+
+  it("readonly=1 rejects CREATE TABLE at the engine", async () => {
+    const { clickhouseQuerySettings } = await import("../../src/connectors/clickhouse.js");
+    const { createClickHouseClient } = await import("../helpers/clickhouse-live.js");
+    const client = await createClickHouseClient(chEnv!.url);
+    try {
+      await client.query({
+        query: "CREATE TABLE qa_cs_write_probe (id Int32) ENGINE = Memory",
+        clickhouse_settings: clickhouseQuerySettings(5_000),
+      });
+      throw new Error("ClickHouse accepted CREATE TABLE with readonly=1");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      expect(message).not.toMatch(/accepted CREATE TABLE/);
+      expect(message).toMatch(/readonly|Cannot execute|read-only|not allowed/i);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
   });
 
   it("pins readonly, UTC, and join_use_nulls so unmatched LEFT JOIN is NULL not 0/''", async () => {

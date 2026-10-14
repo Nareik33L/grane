@@ -104,18 +104,9 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
 
   const introspectSchema = async (): Promise<DatabaseSchema> => {
     const started = Date.now();
+    let schema: DatabaseSchema;
     try {
-      const schema = await options.connector.introspect();
-      const columnCount = schema.tables.reduce((n, table) => n + table.columns.length, 0);
-      emit({
-        operation: "introspect",
-        target: { schema: schema.schemaName },
-        sql: [`/* connector.introspect() ${options.connector.type} */`],
-        row_count: columnCount,
-        duration_ms: Date.now() - started,
-        snapshot_hash: hashDiscoverySnapshot(canonicalSchema(schema)),
-      });
-      return schema;
+      schema = await options.connector.introspect();
     } catch (err) {
       emit({
         operation: "introspect",
@@ -127,21 +118,23 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
       });
       throw err;
     }
+    const columnCount = schema.tables.reduce((n, table) => n + table.columns.length, 0);
+    emit({
+      operation: "introspect",
+      target: { schema: schema.schemaName },
+      sql: [`/* connector.introspect() ${options.connector.type} */`],
+      row_count: columnCount,
+      duration_ms: Date.now() - started,
+      snapshot_hash: hashDiscoverySnapshot(canonicalSchema(schema)),
+    });
+    return schema;
   };
 
   const infer = async (schema: DatabaseSchema): Promise<Record<string, InferredRelationship>> => {
     const started = Date.now();
+    let inferred: Record<string, InferredRelationship>;
     try {
-      const inferred = inferRelationships(schema);
-      emit({
-        operation: "relationships",
-        target: { schema: schema.schemaName },
-        sql: [],
-        row_count: Object.keys(inferred).length,
-        duration_ms: Date.now() - started,
-        snapshot_hash: hashDiscoverySnapshot(inferred),
-      });
-      return inferred;
+      inferred = inferRelationships(schema);
     } catch (err) {
       emit({
         operation: "relationships",
@@ -153,6 +146,15 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
       });
       throw err;
     }
+    emit({
+      operation: "relationships",
+      target: { schema: schema.schemaName },
+      sql: [],
+      row_count: Object.keys(inferred).length,
+      duration_ms: Date.now() - started,
+      snapshot_hash: hashDiscoverySnapshot(inferred),
+    });
+    return inferred;
   };
 
   const profileColumn = async (table: string, column: string): Promise<ColumnProfile> => {
@@ -160,62 +162,9 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
     const requested = `${table}.${column}`;
     const sql: string[] = [];
     const target = { table, column };
+    let profile: ColumnProfile;
     try {
-      const schema = await options.connector.introspect();
-      const found = findColumn(schema, table, column);
-      if (!found) {
-        throw undefinedColumn(requested, similarColumns(schema, requested));
-      }
-      const targetWithSchema = { schema: found.table.schema, table: found.table.name, column: found.column };
-      if (!isSchemaAllowed(policy, found.table.schema)) {
-        throw columnNotPermitted(
-          `${requested} (schema "${found.table.schema}" is not in exploration.schemas)`,
-        );
-      }
-      if (!isExplorable(policy, found.table.name, found.column)) {
-        const allowlistMiss =
-          policy.mode === "allowlist" && !matchesAnyPattern(policy.include, found.table.name, found.column);
-        throw columnNotPermitted(requested, allowlistMiss ? "allowlist" : "excluded");
-      }
-      assertSafeIdent(found.table.schema || "public");
-      assertSafeIdent(found.table.name);
-      assertSafeIdent(found.column);
-
-      const dialect = options.connector.dialect;
-      const tableSql = dialect.qualifyTable(found.table.schema, found.table.name);
-      const colSql = dialect.ident(found.column);
-      const distinctSql = `SELECT COUNT(DISTINCT ${colSql}) AS n FROM ${tableSql}`;
-      sql.push(distinctSql);
-      const distinctRows = await runDiscoveryQuery(options.connector, distinctSql, limits);
-      const distinctCount = parseCount(distinctRows.rows[0]?.n);
-
-      let samples: unknown[] = [];
-      let sampleHash: string | undefined;
-      if (sampling) {
-        const sampleSql = `SELECT ${colSql} AS v FROM ${tableSql} LIMIT ${sampleRows}`;
-        sql.push(sampleSql);
-        const sampleRowsResult = await runDiscoveryQuery(options.connector, sampleSql, limits);
-        samples = sampleRowsResult.rows.map((row) => canonicalizeValue(row.v));
-        sampleHash = hashDiscoverySnapshot(samples);
-      }
-
-      emit({
-        operation: "profile",
-        target: targetWithSchema,
-        sql,
-        row_count: sampling ? samples.length : distinctCount ?? 0,
-        duration_ms: Date.now() - started,
-        snapshot_hash: sampleHash ?? hashDiscoverySnapshot({ distinctCount }),
-      });
-      return {
-        table: found.table.name,
-        column: found.column,
-        schema: found.table.schema,
-        distinctCount,
-        samples,
-        sampleHash,
-        sql,
-      };
+      profile = await profileWork(table, column, requested, sql);
     } catch (err) {
       emit({
         operation: "profile",
@@ -227,7 +176,70 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
       });
       throw err;
     }
+    emit({
+      operation: "profile",
+      target: { schema: profile.schema, table: profile.table, column: profile.column },
+      sql: profile.sql,
+      row_count: sampling ? profile.samples.length : profile.distinctCount ?? 0,
+      duration_ms: Date.now() - started,
+      snapshot_hash: profile.sampleHash ?? hashDiscoverySnapshot({ distinctCount: profile.distinctCount }),
+    });
+    return profile;
   };
+
+  async function profileWork(
+    table: string,
+    column: string,
+    requested: string,
+    sql: string[],
+  ): Promise<ColumnProfile> {
+    const schema = await options.connector.introspect();
+    const found = findColumn(schema, table, column);
+    if (!found) {
+      throw undefinedColumn(requested, similarColumns(schema, requested));
+    }
+    if (!isSchemaAllowed(policy, found.table.schema)) {
+      throw columnNotPermitted(
+        `${requested} (schema "${found.table.schema}" is not in exploration.schemas)`,
+      );
+    }
+    if (!isExplorable(policy, found.table.name, found.column)) {
+      const allowlistMiss =
+        policy.mode === "allowlist" && !matchesAnyPattern(policy.include, found.table.name, found.column);
+      throw columnNotPermitted(requested, allowlistMiss ? "allowlist" : "excluded");
+    }
+    assertSafeIdent(found.table.schema || "public");
+    assertSafeIdent(found.table.name);
+    assertSafeIdent(found.column);
+
+    const dialect = options.connector.dialect;
+    const tableSql = dialect.qualifyTable(found.table.schema, found.table.name);
+    const colSql = dialect.ident(found.column);
+    const distinctSql = `SELECT COUNT(DISTINCT ${colSql}) AS n FROM ${tableSql}`;
+    sql.push(distinctSql);
+    const distinctRows = await runDiscoveryQuery(options.connector, distinctSql, limits);
+    const distinctCount = parseCount(distinctRows.rows[0]?.n);
+
+    let samples: unknown[] = [];
+    let sampleHash: string | undefined;
+    if (sampling) {
+      const sampleSql = `SELECT ${colSql} AS v FROM ${tableSql} LIMIT ${sampleRows}`;
+      sql.push(sampleSql);
+      const sampleRowsResult = await runDiscoveryQuery(options.connector, sampleSql, limits);
+      samples = sampleRowsResult.rows.map((row) => canonicalizeValue(row.v));
+      sampleHash = hashDiscoverySnapshot(samples);
+    }
+
+    return {
+      table: found.table.name,
+      column: found.column,
+      schema: found.table.schema,
+      distinctCount,
+      samples,
+      sampleHash,
+      sql: [...sql],
+    };
+  }
 
   return { introspectSchema, inferRelationships: infer, profileColumn };
 }

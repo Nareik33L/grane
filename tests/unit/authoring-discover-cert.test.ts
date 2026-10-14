@@ -1,19 +1,33 @@
 /**
  * V2-07 discovery against CI-certified engines (PG16, MySQL8, DuckDB, CH24).
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDiscovery, runDiscoveryQuery } from "../../src/authoring/discover.js";
+import { createSession } from "../../src/authoring/session.js";
 import { createConnector } from "../../src/connectors/create.js";
 import { isWriteSql } from "../../src/connectors/types.js";
-import { GraneError } from "../../src/errors.js";
 import { CI_REQUIRED_CERT_ENGINES, loadAvailableEngines, type CertSession } from "../helpers/cert-engine.js";
+import { assertEngineRejectsWrite } from "../helpers/discovery-readonly.js";
 
 const engines = await loadAvailableEngines();
 const sessions: CertSession[] = [];
 const dirs: string[] = [];
+
+function walkText(dir: string): string {
+  const chunks: string[] = [];
+  const walk = (current: string) => {
+    for (const name of readdirSync(current)) {
+      const path = join(current, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else chunks.push(readFileSync(path, "utf8"));
+    }
+  };
+  walk(dir);
+  return chunks.join("\n");
+}
 
 afterAll(async () => {
   for (const session of sessions) await session.teardown();
@@ -85,7 +99,45 @@ for (const engine of engines.filter((item) =>
           runDiscoveryQuery(connector, "INSERT INTO customers VALUES (1)", config.limits),
         ).rejects.toMatchObject({ refusal: { status: "unsafe_query" } });
 
+        if (session.type === "postgres") {
+          const ro = await runDiscoveryQuery(
+            connector,
+            "SELECT current_setting('transaction_read_only') AS ro",
+            config.limits,
+          );
+          expect(String(ro.rows[0]?.ro).toLowerCase()).toMatch(/on|true|1/);
+        }
+        if (session.type === "mysql") {
+          const ro = await runDiscoveryQuery(
+            connector,
+            "SELECT @@session.transaction_read_only AS ro",
+            config.limits,
+          );
+          expect(String(ro.rows[0]?.ro).toLowerCase()).toMatch(/on|true|1/);
+        }
+        if (session.type === "duckdb") {
+          const mode = await runDiscoveryQuery(
+            connector,
+            "SELECT current_setting('access_mode') AS m",
+            config.limits,
+          );
+          expect(String(mode.rows[0]?.m).toLowerCase()).toMatch(/read_only/);
+        }
+        if (session.type === "clickhouse") {
+          const ro = await runDiscoveryQuery(connector, "SELECT getSetting('readonly') AS ro", config.limits);
+          expect(String(ro.rows[0]?.ro)).toMatch(/^1/);
+        }
+
+        await assertEngineRejectsWrite(session);
+
+        createSession(dir, {
+          id: "cert-sess",
+          warehouse_ref: { type: session.type, locator: `${session.type}://${session.schemaName}` },
+          discovered_snapshot_hash: profile.sampleHash ?? null,
+        });
+
         const raw = readFileSync(join(dir, ".grane", "audit.jsonl"), "utf8");
+        expect(raw.trimEnd().split("\n")).toHaveLength(4);
         for (const value of sampleValues) {
           expect(raw).not.toContain(value);
         }
@@ -95,10 +147,26 @@ for (const engine of engines.filter((item) =>
           .trim()
           .split("\n")
           .map((line) => JSON.parse(line) as { kind: string; operation: string; read_only: boolean });
+        expect(events).toHaveLength(4);
+        expect(events.map((event) => event.operation)).toEqual([
+          "introspect",
+          "relationships",
+          "profile",
+          "profile",
+        ]);
         expect(events.every((event) => event.kind === "discovery" && event.read_only === true)).toBe(true);
-        expect(events.map((event) => event.operation)).toEqual(
-          expect.arrayContaining(["introspect", "relationships", "profile"]),
-        );
+
+        const persisted = walkText(join(dir, ".grane"));
+        for (const value of sampleValues) {
+          expect(persisted).not.toContain(value);
+        }
+        const password = session.readConnection().password;
+        const url = session.readConnection().url;
+        if (password) expect(persisted).not.toContain(password);
+        if (url && url.includes("@")) {
+          const secret = url.slice(url.indexOf("://") + 3, url.indexOf("@"));
+          if (secret.includes(":")) expect(persisted).not.toContain(secret.split(":")[1]!);
+        }
       } finally {
         await connector.close();
       }

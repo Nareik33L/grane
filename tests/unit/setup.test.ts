@@ -323,9 +323,13 @@ audit:
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { kind: string; operation: string; agent: string | null; read_only: boolean });
-    expect(events.some((event) => event.kind === "discovery" && event.operation === "introspect")).toBe(true);
-    expect(events.every((event) => event.kind !== "discovery" || event.read_only === true)).toBe(true);
-    expect(events.find((event) => event.kind === "discovery")?.agent).toBe("setup-import");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "discovery",
+      operation: "introspect",
+      agent: "setup-import",
+      read_only: true,
+    });
   });
 
   it("non-interactive --import validates and inspects without pinning", async () => {
