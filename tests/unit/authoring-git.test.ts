@@ -203,6 +203,67 @@ describe("git proposal library", () => {
     expect(git(dir, ["rev-parse", "main"])).toBe(main);
   });
 
+  it("refuses to pin against a grane/proposal/* ref", () => {
+    const dir = initRepo();
+    const proposal = createProposal(dir, {
+      slug: "unmerged",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT_METRICS },
+    });
+    try {
+      writeActivePin(dir, {
+        ref: proposal.branch,
+        commit: proposal.commit,
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/proposal branch/);
+      expect((err as GraneError).message).toMatch(/GitHub PR base/);
+    }
+    expect(readActivePin(dir)).toBeNull();
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+  });
+
+  it("refuses a pin ref that is not the approved base branch", () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    try {
+      writeActivePin(dir, {
+        ref: "develop",
+        commit: main,
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/pin ref must be "main"/);
+    }
+    writeActivePin(dir, {
+      ref: "main",
+      commit: main,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    try {
+      writeActivePin(dir, {
+        ref: "develop",
+        commit: main,
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:01:00.000Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/pin ref must be "main"/);
+    }
+    expect(readActivePin(dir)?.ref).toBe("main");
+    expect(readActivePin(dir)?.commit).toBe(main);
+  });
+
   it("does not treat x-add as merged when only x-add-revenue is merged", () => {
     const dir = initRepo();
     const at = new Date("2026-10-14T00:00:00.000Z");

@@ -252,6 +252,37 @@ function previouslyApprovedCommits(root: string, pin: ActivePin | null): Set<str
   return out;
 }
 
+function normalizeBranchRef(ref: string): string {
+  return ref.replace(/^refs\/heads\//, "");
+}
+
+/**
+ * The pin ref is the GitHub PR base, never a proposal branch. On the first pin it
+ * must match `resolveActiveRef().branch`; afterwards it must keep the existing pin's ref.
+ */
+function assertPinRef(projectDir: string, requested: string): string {
+  const ref = normalizeBranchRef(requested);
+  if (ref.startsWith(PROPOSAL_BRANCH_PREFIX) || ref === PROPOSAL_BRANCH_PREFIX) {
+    throw configError(
+      `Refusing to pin against "${requested}". The active pin cannot use a ${PROPOSAL_BRANCH_PREFIX}* proposal branch. ` +
+        `Pin the GitHub PR base after the PR is merged.`,
+    );
+  }
+  const existing = readActivePin(projectDir);
+  if (existing && (normalizeBranchRef(existing.ref).startsWith(PROPOSAL_BRANCH_PREFIX) || existing.ref === PROPOSAL_BRANCH_PREFIX)) {
+    throw configError(
+      `Existing pin ref "${existing.ref}" is a proposal branch and cannot be used. Delete ${ACTIVE_PIN_PATH} and pin the GitHub PR base.`,
+    );
+  }
+  const expected = existing?.ref ?? resolveActiveRef(projectDir).branch;
+  if (ref !== expected) {
+    throw configError(
+      `Refusing to pin against "${requested}". The pin ref must be "${expected}" (the approved/active base branch).`,
+    );
+  }
+  return expected;
+}
+
 /** A pin may only record commits on `ref`'s history, or a SHA this pin already approved. */
 function assertPinnableCommit(root: string, rev: string, ref: string, approved: Set<string>, label: string): string {
   const commit = resolveCommit(root, rev);
@@ -265,13 +296,14 @@ function assertPinnableCommit(root: string, rev: string, ref: string, approved: 
 
 export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   const parsed = activePinSchema.parse(pin);
+  const ref = assertPinRef(projectDir, parsed.ref);
   const root = gitRoot(projectDir);
   const approved = previouslyApprovedCommits(root, readActivePin(projectDir));
-  const commit = assertPinnableCommit(root, parsed.commit, parsed.ref, approved, "commit");
+  const commit = assertPinnableCommit(root, parsed.commit, ref, approved, "commit");
   const previous_commit = parsed.previous_commit
-    ? assertPinnableCommit(root, parsed.previous_commit, parsed.ref, approved, "previous_commit")
+    ? assertPinnableCommit(root, parsed.previous_commit, ref, approved, "previous_commit")
     : parsed.previous_commit;
-  const next = { ...parsed, commit, previous_commit };
+  const next = { ...parsed, ref, commit, previous_commit };
   const path = join(projectDir, ACTIVE_PIN_PATH);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
@@ -598,6 +630,7 @@ export function rollbackPin(
       `Nothing to roll back: ${ACTIVE_PIN_PATH} does not exist. After a GitHub PR merge, pin that commit first.`,
     );
   }
+  const ref = assertPinRef(projectDir, pin.ref);
   const target = options.to ?? pin.previous_commit ?? undefined;
   if (!target) {
     throw configError(
@@ -613,7 +646,7 @@ export function rollbackPin(
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   const branchShaBefore = git(root, ["rev-parse", pin.ref], { allowFail: true }).trim();
   const next = writeActivePin(projectDir, {
-    ref: pin.ref,
+    ref,
     commit: resolved,
     approved_by: options.approved_by ?? "rollback",
     approved_at: new Date().toISOString(),
