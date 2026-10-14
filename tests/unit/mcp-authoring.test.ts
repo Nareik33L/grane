@@ -46,6 +46,7 @@ const SCHEMA: DatabaseSchema = {
     {
       schema: "public",
       name: "customers",
+      primaryKey: "id",
       columns: [
         { name: "id", dataType: "integer", nullable: false },
         { name: "email", dataType: "text", nullable: true },
@@ -55,6 +56,7 @@ const SCHEMA: DatabaseSchema = {
     {
       schema: "public",
       name: "orders",
+      primaryKey: "id",
       columns: [
         { name: "id", dataType: "integer", nullable: false },
         { name: "customer_id", dataType: "integer", nullable: false },

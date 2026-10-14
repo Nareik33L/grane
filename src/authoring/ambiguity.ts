@@ -1,4 +1,4 @@
-import type { DatabaseSchema } from "../connectors/types.js";
+import { tablePrimaryKey, type DatabaseSchema } from "../connectors/types.js";
 import { isNumericType, isTemporalType } from "../connectors/dialect.js";
 import { RelationshipGraph, describeJoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
@@ -122,12 +122,29 @@ export function semiAdditiveGroupByAmbiguity(
   };
 }
 
+export type SemiGroupByRefusal = "primary_key" | "temporal" | "measure";
+
 /**
- * True when `groupColumn` must not be a semi-additive series key: the measure
- * itself, the entity primary key, any temporal column, or the metric's
- * time_dimension. Grouping by the snapshot date keeps one row per timestamp
- * and sums every snapshot — the double count `additive: semi` exists to prevent.
+ * Why `groupColumn` must not be a semi-additive series key. Uses introspected
+ * PRIMARY KEY metadata only — never guesses `id` or the first column.
  */
+export function semiGroupByRefusalReason(
+  schema: DatabaseSchema,
+  table: string,
+  measureColumn: string,
+  groupColumn: string,
+  timeColumn?: string,
+): SemiGroupByRefusal | null {
+  if (groupColumn === measureColumn) return "measure";
+  if (timeColumn && groupColumn === timeColumn) return "temporal";
+  const info = schema.tables.find((item) => item.name === table);
+  if (tablePrimaryKey(info) === groupColumn) return "primary_key";
+  const col = info?.columns.find((item) => item.name === groupColumn);
+  if (col && looksTemporal(col.name, col.dataType)) return "temporal";
+  if (!col && looksTemporal(groupColumn, "")) return "temporal";
+  return null;
+}
+
 export function isForbiddenSemiGroupByColumn(
   schema: DatabaseSchema,
   table: string,
@@ -135,24 +152,29 @@ export function isForbiddenSemiGroupByColumn(
   groupColumn: string,
   timeColumn?: string,
 ): boolean {
-  if (groupColumn === measureColumn) return true;
-  if (timeColumn && groupColumn === timeColumn) return true;
-  const info = schema.tables.find((item) => item.name === table);
-  const pk = info?.columns.find((item) => item.name === "id")?.name ?? info?.columns[0]?.name;
-  if (groupColumn === pk) return true;
-  const col = info?.columns.find((item) => item.name === groupColumn);
-  if (col && looksTemporal(col.name, col.dataType)) return true;
-  if (!col && looksTemporal(groupColumn, "")) return true;
-  return false;
+  return semiGroupByRefusalReason(schema, table, measureColumn, groupColumn, timeColumn) !== null;
 }
 
-export function forbiddenSemiGroupByMessage(chosen: string): string {
+export function forbiddenSemiGroupByTemporalMessage(chosen: string): string {
   return (
     `"${chosen}" is a temporal column or the metric time dimension. ` +
     `Grouping by it keeps one row per timestamp and sums every snapshot — ` +
     `the double count additive: semi exists to prevent. ` +
     `Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" or a non-temporal series key.`
   );
+}
+
+export function forbiddenSemiGroupByPrimaryKeyMessage(chosen: string): string {
+  return (
+    `"${chosen}" is the entity primary key (introspected grain). ` +
+    `group_by on that key is vacuous_semi_additive_group_by: first/last cannot ` +
+    `collapse history. Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" or a non-key series column.`
+  );
+}
+
+/** @deprecated Use forbiddenSemiGroupByTemporalMessage — kept as the temporal wording. */
+export function forbiddenSemiGroupByMessage(chosen: string): string {
+  return forbiddenSemiGroupByTemporalMessage(chosen);
 }
 
 /** Parse a resolved group_by choice into the YAML list (`[]` or `${table.column}`). */

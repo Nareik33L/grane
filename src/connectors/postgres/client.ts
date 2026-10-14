@@ -3,7 +3,7 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../../config/schema
 import { configError } from "../../errors.js";
 import { postgresDialect, redshiftDialect, type WarehouseType } from "../dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../types.js";
-import { isWriteSql, warehouseSslOptions, connectionPoolSize } from "../types.js";
+import { applyPrimaryKeys, isWriteSql, warehouseSslOptions, connectionPoolSize } from "../types.js";
 import { unsafeQuery } from "../../errors.js";
 
 export const POSTGRES_READ_ONLY_BEGIN = "BEGIN TRANSACTION READ ONLY";
@@ -168,6 +168,26 @@ export async function introspectPostgres(pool: pg.Pool, schemaName: string): Pro
   } catch {
     // Redshift and some Postgres-compatible engines lack pg_constraint details.
     foreignKeys = [];
+  }
+
+  try {
+    const pkResult = await pool.query<{ table_name: string; column_name: string }>(
+      `SELECT kcu.table_name, kcu.column_name
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
+       WHERE tc.table_schema = $1 AND tc.constraint_type = 'PRIMARY KEY'
+       ORDER BY kcu.table_name, kcu.ordinal_position`,
+      [schemaName],
+    );
+    applyPrimaryKeys(
+      tablesByName.values(),
+      pkResult.rows.map((row) => ({ table: row.table_name, column: row.column_name })),
+    );
+  } catch {
+    /* PRIMARY KEY metadata is optional; authoring will not guess a grain. */
   }
 
   return { schemaName, tables: [...tablesByName.values()], foreignKeys };

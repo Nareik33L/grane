@@ -58,7 +58,9 @@ function tempDir(): string {
 function table(
   name: string,
   columns: { name: string; dataType: string; nullable?: boolean }[],
+  primaryKey?: string,
 ): DatabaseSchema["tables"][number] {
+  const pk = primaryKey ?? columns.find((column) => column.name === "id")?.name;
   return {
     schema: "public",
     name,
@@ -67,6 +69,7 @@ function table(
       dataType: column.dataType,
       nullable: column.nullable ?? true,
     })),
+    ...(pk ? { primaryKey: pk } : {}),
   };
 }
 
@@ -376,6 +379,33 @@ describe("non-additive measures", () => {
       /time dimension|temporal|every snapshot|double count/i,
     );
     expect(listAmbiguities(k, sessionId).some((item) => item.id === follow.id)).toBe(true);
+  });
+
+  it("refuses the introspected primary key with a message distinct from the temporal one", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, nonAdditiveSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const snapshot = listAmbiguities(k, sessionId).find((item) => item.kind === "non_additive_measure")!;
+    await resolveAmbiguity(k, sessionId, snapshot.id, "semi");
+    const follow = listAmbiguities(k, sessionId).find((item) => item.kind === "semi_additive_group_by")!;
+    expect(follow.candidates).not.toContain("inventory.id");
+
+    try {
+      await resolveAmbiguity(k, sessionId, follow.id, "inventory.id");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as Error).message).toMatch(/primary key|introspected grain|vacuous_semi_additive_group_by/i);
+      expect((err as Error).message).not.toMatch(/time dimension|every snapshot|double count/i);
+    }
+    try {
+      await resolveAmbiguity(k, sessionId, follow.id, "inventory.snapshot_at");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).toMatch(/time dimension|temporal|every snapshot|double count/i);
+      expect((err as Error).message).not.toMatch(/introspected grain/i);
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js";
 import { duckdbDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
-import { loadOptionalModule, isWriteSql, runWithTimeout } from "./types.js";
+import { applyPrimaryKeys, loadOptionalModule, isWriteSql, runWithTimeout } from "./types.js";
 import { unsafeQuery } from "../errors.js";
 
 type DuckDbReader = {
@@ -120,6 +120,27 @@ export class DuckDbConnector implements WarehouseConnector {
         dataType: String(row["data_type"]),
         nullable: String(row["is_nullable"]).toUpperCase() === "YES",
       });
+    }
+    try {
+      const pkReader = await conn.runAndReadAll(
+        `SELECT kcu.table_name, kcu.column_name
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_name = kcu.table_name
+         WHERE tc.constraint_type = 'PRIMARY KEY'
+         ORDER BY kcu.table_name, kcu.ordinal_position`,
+      );
+      const pkRows = pkReader.getRowObjectsJS?.() ?? pkReader.getRowObjects?.() ?? [];
+      applyPrimaryKeys(
+        tablesByName.values(),
+        pkRows.map((row) => ({
+          table: String(row["table_name"]),
+          column: String(row["column_name"]),
+        })),
+      );
+    } catch {
+      /* PRIMARY KEY metadata is optional; authoring will not guess a grain. */
     }
     return { schemaName: this.schemaName, tables: [...tablesByName.values()], foreignKeys: [] };
   }

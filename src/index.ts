@@ -112,5 +112,6 @@ export {
   GLOBAL_SNAPSHOT_GROUP_BY,
   type AmbiguityKind,
 } from "./authoring/ambiguity.js";
+export { generateDraftYaml } from "./authoring/generate.js";
 export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

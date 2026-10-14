@@ -11,6 +11,31 @@ export interface TableInfo {
   schema: string;
   name: string;
   columns: ColumnInfo[];
+  /**
+   * First column of the warehouse PRIMARY KEY, when introspected.
+   * Authoring never guesses `id` or the first column.
+   */
+  primaryKey?: string;
+}
+
+/** Apply introspected PRIMARY KEY columns (first ordinal wins per table). */
+export function applyPrimaryKeys(
+  tables: Iterable<TableInfo>,
+  keys: ReadonlyArray<{ table: string; column: string }>,
+): void {
+  const first = new Map<string, string>();
+  for (const key of keys) {
+    if (!first.has(key.table)) first.set(key.table, key.column);
+  }
+  for (const table of tables) {
+    const pk = first.get(table.name);
+    if (pk) table.primaryKey = pk;
+  }
+}
+
+/** Introspected grain key only — never `id` or columns[0] as a guess. */
+export function tablePrimaryKey(table: TableInfo | undefined): string | undefined {
+  return table?.primaryKey;
 }
 
 export interface ForeignKeyInfo {
