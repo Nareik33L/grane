@@ -21,6 +21,7 @@ import {
   parseTool,
   recordingConnector,
   SHOP_SCHEMA,
+  thrownSecurity,
   tryBannedMcpTools,
   withAuthoringMcp,
 } from "./authoring.js";
@@ -127,7 +128,7 @@ export async function runAuthoringMcpSweep(): Promise<Verdict> {
         }
         const stale = Object.keys(MCP_SWEEP_TOOL_ARGS).filter((name) => !listed.includes(name));
         if (stale.length > 0) {
-          return { code: "FAIL", detail: `sweep args for unregistered tools: ${stale.join(", ")}` };
+          return { code: "SECURITY CRITICAL", detail: `sweep args for unregistered tools: ${stale.join(", ")}` };
         }
 
         const start = await client.callTool({ name: "authoring_start", arguments: {} });
@@ -171,7 +172,7 @@ export async function runAuthoringMcpSweep(): Promise<Verdict> {
       },
     });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "MCP sweep");
   } finally {
     repo.cleanup();
   }

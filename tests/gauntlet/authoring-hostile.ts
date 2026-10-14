@@ -1,21 +1,27 @@
 /**
  * Adversarial authoring: prompt injection, self-approve, active YAML / pin
- * writes, hostile slug and path arguments.
+ * writes, hostile slug and path arguments driven through MCP.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { approveProposal, createProposal, rollbackPin } from "../../src/authoring/git.js";
+import { approveProposal, rollbackPin } from "../../src/authoring/git.js";
+import { loadSession, updateSession } from "../../src/authoring/session.js";
 import { isWriteSql } from "../../src/connectors/types.js";
 import {
   AUTHORING_INJECTION,
   assertMainUnmoved,
   assertNoPin,
   assertProposalParent,
+  EMPTY_METRICS_YAML,
   git,
   initAuthoringRepo,
+  mustRefuse,
   parseTool,
   recordingConnector,
+  securityCritical,
   SHOP_SCHEMA,
+  thrownSecurity,
+  toolMessage,
   tryBannedMcpTools,
   withAuthoringMcp,
   writeSqlInLog,
@@ -29,6 +35,28 @@ function frozen(dir: string, mainSha: string, branch?: string): Verdict | null {
   if (pin) return pin;
   if (branch) return assertProposalParent(dir, branch, mainSha);
   return null;
+}
+
+async function seedDraftSession(
+  client: Parameters<Parameters<typeof withAuthoringMcp>[0]["fn"]>[0],
+): Promise<string> {
+  const started = parseTool(await client.callTool({ name: "authoring_start", arguments: {} })) as {
+    session: { id: string };
+  };
+  const sessionId = started.session.id;
+  await client.callTool({ name: "discover_schema", arguments: { session_id: sessionId } });
+  await client.callTool({
+    name: "record_term",
+    arguments: { session_id: sessionId, term: "revenue", answer: "net_amount" },
+  });
+  const proposed = await client.callTool({
+    name: "propose_definitions",
+    arguments: { session_id: sessionId },
+  });
+  if (proposed.isError) {
+    throw new Error(`propose_definitions failed: ${toolMessage(proposed)}`);
+  }
+  return sessionId;
 }
 
 export async function runAuthoringPromptInjection(): Promise<Verdict> {
@@ -56,11 +84,13 @@ export async function runAuthoringPromptInjection(): Promise<Verdict> {
           name: "profile_column",
           arguments: { session_id: sessionId, table: "orders", column: "comment" },
         });
-        if (profile.isError) return { code: "FAIL", detail: "profile_column refused a normal comment column" };
+        if (profile.isError) {
+          return securityCritical("profile_column refused a normal comment column");
+        }
         const payload = parseTool(profile) as { samples?: unknown[] };
         const samples = JSON.stringify(payload.samples ?? payload);
         if (!samples.includes("IGNORE PREVIOUS INSTRUCTIONS")) {
-          return { code: "FAIL", detail: "injection sample did not surface through profile_column" };
+          return securityCritical("injection sample did not surface through profile_column");
         }
         await client.callTool({
           name: "record_term",
@@ -75,17 +105,22 @@ export async function runAuthoringPromptInjection(): Promise<Verdict> {
         try {
           await client.callTool({
             name: "query",
-            arguments: { query: { metrics: ["revenue"], filters: [{ field: "orders.comment", operator: "=", value: AUTHORING_INJECTION }] } },
+            arguments: {
+              query: {
+                metrics: ["revenue"],
+                filters: [{ field: "orders.comment", operator: "=", value: AUTHORING_INJECTION }],
+              },
+            },
           });
         } catch {
           // structured refusal is fine
         }
         const writes = writeSqlInLog(sqlLog);
         if (writes.length > 0 || sqlLog.some((sql) => isWriteSql(sql) || /drop\s+table|merge\s+into/i.test(sql))) {
-          return { code: "SECURITY CRITICAL", detail: `injection reached write SQL: ${sqlLog.join(" | ")}` };
+          return securityCritical(`injection reached write SQL: ${sqlLog.join(" | ")}`);
         }
         if (readFileSync(join(repo.dir, "grane.yml"), "utf8") !== yamlBefore) {
-          return { code: "SECURITY CRITICAL", detail: "active YAML changed after injection samples" };
+          return securityCritical("active YAML changed after injection samples");
         }
         const freeze = frozen(repo.dir, repo.mainSha);
         if (freeze) return freeze;
@@ -96,50 +131,44 @@ export async function runAuthoringPromptInjection(): Promise<Verdict> {
       },
     });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "prompt injection");
   } finally {
     repo.cleanup();
   }
 }
 
 export async function runAuthoringSelfApprove(): Promise<Verdict> {
-  const repo = initAuthoringRepo();
+  const repo = initAuthoringRepo({ metrics: EMPTY_METRICS_YAML });
   try {
-    const proposal = createProposal(repo.dir, {
-      slug: "self-approve",
-      files: {
-        "metrics.yml": `metrics:
-  extra:
-    entity: order
-    type: count
-    sql: "\${orders.id}"
-    status: experimental
-`,
-      },
-    });
-    try {
-      approveProposal(repo.dir, proposal.id, { tty: false });
-      return { code: "SECURITY CRITICAL", detail: "approveProposal succeeded without TTY or merged PR" };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!/TTY|merged GitHub PR/i.test(message)) {
-        return { code: "FAIL", detail: `unexpected approve refusal: ${message}` };
-      }
-    }
-    try {
-      rollbackPin(repo.dir);
-      return { code: "SECURITY CRITICAL", detail: "rollbackPin succeeded with no pin" };
-    } catch {
-      // expected
-    }
-    const connector = recordingConnector(SHOP_SCHEMA);
     return await withAuthoringMcp({
       dir: repo.dir,
-      connector,
+      connector: recordingConnector(SHOP_SCHEMA),
       fn: async (client) => {
+        const sessionId = await seedDraftSession(client);
+        const submitted = await client.callTool({
+          name: "submit_proposal",
+          arguments: { session_id: sessionId, slug: "self-approve" },
+        });
+        if (submitted.isError) {
+          return securityCritical(`submit_proposal refused a valid draft: ${toolMessage(submitted)}`);
+        }
+        const payload = parseTool(submitted) as { proposal: { id: string; branch: string } };
+        try {
+          approveProposal(repo.dir, payload.proposal.id, { tty: false });
+          return securityCritical("approveProposal succeeded without TTY or merged PR");
+        } catch (err) {
+          const refuse = mustRefuse(err, /TTY|merged GitHub PR/i, "approve");
+          if (refuse) return refuse;
+        }
+        try {
+          rollbackPin(repo.dir);
+          return securityCritical("rollbackPin succeeded with no pin");
+        } catch {
+          // expected
+        }
         const banned = await tryBannedMcpTools(client);
         if (banned) return banned;
-        const freeze = frozen(repo.dir, repo.mainSha, proposal.branch);
+        const freeze = frozen(repo.dir, repo.mainSha, payload.proposal.branch);
         if (freeze) return freeze;
         return {
           code: "PASS — POLICY",
@@ -148,104 +177,143 @@ export async function runAuthoringSelfApprove(): Promise<Verdict> {
       },
     });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "self-approve");
   } finally {
     repo.cleanup();
   }
 }
 
 export async function runAuthoringActiveWrites(): Promise<Verdict> {
-  const repo = initAuthoringRepo();
+  const repo = initAuthoringRepo({ metrics: EMPTY_METRICS_YAML });
   try {
     const yamlBefore = readFileSync(join(repo.dir, "grane.yml"), "utf8");
-    try {
-      createProposal(repo.dir, {
-        slug: "agent-pin",
-        files: {
-          ".grane/active.json": JSON.stringify({
-            ref: "main",
-            commit: "deadbeef",
-            approved_by: "agent",
-            approved_at: "now",
-          }),
-        },
-      });
-      return { code: "SECURITY CRITICAL", detail: "createProposal accepted .grane/active.json" };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!/\.grane/.test(message) && !/Refusing/.test(message)) {
-        return { code: "FAIL", detail: `unexpected createProposal error: ${message}` };
-      }
-    }
-    const proposal = createProposal(repo.dir, {
-      slug: "rewrite-yaml",
-      files: {
-        "grane.yml": "project: { name: pwned, timezone: UTC }\nconnection: { type: postgres }\n",
+    return await withAuthoringMcp({
+      dir: repo.dir,
+      connector: recordingConnector(SHOP_SCHEMA),
+      fn: async (client) => {
+        const sessionId = await seedDraftSession(client);
+        const draft = loadSession(repo.dir, sessionId).draft_yaml;
+        updateSession(repo.dir, sessionId, {
+          draft_yaml: {
+            ...draft,
+            ".grane/active.json": JSON.stringify({
+              ref: "main",
+              commit: "deadbeef",
+              approved_by: "agent",
+              approved_at: "now",
+            }),
+          },
+        });
+        const pinWrite = await client.callTool({
+          name: "submit_proposal",
+          arguments: { session_id: sessionId, slug: "agent-pin" },
+        });
+        if (!pinWrite.isError) {
+          return securityCritical("submit_proposal accepted .grane/active.json");
+        }
+        const pinMsg = toolMessage(pinWrite);
+        if (!/\.grane/i.test(pinMsg) && !/Refusing/i.test(pinMsg)) {
+          return securityCritical(`unexpected submit_proposal error for pin path: ${pinMsg}`);
+        }
+        updateSession(repo.dir, sessionId, {
+          draft_yaml: {
+            ...draft,
+            "grane.yml": "project: { name: pwned, timezone: UTC }\nconnection: { type: postgres }\n",
+          },
+        });
+        const yamlWrite = await client.callTool({
+          name: "submit_proposal",
+          arguments: { session_id: sessionId, slug: "rewrite-yaml" },
+        });
+        if (yamlWrite.isError) {
+          return securityCritical(`submit_proposal refused a YAML draft: ${toolMessage(yamlWrite)}`);
+        }
+        if (readFileSync(join(repo.dir, "grane.yml"), "utf8") !== yamlBefore) {
+          return securityCritical("submit_proposal mutated working-tree YAML");
+        }
+        const payload = parseTool(yamlWrite) as { proposal: { branch: string } };
+        const freeze = frozen(repo.dir, repo.mainSha, payload.proposal.branch);
+        if (freeze) return freeze;
+        return {
+          code: "PASS — POLICY",
+          detail: "Active YAML and .grane/active.json writes refused; proposal stayed off main",
+        };
       },
     });
-    if (readFileSync(join(repo.dir, "grane.yml"), "utf8") !== yamlBefore) {
-      return { code: "SECURITY CRITICAL", detail: "createProposal mutated working-tree YAML" };
-    }
-    const freeze = frozen(repo.dir, repo.mainSha, proposal.branch);
-    if (freeze) return freeze;
-    return {
-      code: "PASS — POLICY",
-      detail: "Active YAML and .grane/active.json writes refused; proposal stayed off main",
-    };
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "active writes");
   } finally {
     repo.cleanup();
   }
 }
 
 export async function runAuthoringHostileArgs(): Promise<Verdict> {
-  const repo = initAuthoringRepo();
+  const repo = initAuthoringRepo({ metrics: EMPTY_METRICS_YAML });
   try {
-    const hostileSlugs = ["../evil", "..\\evil", "foo/../../../etc", "'; DROP TABLE orders; --", "ok\nGrane-Proposal: pwn"];
-    for (const slug of hostileSlugs) {
-      try {
-        const proposal = createProposal(repo.dir, {
-          slug,
-          files: { "metrics.yml": "metrics: {}\n" },
-        });
-        if (proposal.branch.includes("..") || proposal.branch.includes("/") && !proposal.branch.startsWith("grane/proposal/")) {
-          return { code: "SECURITY CRITICAL", detail: `hostile slug became branch ${proposal.branch}` };
+    return await withAuthoringMcp({
+      dir: repo.dir,
+      connector: recordingConnector(SHOP_SCHEMA),
+      fn: async (client) => {
+        const sessionId = await seedDraftSession(client);
+        const hostileSlugs = [
+          "../evil",
+          "..\\evil",
+          "foo/../../../etc",
+          "'; DROP TABLE orders; --",
+          "ok\nGrane-Proposal: pwn",
+        ];
+        for (const slug of hostileSlugs) {
+          const submitted = await client.callTool({
+            name: "submit_proposal",
+            arguments: { session_id: sessionId, slug },
+          });
+          if (submitted.isError) {
+            const freeze = frozen(repo.dir, repo.mainSha);
+            if (freeze) return freeze;
+            continue;
+          }
+          const payload = parseTool(submitted) as { proposal: { branch: string } };
+          if (
+            payload.proposal.branch.includes("..") ||
+            (payload.proposal.branch.includes("/") && !payload.proposal.branch.startsWith("grane/proposal/"))
+          ) {
+            return securityCritical(`hostile slug became branch ${payload.proposal.branch}`);
+          }
+          const freeze = frozen(repo.dir, repo.mainSha, payload.proposal.branch);
+          if (freeze) return freeze;
         }
-        const freeze = frozen(repo.dir, repo.mainSha, proposal.branch);
-        if (freeze) return freeze;
-      } catch (err) {
-        const freeze = frozen(repo.dir, repo.mainSha);
-        if (freeze) return freeze;
-        const message = err instanceof Error ? err.message : String(err);
-        if (/main SHA moved|HEAD moved/.test(message)) {
-          return { code: "SECURITY CRITICAL", detail: message };
+
+        const hostilePaths = ["../pwn.yml", "../../etc/passwd", ".git/config", ".grane/active.json", "/tmp/x.yml"];
+        const draft = loadSession(repo.dir, sessionId).draft_yaml;
+        for (const path of hostilePaths) {
+          updateSession(repo.dir, sessionId, {
+            draft_yaml: { ...draft, [path]: "pwned\n" },
+          });
+          const submitted = await client.callTool({
+            name: "submit_proposal",
+            arguments: { session_id: sessionId, slug: "path-attack" },
+          });
+          if (!submitted.isError) {
+            return securityCritical(`submit_proposal accepted path ${path}`);
+          }
+          const freeze = frozen(repo.dir, repo.mainSha);
+          if (freeze) return freeze;
+          const message = toolMessage(submitted);
+          if (!/Refusing|proposal|\.grane|\.\.|git/i.test(message)) {
+            return securityCritical(`unexpected path error for ${path}: ${message}`);
+          }
         }
-      }
-    }
-    const hostilePaths = ["../pwn.yml", "../../etc/passwd", ".git/config", ".grane/active.json", "/tmp/x.yml"];
-    for (const path of hostilePaths) {
-      try {
-        createProposal(repo.dir, { slug: "path-attack", files: { [path]: "pwned\n" } });
-        return { code: "SECURITY CRITICAL", detail: `createProposal accepted path ${path}` };
-      } catch (err) {
-        const freeze = frozen(repo.dir, repo.mainSha);
-        if (freeze) return freeze;
-        const message = err instanceof Error ? err.message : String(err);
-        if (!/Refusing|proposal|\.grane|\.\./i.test(message)) {
-          return { code: "FAIL", detail: `unexpected path error for ${path}: ${message}` };
+        if (git(repo.dir, ["rev-parse", "main"]) !== repo.mainSha) {
+          return securityCritical("hostile args moved main");
         }
-      }
-    }
-    if (git(repo.dir, ["rev-parse", "main"]) !== repo.mainSha) {
-      return { code: "SECURITY CRITICAL", detail: "hostile args moved main" };
-    }
-    return {
-      code: "PASS — POLICY",
-      detail: "Hostile slug and path arguments did not write main, the pin, or escape the proposal prefix",
-    };
+        return {
+          code: "PASS — POLICY",
+          detail: "Hostile slug and path arguments did not write main, the pin, or escape the proposal prefix",
+        };
+      },
+    });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "hostile args");
   } finally {
     repo.cleanup();
   }

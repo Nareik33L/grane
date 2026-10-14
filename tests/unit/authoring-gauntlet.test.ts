@@ -11,8 +11,16 @@ import {
   runAuthoringDemoGrain,
   runAuthoringExplorationPolicy,
   runAuthoringHugeSchema,
+  runAuthoringSelectOnlyRole,
   runAuthoringTimeLikeGroupBy,
 } from "../gauntlet/authoring-schema.js";
+import {
+  runAuthoringAuditAssertions,
+  runAuthoringBaseBranchPin,
+  runAuthoringDemoRepoRefuse,
+  runAuthoringReviewMergedProposal,
+  runAuthoringUnmergedPin,
+} from "../gauntlet/authoring-review.js";
 import { runTamperedActivePinGauntlet } from "../gauntlet/active-pin-tamper.js";
 
 describe("V2-14 authoring gauntlet", () => {
@@ -60,6 +68,36 @@ describe("V2-14 authoring gauntlet", () => {
     const verdict = await runAuthoringDemoGrain();
     expect(verdict.code, verdict.detail).toMatch(/^PASS/);
   });
+
+  it("pin/proposal/discovery audit lines are required", async () => {
+    const verdict = await runAuthoringAuditAssertions();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  }, 60_000);
+
+  it("refuses pinning an unmerged proposal commit", async () => {
+    const verdict = await runAuthoringUnmergedPin();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("refuses approve/reject/rollback/pin in a .grane-demo repo", async () => {
+    const verdict = await runAuthoringDemoRepoRefuse();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("SELECT-only role refuses writes and sees partitioned PKs", async () => {
+    const verdict = await runAuthoringSelectOnlyRole();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("first pin is the configured base, not HEAD", async () => {
+    const verdict = await runAuthoringBaseBranchPin();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("V2-13 CLI list/diff/approve/rollback/reject a merged proposal", async () => {
+    const verdict = await runAuthoringReviewMergedProposal();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  }, 60_000);
 
   it("pin tamper table fails closed", async () => {
     const verdict = await runTamperedActivePinGauntlet();

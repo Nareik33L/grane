@@ -87,27 +87,45 @@ export function parseTool(result: { content: unknown; isError?: boolean }): Reco
   return JSON.parse(text.slice(start)) as Record<string, unknown> | unknown[];
 }
 
+export const DEFAULT_AUTHORING_YAML = `project: { name: shop, timezone: UTC }
+connection: { type: postgres, schema: public }
+audit: { enabled: true, fail_closed: true, path: .grane/audit.jsonl }
+entities:
+  order: { table: orders, primary_key: id }
+`;
+
+/** Empty metrics so propose_definitions can draft revenue without colliding. */
+export const EMPTY_METRICS_YAML = "metrics: {}\n";
+
 export interface AuthoringRepo {
   dir: string;
   mainSha: string;
+  baseBranch: string;
   cleanup: () => void;
 }
 
-export function initAuthoringRepo(options?: { yaml?: string }): AuthoringRepo {
+export function securityCritical(detail: string): Verdict {
+  return { code: "SECURITY CRITICAL", detail };
+}
+
+export function thrownSecurity(err: unknown, context?: string): Verdict {
+  const message = err instanceof Error ? err.message : String(err);
+  return securityCritical(context ? `${context}: ${message}` : message);
+}
+
+export function initAuthoringRepo(options?: { yaml?: string; branch?: string; metrics?: string }): AuthoringRepo {
   const dir = mkdtempSync(join(tmpdir(), "grane-gauntlet-authoring-"));
+  const baseBranch = options?.branch ?? "main";
   mkdirSync(join(dir, ".grane"), { recursive: true });
-  git(dir, ["init", "-b", "main"]);
+  git(dir, ["init", "-b", baseBranch]);
   git(dir, ["config", "user.email", "gauntlet@grane.dev"]);
   git(dir, ["config", "user.name", "Grane Gauntlet"]);
   writeFileSync(join(dir, ".gitignore"), ".grane/\n");
-  writeFileSync(
-    join(dir, "grane.yml"),
-    options?.yaml ??
-      "project: { name: shop, timezone: UTC }\nconnection: { type: postgres, schema: public }\nentities:\n  order: { table: orders, primary_key: id }\n",
-  );
+  writeFileSync(join(dir, "grane.yml"), options?.yaml ?? DEFAULT_AUTHORING_YAML);
   writeFileSync(
     join(dir, "metrics.yml"),
-    `metrics:
+    options?.metrics ??
+      `metrics:
   revenue:
     entity: order
     type: sum
@@ -116,24 +134,27 @@ export function initAuthoringRepo(options?: { yaml?: string }): AuthoringRepo {
   );
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-m", "initial"]);
+  const sha = git(dir, ["rev-parse", baseBranch]);
   return {
     dir,
-    mainSha: git(dir, ["rev-parse", "main"]),
+    mainSha: sha,
+    baseBranch,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
 }
 
-export function assertMainUnmoved(dir: string, mainSha: string): Verdict | null {
+export function assertMainUnmoved(dir: string, mainSha: string, baseBranch = "main"): Verdict | null {
   const head = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  if (head !== "main") {
-    return { code: "SECURITY CRITICAL", detail: `HEAD moved to ${head}` };
+  if (head !== baseBranch) {
+    return securityCritical(`HEAD moved to ${head}`);
   }
-  const after = git(dir, ["rev-parse", "main"]);
-  if (after !== mainSha) {
-    return {
-      code: "SECURITY CRITICAL",
-      detail: `main SHA moved from ${mainSha} to ${after}`,
-    };
+  return assertBranchUnmoved(dir, baseBranch, mainSha);
+}
+
+export function assertBranchUnmoved(dir: string, branch: string, sha: string): Verdict | null {
+  const after = git(dir, ["rev-parse", branch]);
+  if (after !== sha) {
+    return securityCritical(`${branch} SHA moved from ${sha} to ${after}`);
   }
   return null;
 }
@@ -141,17 +162,14 @@ export function assertMainUnmoved(dir: string, mainSha: string): Verdict | null 
 export function assertProposalParent(dir: string, branch: string, mainSha: string): Verdict | null {
   const parent = git(dir, ["rev-parse", `${branch}^`]);
   if (parent !== mainSha) {
-    return {
-      code: "SECURITY CRITICAL",
-      detail: `proposal ${branch} parent ${parent} is not original main ${mainSha}`,
-    };
+    return securityCritical(`proposal ${branch} parent ${parent} is not original main ${mainSha}`);
   }
   return null;
 }
 
 export function assertNoPin(dir: string): Verdict | null {
   if (existsSync(join(dir, ACTIVE_PIN_PATH)) || readActivePin(dir)) {
-    return { code: "SECURITY CRITICAL", detail: "pin/active.json was written" };
+    return securityCritical("pin/active.json was written");
   }
   return null;
 }
@@ -159,10 +177,10 @@ export function assertNoPin(dir: string): Verdict | null {
 export function assertPinBytes(dir: string, expected: Buffer): Verdict | null {
   const path = join(dir, ACTIVE_PIN_PATH);
   if (!existsSync(path)) {
-    return { code: "SECURITY CRITICAL", detail: "pin disappeared during authoring" };
+    return securityCritical("pin disappeared during authoring");
   }
   if (!readFileSync(path).equals(expected)) {
-    return { code: "SECURITY CRITICAL", detail: "pin bytes changed during authoring" };
+    return securityCritical("pin bytes changed during authoring");
   }
   return null;
 }
@@ -231,7 +249,7 @@ export async function tryBannedMcpTools(client: Client): Promise<Verdict | null>
     try {
       const result = await client.callTool({ name: banned, arguments: { id: "x" } });
       if (!result.isError) {
-        return { code: "SECURITY CRITICAL", detail: `MCP exposed ${banned}` };
+        return securityCritical(`MCP exposed ${banned}`);
       }
     } catch {
       // unknown tool — expected
@@ -240,7 +258,7 @@ export async function tryBannedMcpTools(client: Client): Promise<Verdict | null>
   const listed = (await client.listTools()).tools.map((tool) => tool.name);
   const leak = listed.filter((name) => /activate|approve|pin|merge|write_active|rollback|rejectProposal/.test(name));
   if (leak.length > 0) {
-    return { code: "SECURITY CRITICAL", detail: `MCP listed banned tools ${leak.join(", ")}` };
+    return securityCritical(`MCP listed banned tools ${leak.join(", ")}`);
   }
   return null;
 }
@@ -248,8 +266,123 @@ export async function tryBannedMcpTools(client: Client): Promise<Verdict | null>
 export function expectCoreAndAuthoring(names: string[]): Verdict | null {
   for (const tool of [...CORE_MCP_TOOLS, ...AUTHORING_MCP_TOOLS]) {
     if (!names.includes(tool)) {
-      return { code: "FAIL", detail: `missing MCP tool ${tool}` };
+      return securityCritical(`missing MCP tool ${tool}`);
     }
+  }
+  return null;
+}
+
+export function mergeProposal(
+  dir: string,
+  proposal: { id: string; branch: string },
+  pr = 1,
+): string {
+  git(dir, [
+    "merge",
+    "--no-ff",
+    "-m",
+    `Merge pull request #${pr} from ${proposal.branch}\n\nGrane-Proposal: ${proposal.id}`,
+    proposal.branch,
+  ]);
+  return git(dir, ["rev-parse", "HEAD"]);
+}
+
+export function runProposalsCli(
+  dir: string,
+  args: string[],
+): { status: number; stdout: string; stderr: string } {
+  const result = spawnSync("npx", ["tsx", "src/cli/index.ts", "-p", dir, ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 60_000,
+    env: process.env,
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+export function readAuditLines(dir: string): Record<string, unknown>[] {
+  const path = join(dir, ".grane", "audit.jsonl");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+export function assertAuditLine(
+  dir: string,
+  match: (event: Record<string, unknown>) => boolean,
+  label: string,
+): Verdict | null {
+  const events = readAuditLines(dir);
+  if (!events.some(match)) {
+    return securityCritical(`missing audit line: ${label}`);
+  }
+  return null;
+}
+
+export function assertPinAudit(dir: string, operation: "load" | "refuse" | "write"): Verdict | null {
+  return assertAuditLine(
+    dir,
+    (event) => event.kind === "pin" && event.operation === operation,
+    `pin ${operation}`,
+  );
+}
+
+export function assertProposalAudit(
+  dir: string,
+  operation: "submit" | "approve" | "reject" | "rollback" | "list" | "diff",
+): Verdict | null {
+  if (operation === "submit") {
+    return assertAuditLine(
+      dir,
+      (event) =>
+        (event.kind === "authoring" &&
+          (event.operation === "proposal_created" || event.operation === "submit_proposal")) ||
+        (event.kind === "proposal" && event.operation === "submit"),
+      "proposal submit",
+    );
+  }
+  return assertAuditLine(
+    dir,
+    (event) => event.kind === "proposal" && event.operation === operation,
+    `proposal ${operation}`,
+  );
+}
+
+export function assertDiscoveryAudit(dir: string): Verdict | null {
+  const events = readAuditLines(dir);
+  const line = events.find((event) => event.kind === "discovery");
+  if (!line) return securityCritical("missing discovery audit line");
+  if (line.read_only !== true) {
+    return securityCritical(`discovery audit missing read_only:true (${JSON.stringify(line)})`);
+  }
+  return null;
+}
+
+export function toolMessage(result: { content: unknown; isError?: boolean }): string {
+  try {
+    const parsed = parseTool(result);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const rec = parsed as { message?: unknown; status?: unknown };
+      if (typeof rec.message === "string") return rec.message;
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    const content = result.content as { type: string; text: string }[] | undefined;
+    return content?.[0]?.text ?? "";
+  }
+}
+
+export function mustRefuse(err: unknown, pattern: RegExp, action: string): Verdict | null {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!pattern.test(message)) {
+    return securityCritical(`unexpected ${action} error: ${message}`);
   }
   return null;
 }

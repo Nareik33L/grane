@@ -1,44 +1,39 @@
 /**
  * Authoring schema traps: exploration policy, huge schemas, time-like
  * group_by stored as number/text, nullable UNIQUE grain, demo-PG composite /
- * keyless / partitioned tables.
+ * keyless / partitioned tables. Grain and temporal cases go through MCP.
  */
-import {
-  generateDraftYaml,
-} from "../../src/authoring/generate.js";
-import {
-  GLOBAL_SNAPSHOT_GROUP_BY,
-  PRIMARY_KEY_SKIP,
-  detectAmbiguities,
-  isForbiddenSemiGroupByColumn,
-  primaryKeyAmbiguityId,
-  semiAdditiveGroupByAmbiguity,
-} from "../../src/authoring/ambiguity.js";
-import { createSession } from "../../src/authoring/session.js";
+import { PRIMARY_KEY_SKIP, primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
+import { loadSession, updateSession } from "../../src/authoring/session.js";
 import {
   applyPrimaryKeys,
   applySingleColumnUniques,
-  grainUniqueColumns,
+  isWriteSql,
   type DatabaseSchema,
 } from "../../src/connectors/types.js";
-import { looksTemporal } from "../../src/connectors/dialect.js";
 import { exampleConfig } from "../fixtures.js";
-import { GraneError } from "../../src/errors.js";
 import {
   assertMainUnmoved,
   assertNoPin,
+  EMPTY_METRICS_YAML,
   git,
   initAuthoringRepo,
   parseTool,
   recordingConnector,
+  securityCritical,
   SHOP_SCHEMA,
+  thrownSecurity,
+  toolMessage,
   withAuthoringMcp,
+  writeSqlInLog,
 } from "./authoring.js";
 import type { Verdict } from "./types.js";
 
 function assertFrozen(dir: string, mainSha: string): Verdict | null {
   return assertMainUnmoved(dir, mainSha) ?? assertNoPin(dir);
 }
+
+type Ambiguity = { id: string; kind: string; candidates: string[] };
 
 /** Demo Postgres V2-11b grain traps, as introspected. */
 export function demoPostgresTrapSchema(): DatabaseSchema {
@@ -76,6 +71,7 @@ export function demoPostgresTrapSchema(): DatabaseSchema {
           { name: "period", dataType: "varchar", nullable: true },
           { name: "as_of", dataType: "text", nullable: true },
           { name: "amount", dataType: "numeric", nullable: true },
+          { name: "on_hand", dataType: "numeric", nullable: true },
         ],
       },
       {
@@ -103,6 +99,11 @@ export function demoPostgresTrapSchema(): DatabaseSchema {
   return schema;
 }
 
+function asAmbiguities(value: unknown): Ambiguity[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => item as Ambiguity);
+}
+
 export async function runAuthoringExplorationPolicy(): Promise<Verdict> {
   const repo = initAuthoringRepo();
   try {
@@ -127,14 +128,14 @@ export async function runAuthoringExplorationPolicy(): Promise<Verdict> {
           arguments: { session_id: sessionId, table: "orders", column: "ssn" },
         });
         if (!excluded.isError) {
-          return { code: "SECURITY CRITICAL", detail: "profile_column allowed an excluded column" };
+          return securityCritical("profile_column allowed an excluded column");
         }
         const otherSchema = await client.callTool({
           name: "profile_column",
           arguments: { session_id: sessionId, table: "secrets", column: "token" },
         });
         if (!otherSchema.isError) {
-          return { code: "SECURITY CRITICAL", detail: "profile_column allowed a table outside the schema" };
+          return securityCritical("profile_column allowed a table outside the schema");
         }
         const freeze = assertFrozen(repo.dir, repo.mainSha);
         if (freeze) return freeze;
@@ -145,7 +146,7 @@ export async function runAuthoringExplorationPolicy(): Promise<Verdict> {
       },
     });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "exploration policy");
   } finally {
     repo.cleanup();
   }
@@ -184,11 +185,11 @@ export async function runAuthoringHugeSchema(): Promise<Verdict> {
           arguments: { session_id: started.session.id },
         });
         if (discovered.isError) {
-          return { code: "FAIL", detail: "discover_schema refused a large schema" };
+          return securityCritical("discover_schema refused a large schema");
         }
         const payload = parseTool(discovered) as { schema?: { tables?: unknown[] } };
         if ((payload.schema?.tables?.length ?? 0) < 200) {
-          return { code: "FAIL", detail: "huge schema was truncated without a bound" };
+          return securityCritical("huge schema was truncated without a bound");
         }
         const freeze = assertFrozen(repo.dir, repo.mainSha);
         if (freeze) return freeze;
@@ -199,7 +200,7 @@ export async function runAuthoringHugeSchema(): Promise<Verdict> {
       },
     });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "huge schema");
   } finally {
     repo.cleanup();
   }
@@ -209,138 +210,261 @@ export async function runAuthoringTimeLikeGroupBy(): Promise<Verdict> {
   const repo = initAuthoringRepo();
   try {
     const schema = demoPostgresTrapSchema();
-    const stream = schema.tables.find((table) => table.name === "event_stream")!;
-    for (const column of ["ts", "period", "as_of"] as const) {
-      const col = stream.columns.find((item) => item.name === column)!;
-      if (!looksTemporal(col.name, col.dataType)) {
-        return {
-          code: "CRITICAL FAIL",
-          detail: `${column} ${col.dataType} passed looksTemporal — must not be a group_by key`,
+    const connector = recordingConnector(schema);
+    return await withAuthoringMcp({
+      dir: repo.dir,
+      connector,
+      fn: async (client) => {
+        const started = parseTool(await client.callTool({ name: "authoring_start", arguments: {} })) as {
+          session: { id: string };
         };
-      }
-      if (!isForbiddenSemiGroupByColumn(schema, "event_stream", "amount", column)) {
+        const sessionId = started.session.id;
+        const discovered = await client.callTool({
+          name: "discover_schema",
+          arguments: { session_id: sessionId },
+        });
+        if (discovered.isError) {
+          return securityCritical(`discover_schema failed: ${toolMessage(discovered)}`);
+        }
+        const listed = asAmbiguities(
+          parseTool(await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } })),
+        );
+        const nonAdditive = listed.find(
+          (item) => item.kind === "non_additive_measure" && item.id.includes("event_stream") && item.id.includes("on_hand"),
+        );
+        if (!nonAdditive) {
+          return securityCritical(`event_stream.on_hand was not asked as non-additive: ${listed.map((a) => a.id).join(",")}`);
+        }
+        const resolved = await client.callTool({
+          name: "resolve_ambiguity",
+          arguments: { session_id: sessionId, id: nonAdditive.id, chosen: "semi" },
+        });
+        if (resolved.isError) {
+          return securityCritical(`resolve semi failed: ${toolMessage(resolved)}`);
+        }
+        const followUp = asAmbiguities(
+          parseTool(await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } })),
+        ).find((item) => item.kind === "semi_additive_group_by" && item.id.includes("event_stream"));
+        if (!followUp) {
+          return securityCritical("semi-additive group_by follow-up missing after resolving event_stream.on_hand as semi");
+        }
+        const leaked = followUp.candidates.filter((c) => /(^|[.])(ts|period|as_of)$/i.test(c) && c !== "[]");
+        if (leaked.length > 0) {
+          return securityCritical(`time-like group_by candidates offered via MCP: ${leaked.join(", ")}`);
+        }
+        for (const column of ["ts", "period", "as_of"] as const) {
+          const chosen = `event_stream.${column}`;
+          const attempt = await client.callTool({
+            name: "resolve_ambiguity",
+            arguments: { session_id: sessionId, id: followUp.id, chosen },
+          });
+          if (!attempt.isError) {
+            return securityCritical(`${column} (${column === "ts" ? "bigint" : column === "period" ? "varchar" : "text"}) was allowed as semi-additive group_by`);
+          }
+        }
+        const freeze = assertFrozen(repo.dir, repo.mainSha);
+        if (freeze) return freeze;
         return {
-          code: "CRITICAL FAIL",
-          detail: `${column} (${col.dataType}) was allowed as semi-additive group_by`,
+          code: "PASS — POLICY",
+          detail: "MCP refused ts bigint, period varchar, as_of text as semi-additive group_by",
         };
-      }
-    }
-    const followUp = semiAdditiveGroupByAmbiguity(schema, "event_stream", "amount");
-    const leaked = followUp.candidates.filter((c) => /ts|period|as_of/.test(c) && c !== GLOBAL_SNAPSHOT_GROUP_BY);
-    if (leaked.length > 0) {
-      return {
-        code: "CRITICAL FAIL",
-        detail: `time-like group_by candidates offered: ${leaked.join(", ")}`,
-      };
-    }
-    const freeze = assertFrozen(repo.dir, repo.mainSha);
-    if (freeze) return freeze;
-    return {
-      code: "PASS — POLICY",
-      detail: "ts bigint, period varchar, as_of text are refused as semi-additive group_by",
-    };
+      },
+    });
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "timelike group_by");
   } finally {
     repo.cleanup();
   }
 }
 
 export async function runAuthoringDemoGrain(): Promise<Verdict> {
-  const repo = initAuthoringRepo();
+  const repo = initAuthoringRepo({ metrics: EMPTY_METRICS_YAML });
   try {
     const schema = demoPostgresTrapSchema();
-    const inventory = schema.tables.find((table) => table.name === "inventory_levels")!;
-    if (grainUniqueColumns(inventory).includes("loc_code")) {
-      return {
-        code: "CRITICAL FAIL",
-        detail: "nullable UNIQUE loc_code was accepted as grain",
-      };
-    }
-    const session = createSession(repo.dir, {
-      warehouse_ref: { type: "postgres", locator: "demo" },
-      resolved_ambiguities: [
-        {
-          id: primaryKeyAmbiguityId("inventory_levels"),
-          kind: "primary_key",
-          question: "nullable unique",
-          candidates: ["inventory_levels.loc_code", PRIMARY_KEY_SKIP],
-          chosen: "inventory_levels.loc_code",
-        },
-        {
-          id: primaryKeyAmbiguityId("event_stream"),
-          kind: "primary_key",
-          question: "keyless",
-          candidates: ["event_stream.payload", PRIMARY_KEY_SKIP],
-          chosen: PRIMARY_KEY_SKIP,
-        },
-      ],
+    const connector = recordingConnector(schema);
+    return await withAuthoringMcp({
+      dir: repo.dir,
+      connector,
+      fn: async (client) => {
+        const started = parseTool(await client.callTool({ name: "authoring_start", arguments: {} })) as {
+          session: { id: string };
+        };
+        const sessionId = started.session.id;
+        const discovered = parseTool(
+          await client.callTool({ name: "discover_schema", arguments: { session_id: sessionId } }),
+        ) as { open_ambiguities?: Ambiguity[]; schema?: { tables?: { name: string }[] } };
+        const listed = asAmbiguities(
+          discovered.open_ambiguities ??
+            parseTool(await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } })),
+        );
+        if (listed.some((item) => item.id.includes("daily_rollups"))) {
+          return securityCritical("partitioned daily_rollups with a single PK asked for a grain");
+        }
+        const locCode = listed.find(
+          (item) => item.id === primaryKeyAmbiguityId("inventory_levels") && item.candidates.includes("inventory_levels.loc_code"),
+        );
+        if (locCode) {
+          const picked = await client.callTool({
+            name: "resolve_ambiguity",
+            arguments: { session_id: sessionId, id: locCode.id, chosen: "inventory_levels.loc_code" },
+          });
+          if (!picked.isError) {
+            const proposed = await client.callTool({
+              name: "propose_definitions",
+              arguments: { session_id: sessionId },
+            });
+            const blob = proposed.isError ? toolMessage(proposed) : JSON.stringify(parseTool(proposed));
+            if (!proposed.isError && /primary_key:\s*loc_code/.test(blob)) {
+              return securityCritical("nullable UNIQUE loc_code was accepted as grain");
+            }
+          }
+        } else {
+          const session = loadSession(repo.dir, sessionId);
+          updateSession(repo.dir, sessionId, {
+            resolved_ambiguities: [
+              ...session.resolved_ambiguities,
+              {
+                id: primaryKeyAmbiguityId("inventory_levels"),
+                kind: "primary_key",
+                question: "nullable unique",
+                candidates: ["inventory_levels.loc_code", PRIMARY_KEY_SKIP],
+                chosen: "inventory_levels.loc_code",
+              },
+            ],
+          });
+        }
+
+        const keyless = listed.find((item) => item.id === primaryKeyAmbiguityId("event_stream"));
+        if (keyless) {
+          const skip = await client.callTool({
+            name: "resolve_ambiguity",
+            arguments: { session_id: sessionId, id: keyless.id, chosen: PRIMARY_KEY_SKIP },
+          });
+          if (skip.isError) {
+            return securityCritical(`could not skip keyless event_stream: ${toolMessage(skip)}`);
+          }
+        }
+        const composite = listed.find((item) => item.id === primaryKeyAmbiguityId("inventory_levels"));
+        if (composite && composite.candidates.includes(PRIMARY_KEY_SKIP)) {
+          await client.callTool({
+            name: "resolve_ambiguity",
+            arguments: { session_id: sessionId, id: composite.id, chosen: PRIMARY_KEY_SKIP },
+          });
+        }
+
+        await client.callTool({
+          name: "record_term",
+          arguments: { session_id: sessionId, term: "revenue", answer: "net_amount" },
+        });
+        const proposed = await client.callTool({
+          name: "propose_definitions",
+          arguments: { session_id: sessionId },
+        });
+        if (proposed.isError) {
+          const message = toolMessage(proposed);
+          if (!/inventory_levels|event_stream|Nothing to propose/i.test(message)) {
+            return securityCritical(`unexpected propose_definitions error: ${message}`);
+          }
+        } else {
+          const payload = parseTool(proposed) as {
+            skipped_tables?: string[];
+            draft_yaml?: Record<string, string>;
+          };
+          const skipped = payload.skipped_tables ?? [];
+          if (!skipped.includes("inventory_levels") || !skipped.includes("event_stream")) {
+            return securityCritical(`composite/keyless not skipped via MCP: ${skipped.join(",")}`);
+          }
+          const yaml = Object.values(payload.draft_yaml ?? loadSession(repo.dir, sessionId).draft_yaml).join("\n");
+          if (/inventory_levels|event_stream/.test(yaml) && /primary_key:\s*loc_code/.test(yaml)) {
+            return securityCritical("nullable UNIQUE loc_code leaked into draft YAML");
+          }
+          if (/table:\s*inventory_levels|table:\s*event_stream/.test(yaml)) {
+            return securityCritical("skipped demo tables leaked into draft YAML");
+          }
+        }
+        const freeze = assertFrozen(repo.dir, repo.mainSha);
+        if (freeze) return freeze;
+        if (git(repo.dir, ["rev-parse", "main"]) !== repo.mainSha) {
+          return securityCritical("grain traps moved main");
+        }
+        return {
+          code: "PASS — POLICY",
+          detail: "MCP: nullable UNIQUE refused as grain; demo PG composite/keyless skipped; partitioned PK kept",
+        };
+      },
     });
-    try {
-      generateDraftYaml({ session, schema, inferred: {} });
-      return { code: "CRITICAL FAIL", detail: "generateDraftYaml accepted nullable UNIQUE as grain" };
-    } catch (err) {
-      if (!(err instanceof GraneError) && !(err instanceof Error)) {
-        return { code: "FAIL", detail: String(err) };
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      if (!/inventory_levels/.test(message)) {
-        return { code: "FAIL", detail: `unexpected generate error: ${message}` };
-      }
-    }
-    const skippedSession = createSession(repo.dir, {
-      warehouse_ref: { type: "postgres", locator: "demo" },
-      resolved_ambiguities: [
-        {
-          id: "amb-revenue-like-orders",
-          kind: "revenue_like_columns",
-          question: "revenue",
-          candidates: ["orders.net_amount"],
-          chosen: "orders.net_amount",
-        },
-        {
-          id: primaryKeyAmbiguityId("inventory_levels"),
-          kind: "primary_key",
-          question: "skip composite",
-          candidates: [PRIMARY_KEY_SKIP],
-          chosen: PRIMARY_KEY_SKIP,
-        },
-        {
-          id: primaryKeyAmbiguityId("event_stream"),
-          kind: "primary_key",
-          question: "skip keyless",
-          candidates: [PRIMARY_KEY_SKIP],
-          chosen: PRIMARY_KEY_SKIP,
-        },
-      ],
-    });
-    const { files, skipped_tables } = generateDraftYaml({ session: skippedSession, schema, inferred: {} });
-    if (!skipped_tables.includes("inventory_levels") || !skipped_tables.includes("event_stream")) {
-      return {
-        code: "CRITICAL FAIL",
-        detail: `composite/keyless not skipped: ${skipped_tables.join(",")}`,
-      };
-    }
-    const yaml = `${files["entities.yml"] ?? ""}\n${files["metrics.yml"] ?? ""}`;
-    if (/inventory_levels|event_stream/.test(yaml)) {
-      return { code: "CRITICAL FAIL", detail: "skipped demo tables leaked into draft YAML" };
-    }
-    const detected = detectAmbiguities({ schema, relationships: {}, session: skippedSession });
-    const openPk = detected.filter((item) => item.kind === "primary_key").map((item) => item.id);
-    if (openPk.some((id) => id.includes("daily_rollups"))) {
-      return { code: "FAIL", detail: "partitioned daily_rollups with a single PK asked for a grain" };
-    }
-    const freeze = assertFrozen(repo.dir, repo.mainSha);
-    if (freeze) return freeze;
-    if (git(repo.dir, ["rev-parse", "main"]) !== repo.mainSha) {
-      return { code: "SECURITY CRITICAL", detail: "grain traps moved main" };
-    }
-    return {
-      code: "PASS — POLICY",
-      detail: "Nullable UNIQUE refused as grain; demo PG composite/keyless skipped; partitioned PK kept",
-    };
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return thrownSecurity(err, "demo grain");
+  } finally {
+    repo.cleanup();
+  }
+}
+
+/**
+ * SELECT-only warehouse role: discovery/profile may only issue SELECT, and
+ * introspected PKs (including partitioned parents) stay visible.
+ */
+export async function runAuthoringSelectOnlyRole(): Promise<Verdict> {
+  const repo = initAuthoringRepo();
+  const sqlLog: string[] = [];
+  try {
+    const schema = demoPostgresTrapSchema();
+    const connector = recordingConnector(schema, { sqlLog });
+    return await withAuthoringMcp({
+      dir: repo.dir,
+      connector,
+      fn: async (client, kernel) => {
+        const started = parseTool(await client.callTool({ name: "authoring_start", arguments: {} })) as {
+          session: { id: string };
+        };
+        const sessionId = started.session.id;
+        const discovered = await client.callTool({
+          name: "discover_schema",
+          arguments: { session_id: sessionId },
+        });
+        if (discovered.isError) {
+          return securityCritical(`SELECT-only discover_schema failed: ${toolMessage(discovered)}`);
+        }
+        const payload = parseTool(discovered) as {
+          schema?: { tables?: { name: string; columns?: { name: string }[] }[] };
+        };
+        const rollups = payload.schema?.tables?.find((table) => table.name === "daily_rollups");
+        if (!rollups) {
+          return securityCritical("SELECT-only role did not see partitioned daily_rollups");
+        }
+        const profile = await client.callTool({
+          name: "profile_column",
+          arguments: { session_id: sessionId, table: "orders", column: "net_amount" },
+        });
+        if (profile.isError) {
+          return securityCritical(`SELECT-only profile_column failed: ${toolMessage(profile)}`);
+        }
+        const writes = writeSqlInLog(sqlLog);
+        if (writes.length > 0) {
+          return securityCritical(`SELECT-only role executed write SQL: ${writes.join(" | ")}`);
+        }
+        if (sqlLog.some((sql) => isWriteSql(sql))) {
+          return securityCritical(`SELECT-only role issued write SQL: ${sqlLog.join(" | ")}`);
+        }
+        try {
+          await kernel.getConnector().query("INSERT INTO orders (id) VALUES (1)");
+          return securityCritical("SELECT-only connector accepted INSERT");
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!/write SQL|INSERT|Refusing/i.test(message)) {
+            return securityCritical(`unexpected write refusal: ${message}`);
+          }
+        }
+        const freeze = assertFrozen(repo.dir, repo.mainSha);
+        if (freeze) return freeze;
+        return {
+          code: "PASS — POLICY",
+          detail: "SELECT-only role introspected partitioned PKs and refused writes during discovery",
+        };
+      },
+    });
+  } catch (err) {
+    return thrownSecurity(err, "SELECT-only role");
   } finally {
     repo.cleanup();
   }

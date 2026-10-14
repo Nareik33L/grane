@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { generateDraftYaml } from "./generate.js";
 import type { GraneKernel } from "../kernel.js";
@@ -208,6 +208,17 @@ export async function resolveAmbiguity(
   });
 }
 
+/**
+ * Stop preview writes from escaping the temp dir (`..` / absolute).
+ * `.git` and `.grane` are left to `createProposal` / `gitPath`.
+ */
+function assertDraftYamlPath(rel: string): void {
+  const normalised = rel.replaceAll("\\", "/");
+  if (!rel || isAbsolute(rel) || isAbsolute(normalised) || normalised.split("/").includes("..")) {
+    throw configError(`Refusing to commit path "${rel}" onto a proposal branch.`);
+  }
+}
+
 function unresolvedFlag(open: OpenAmbiguity[]): {
   unresolved_ambiguities: OpenAmbiguity[];
   unresolved: boolean;
@@ -309,7 +320,12 @@ export function previewYaml(kernel: GraneKernel, sessionId: string): {
       }),
     );
     for (const [rel, contents] of Object.entries(session.draft_yaml)) {
-      const path = join(tmp, rel);
+      assertDraftYamlPath(rel);
+      const path = resolve(tmp, rel);
+      const fromTmp = relative(tmp, path).replaceAll(sep, "/");
+      if (fromTmp.startsWith("..") || isAbsolute(fromTmp)) {
+        throw configError(`Refusing to commit path "${rel}" onto a proposal branch.`);
+      }
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, contents);
     }
@@ -342,6 +358,9 @@ export function submitProposal(
   const session = loadSession(projectDir, sessionId);
   if (Object.keys(session.draft_yaml).length === 0) {
     throw configError("No draft YAML. Call propose_definitions first.");
+  }
+  for (const rel of Object.keys(session.draft_yaml)) {
+    assertDraftYamlPath(rel);
   }
   if (session.open_ambiguities.length > 0) {
     const listed = session.open_ambiguities

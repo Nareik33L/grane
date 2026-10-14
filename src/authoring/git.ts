@@ -1120,6 +1120,12 @@ export function approveProposal(
     proposal: approval.proposal_id,
     previous_commit: previous,
   });
+  recordProposalLine(projectDir, {
+    operation: "approve",
+    proposal_id: approval.proposal_id,
+    branch: approval.proposal_branch,
+    commit: pin.commit,
+  });
   const mainAfter = baseHeadsSha(root, projectDir);
   if (mainAfter !== mainBefore) {
     throw configError("Internal error: approve moved the configured base branch. Refusing.");
@@ -1222,6 +1228,11 @@ export function rollbackPin(
     approved_at: new Date().toISOString(),
     proposal: pin.proposal,
     previous_commit: pin.commit,
+  });
+  recordProposalLine(projectDir, {
+    operation: "rollback",
+    commit: next.commit,
+    reason: options.to ? `to ${resolved}` : undefined,
   });
   const headAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   const mainAfter = baseHeadsSha(root, projectDir);
