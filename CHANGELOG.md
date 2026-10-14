@@ -25,7 +25,11 @@
   the relationship graph) and surfaces them as questions through
   `list_ambiguities` / `resolve_ambiguity`. It asks rather than guesses.
   Non-additive measures default to safe: `additive: none` is refused or asked,
-  never emitted as a governed SUM.
+  never emitted as a governed SUM. Open ambiguities block `submit_proposal`
+  and are flagged on `propose_definitions` / `preview_yaml`. Resolving a
+  snapshot as `semi` also asks for `group_by` so drafts pass
+  `vacuous_semi_additive_group_by`. `submit_proposal` refuses invalid preview
+  YAML.
 
 ## 0.7.0
 

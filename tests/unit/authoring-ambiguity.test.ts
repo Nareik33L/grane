@@ -6,6 +6,7 @@ import * as publicApi from "../../src/index.js";
 import {
   AMBIGUITY_KINDS,
   FANOUT_CANDIDATES,
+  GLOBAL_SNAPSHOT_GROUP_BY,
   NON_ADDITIVE_CANDIDATES,
   dateColumnsAmbiguityId,
   detectAmbiguities,
@@ -13,15 +14,21 @@ import {
   mergeAmbiguities,
   nonAdditiveAmbiguityId,
   parseNonAdditiveAmbiguityId,
+  quoteIdent,
+  quoteTableColumn,
   resolvedTimeColumn,
   revenueLikeAmbiguityId,
+  semiAdditiveGroupById,
 } from "../../src/authoring/ambiguity.js";
+import { createSession, updateSession } from "../../src/authoring/session.js";
 import {
   authoringStart,
   discoverSchema,
   listAmbiguities,
+  previewYaml,
   proposeDefinitions,
   resolveAmbiguity,
+  submitProposal,
 } from "../../src/authoring/tools.js";
 import { getDialect } from "../../src/connectors/dialect.js";
 import type { DatabaseSchema, ExecutedRows, WarehouseConnector } from "../../src/connectors/types.js";
@@ -210,7 +217,7 @@ describe("revenue-like columns", () => {
     await discoverSchema(k, sessionId);
     const listed = listAmbiguities(k, sessionId);
     const amb = listed.find((item) => item.kind === "revenue_like_columns")!;
-    resolveAmbiguity(k, sessionId, amb.id, "orders.net_amount");
+    await resolveAmbiguity(k, sessionId, amb.id, "orders.net_amount");
     const proposed = await proposeDefinitions(k, sessionId);
     expect(proposed.draft_yaml["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
     expect(proposed.draft_yaml["metrics.yml"]).not.toMatch(/gross_amount/);
@@ -248,12 +255,15 @@ describe("date columns", () => {
     const listed = listAmbiguities(k, sessionId);
     const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
     const dates = listed.find((item) => item.kind === "date_columns")!;
-    resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
     const guessed = await proposeDefinitions(k, sessionId);
+    expect(guessed.unresolved).toBe(true);
+    expect(guessed.unresolved_ambiguities.some((item) => item.kind === "date_columns")).toBe(true);
+    expect(guessed.warning).toMatch(/submit_proposal will refuse/);
     expect(guessed.draft_yaml["metrics.yml"]).not.toMatch(/time_dimension/);
     expect(guessed.draft_yaml["metrics.yml"]).not.toMatch(/created_at/);
 
-    resolveAmbiguity(k, sessionId, dates.id, "orders.completed_at");
+    await resolveAmbiguity(k, sessionId, dates.id, "orders.completed_at");
     const resolved = await proposeDefinitions(k, sessionId);
     expect(resolved.draft_yaml["metrics.yml"]).toMatch(/time_dimension:\s*\$\{orders\.completed_at\}/);
     expect(resolved.draft_yaml["metrics.yml"]).not.toMatch(/created_at/);
@@ -285,32 +295,58 @@ describe("non-additive measures", () => {
     const listed = listAmbiguities(k, sessionId);
     const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
     const snapshot = listed.find((item) => item.kind === "non_additive_measure")!;
-    resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
-    expect(() => resolveAmbiguity(k, sessionId, snapshot.id, "none")).toThrow(GraneError);
-    expect(() => resolveAmbiguity(k, sessionId, snapshot.id, "none")).toThrow(/not a candidate/);
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(resolveAmbiguity(k, sessionId, snapshot.id, "none")).rejects.toBeInstanceOf(GraneError);
+    await expect(resolveAmbiguity(k, sessionId, snapshot.id, "none")).rejects.toThrow(/not a candidate/);
 
     const unresolved = await proposeDefinitions(k, sessionId);
     expect(unresolved.draft_yaml["metrics.yml"]).not.toMatch(/balance/);
     expect(unresolved.draft_yaml["metrics.yml"]).not.toMatch(/additive:\s*none/);
 
-    resolveAmbiguity(k, sessionId, snapshot.id, "unsupported");
+    await resolveAmbiguity(k, sessionId, snapshot.id, "unsupported");
     const refused = await proposeDefinitions(k, sessionId);
     expect(refused.draft_yaml["metrics.yml"]).not.toMatch(/balance/);
     expect(refused.draft_yaml["metrics.yml"]).not.toMatch(/additive:\s*none/);
   });
 
-  it("emits additive: semi when chosen, never additive: none", async () => {
+  it("asks for group_by after semi; emitted YAML validates (not vacuous_semi_additive_group_by)", async () => {
     const dir = tempDir();
     const k = kernelFor(dir, nonAdditiveSchema);
     const sessionId = authoringStart(k).session.id;
     await discoverSchema(k, sessionId);
     const listed = listAmbiguities(k, sessionId);
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
     const snapshot = listed.find((item) => item.kind === "non_additive_measure")!;
-    resolveAmbiguity(k, sessionId, snapshot.id, "semi");
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await resolveAmbiguity(k, sessionId, snapshot.id, "semi");
+    const follow = listAmbiguities(k, sessionId).find((item) => item.kind === "semi_additive_group_by");
+    expect(follow).toMatchObject({
+      id: semiAdditiveGroupById("inventory", "balance"),
+      candidates: expect.arrayContaining([GLOBAL_SNAPSHOT_GROUP_BY]),
+    });
+    expect(follow?.candidates).not.toContain("entity");
+    expect(follow?.candidates).not.toContain("inventory.id");
+    expect(follow?.question).toContain(quoteTableColumn("inventory", "balance"));
+    expect(follow?.question).toMatch(/vacuous_semi_additive_group_by/);
+    assertQuestionHasNoSamples(follow!.question);
+
+    const beforeGroup = await proposeDefinitions(k, sessionId);
+    expect(beforeGroup.unresolved).toBe(true);
+    expect(beforeGroup.draft_yaml["metrics.yml"]).not.toMatch(/balance/);
+
+    await resolveAmbiguity(k, sessionId, follow!.id, GLOBAL_SNAPSHOT_GROUP_BY);
     const proposed = await proposeDefinitions(k, sessionId);
     expect(proposed.draft_yaml["metrics.yml"]).toMatch(/sql:\s*\$\{inventory\.balance\}/);
     expect(proposed.draft_yaml["metrics.yml"]).toMatch(/additive:\s*semi/);
+    expect(proposed.draft_yaml["metrics.yml"]).toMatch(/group_by:\s*\[\]/);
     expect(proposed.draft_yaml["metrics.yml"]).not.toMatch(/additive:\s*none/);
+    expect(proposed.draft_yaml["metrics.yml"]).not.toMatch(/group_by:\s*entity/);
+
+    const preview = previewYaml(k, sessionId);
+    expect(preview.validation.ok).toBe(true);
+    expect(preview.validation.issues.some((issue) => issue.code === "vacuous_semi_additive_group_by")).toBe(
+      false,
+    );
   });
 });
 
@@ -329,6 +365,8 @@ describe("fanout joins", () => {
       candidates: [...FANOUT_CANDIDATES],
     });
     expect(amb?.question).toMatch(/multiplies rows/i);
+    expect(amb?.question).toContain(quoteIdent("customers"));
+    expect(amb?.question).toContain(quoteIdent("orders"));
     expect(amb?.question).toMatch(/will not guess/i);
     assertQuestionHasNoSamples(amb!.question);
   });
@@ -356,6 +394,26 @@ describe("fanout joins", () => {
     }
   });
 
+  it("omits unresolved and do_not_join fan-out; preaggregate writes the relationship", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, fanoutSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    const fanout = listed.find((item) => item.kind === "fanout_join")!;
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    const unresolved = await proposeDefinitions(k, sessionId);
+    expect(unresolved.draft_yaml["relationships.yml"] ?? "").not.toMatch(/customers/);
+    expect(unresolved.unresolved).toBe(true);
+
+    await resolveAmbiguity(k, sessionId, fanout.id, "preaggregate");
+    const preagg = await proposeDefinitions(k, sessionId);
+    expect(preagg.draft_yaml["relationships.yml"]).toMatch(/orders_to_customers|customers/);
+    expect(preagg.draft_yaml["relationships.yml"]).toMatch(/preaggregate/);
+    expect(preagg.unresolved).toBe(false);
+  });
+
   it("omits a do_not_join relationship from draft YAML", async () => {
     const dir = tempDir();
     const k = kernelFor(dir, fanoutSchema);
@@ -364,8 +422,8 @@ describe("fanout joins", () => {
     const listed = listAmbiguities(k, sessionId);
     const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
     const fanout = listed.find((item) => item.kind === "fanout_join")!;
-    resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
-    resolveAmbiguity(k, sessionId, fanout.id, "do_not_join");
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await resolveAmbiguity(k, sessionId, fanout.id, "do_not_join");
     const proposed = await proposeDefinitions(k, sessionId);
     expect(proposed.draft_yaml["relationships.yml"] ?? "").not.toMatch(/customers/);
   });
@@ -380,6 +438,37 @@ describe("merge and samples", () => {
     const after = mergeAmbiguities([], [{ id: detected[0]!.id }], detected);
     expect(after.map((item) => item.id)).not.toContain(detected[0]!.id);
     expect(after).toHaveLength(detected.length - 1);
+  });
+
+  it("quotes identifiers in question text", () => {
+    const found = detectAmbiguities({ schema: nonAdditiveSchema });
+    const revenue = found.find((item) => item.kind === "revenue_like_columns")!;
+    const dates = detectAmbiguities({ schema: datesSchema }).find((item) => item.kind === "date_columns")!;
+    const snapshot = found.find((item) => item.kind === "non_additive_measure")!;
+    expect(revenue.question).toContain(quoteIdent("orders"));
+    expect(dates.question).toContain(quoteIdent("orders"));
+    expect(snapshot.question).toContain(quoteTableColumn("inventory", "balance"));
+  });
+
+  it("resolve_ambiguity requires a non-empty candidate list", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, revenueSchema);
+    const created = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+    });
+    updateSession(dir, created.id, {
+      open_ambiguities: [
+        {
+          id: "amb-empty",
+          kind: "revenue_like_columns",
+          question: `Which column on ${quoteIdent("orders")} is governed revenue?`,
+          candidates: [],
+        },
+      ],
+    });
+    await expect(resolveAmbiguity(k, created.id, "amb-empty", "orders.net_amount")).rejects.toThrow(
+      /no candidates/i,
+    );
   });
 
   it("never embeds sample values, tokens, or credentials in question text", () => {
@@ -401,6 +490,69 @@ describe("merge and samples", () => {
         expect(candidate).not.toContain(SECRET_SAMPLE);
         expect(candidate).not.toContain(SECRET_PASSWORD);
       }
+    }
+  });
+});
+
+describe("unresolved ambiguities and invalid drafts", () => {
+  it("flags open ambiguities on propose_definitions and preview_yaml; submit_proposal refuses with the list", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, fanoutSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    const fanout = listed.find((item) => item.kind === "fanout_join")!;
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    const proposed = await proposeDefinitions(k, sessionId);
+    expect(proposed.unresolved).toBe(true);
+    expect(proposed.unresolved_ambiguities.map((item) => item.id)).toContain(fanout.id);
+    expect(proposed.warning).toMatch(/submit_proposal will refuse/);
+    expect(proposed.warning).toContain(fanout.id);
+
+    const preview = previewYaml(k, sessionId);
+    expect(preview.unresolved).toBe(true);
+    expect(preview.unresolved_ambiguities.map((item) => item.id)).toContain(fanout.id);
+    expect(preview.warning).toMatch(/submit_proposal will refuse/);
+
+    try {
+      submitProposal(k, sessionId);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).refusal.status).toBe("config_error");
+      expect((err as GraneError).message).toMatch(/Unresolved ambiguities/);
+      expect((err as GraneError).message).toContain(fanout.id);
+      expect((err as GraneError).refusal.details).toMatchObject({
+        unresolved_ambiguities: expect.arrayContaining([expect.objectContaining({ id: fanout.id })]),
+      });
+    }
+  });
+
+  it("submit_proposal refuses when preview YAML does not validate", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, nonAdditiveSchema);
+    const created = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+    });
+    updateSession(dir, created.id, {
+      open_ambiguities: [],
+      draft_yaml: {
+        "entities.yml": "entities:\n  inventory:\n    table: inventory\n    primary_key: id\n",
+        "metrics.yml":
+          "metrics:\n  balance:\n    entity: inventory\n    type: sum\n    sql: ${inventory.balance}\n" +
+          "    time_dimension: ${inventory.snapshot_at}\n    additive: semi\n    status: experimental\n",
+      },
+    });
+    try {
+      submitProposal(k, created.id);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).refusal.status).toBe("config_error");
+      expect((err as GraneError).message).toMatch(/does not validate/i);
+      const issues = ((err as GraneError).refusal.details as { issues?: { code: string }[] } | undefined)?.issues;
+      expect(issues?.some((issue) => issue.code === "vacuous_semi_additive_group_by")).toBe(true);
     }
   });
 });

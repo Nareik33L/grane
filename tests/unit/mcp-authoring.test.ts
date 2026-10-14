@@ -427,10 +427,43 @@ describe("authoring MCP tools", () => {
       const draft = (proposed.draft_yaml as Record<string, string> | undefined) ?? loadSession(dir, sessionId).draft_yaml;
       expect(draft["metrics.yml"]).toMatch(/status:\s*experimental/);
       expect(draft["metrics.yml"]).not.toContain(SECRET_SAMPLE);
+      expect(proposed.unresolved).toBe(true);
+      expect(proposed.warning).toMatch(/submit_proposal will refuse/);
 
       const preview = parseTool(await client.callTool({ name: "preview_yaml", arguments: { session_id: sessionId } })) as Record<string, unknown>;
       expect(preview.files).toBeTruthy();
       expect((preview.validation as { ok: boolean }).ok).toBeDefined();
+      expect(preview.unresolved).toBe(true);
+
+      const blocked = await client.callTool({
+        name: "submit_proposal",
+        arguments: { session_id: sessionId, slug: "add-gmv" },
+      });
+      expect(blocked.isError).toBe(true);
+      expect((parseTool(blocked) as { message: string }).message).toMatch(/Unresolved ambiguities/);
+
+      let remaining = items.filter((item) => item.id !== amb!.id);
+      for (const item of remaining) {
+        const chosen = pickResolvedCandidate(item);
+        await client.callTool({
+          name: "resolve_ambiguity",
+          arguments: { session_id: sessionId, id: item.id, chosen },
+        });
+      }
+      remaining = parseTool(
+        await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }),
+      ) as { id: string; kind: string; candidates: string[] }[];
+      for (const item of remaining) {
+        await client.callTool({
+          name: "resolve_ambiguity",
+          arguments: { session_id: sessionId, id: item.id, chosen: pickResolvedCandidate(item) },
+        });
+      }
+      await client.callTool({ name: "propose_definitions", arguments: { session_id: sessionId } });
+      const previewReady = parseTool(
+        await client.callTool({ name: "preview_yaml", arguments: { session_id: sessionId } }),
+      ) as Record<string, unknown>;
+      expect(previewReady.unresolved).toBe(false);
 
       await expect(k.query({ metrics: ["gmv"] })).rejects.toBeInstanceOf(GraneError);
       await expect(k.query({ metrics: ["gmv"] })).rejects.toMatchObject({
@@ -583,15 +616,25 @@ async function seedSession(client: Client, level: SeedLevel): Promise<string> {
   if (level === "session") return sessionId;
   await client.callTool({ name: "discover_schema", arguments: { session_id: sessionId } });
   if (level === "discovered") return sessionId;
-  const listed = parseTool(
+  let listed = parseTool(
     await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }),
-  ) as { id: string; candidates: string[] }[];
-  const amb = listed.find((item) => item.candidates.includes("orders.net_amount"));
-  if (!amb) throw new Error("expected a revenue-like ambiguity for orders.net_amount");
-  await client.callTool({
-    name: "resolve_ambiguity",
-    arguments: { session_id: sessionId, id: amb.id, chosen: "orders.net_amount" },
-  });
+  ) as { id: string; kind: string; candidates: string[] }[];
+  let guard = 0;
+  while (listed.length > 0) {
+    if (guard++ > 20) throw new Error("too many ambiguity resolve rounds");
+    const item = listed[0]!;
+    const chosen = pickResolvedCandidate(item);
+    const resolved = await client.callTool({
+      name: "resolve_ambiguity",
+      arguments: { session_id: sessionId, id: item.id, chosen },
+    });
+    if (resolved.isError) {
+      throw new Error(`failed to resolve ${item.id} as ${chosen}`);
+    }
+    listed = parseTool(
+      await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }),
+    ) as { id: string; kind: string; candidates: string[] }[];
+  }
   await client.callTool({
     name: "record_term",
     arguments: { session_id: sessionId, term: "gmv", answer: "Gross merchandise value from orders." },
@@ -599,6 +642,16 @@ async function seedSession(client: Client, level: SeedLevel): Promise<string> {
   if (level === "resolved") return sessionId;
   await client.callTool({ name: "propose_definitions", arguments: { session_id: sessionId } });
   return sessionId;
+}
+
+function pickResolvedCandidate(item: { kind: string; candidates: string[] }): string {
+  if (item.candidates.includes("orders.net_amount")) return "orders.net_amount";
+  if (item.kind === "non_additive_measure" && item.candidates.includes("unsupported")) return "unsupported";
+  if (item.candidates.includes("do_not_join")) return "do_not_join";
+  if (item.candidates.includes("[]")) return "[]";
+  const first = item.candidates[0];
+  if (!first) throw new Error(`ambiguity ${item.kind} has no candidates`);
+  return first;
 }
 
 function successArgs(tool: AuthoringMcpTool, sessionId: string): Record<string, unknown> {
@@ -696,6 +749,43 @@ describe("exactly one audit line per authoring tool", () => {
       expect(line.refusal).toMatchObject({ status: expect.any(String), message: expect.any(String) });
       expect(JSON.stringify(line)).not.toContain(SECRET_SAMPLE);
       expect(after.filter((event) => event.kind === "discovery")).toHaveLength(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it("submit_proposal refuses open ambiguities with the list and one audit line", async () => {
+    const dir = initRepo();
+    const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "stdio" });
+    try {
+      const sessionId = await seedSession(client, "discovered");
+      await client.callTool({
+        name: "resolve_ambiguity",
+        arguments: { session_id: sessionId, id: "amb-revenue-like-orders", chosen: "orders.net_amount" },
+      });
+      await client.callTool({ name: "propose_definitions", arguments: { session_id: sessionId } });
+      const before = readAudit(dir);
+      const result = await client.callTool({
+        name: "submit_proposal",
+        arguments: { session_id: sessionId, slug: "blocked" },
+      });
+      expect(result.isError).toBe(true);
+      const payload = parseTool(result) as {
+        status: string;
+        message: string;
+        details?: { unresolved_ambiguities?: { id: string }[] };
+      };
+      expect(payload.status).toBe("config_error");
+      expect(payload.message).toMatch(/Unresolved ambiguities/);
+      expect(payload.message).toMatch(/amb-fanout-/);
+      expect(payload.details?.unresolved_ambiguities?.length).toBeGreaterThan(0);
+      const after = readAudit(dir);
+      expect(after).toHaveLength(before.length + 1);
+      const line = after[after.length - 1]!;
+      expect(line.kind).toBe("authoring");
+      expect(line.operation).toBe("submit_proposal");
+      expect(line.refusal).toMatchObject({ status: "config_error" });
+      expect(JSON.stringify(line)).not.toContain(SECRET_SAMPLE);
     } finally {
       await close();
     }
