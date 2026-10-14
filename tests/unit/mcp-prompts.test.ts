@@ -90,6 +90,26 @@ describe("authoring MCP prompts gating", () => {
     expect(await listPromptNames(k, { transport: "http" })).toEqual([]);
   });
 
+  it("anonymous HTTP caller is refused prompts/get for the setup prompt", async () => {
+    const dir = tempDir();
+    const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "http" });
+    try {
+      let listed: string[] = [];
+      try {
+        listed = (await client.listPrompts()).prompts.map((prompt) => prompt.name);
+      } catch {
+        listed = [];
+      }
+      expect(listed).not.toContain(SETUP_GRANE_PROMPT_NAME);
+
+      await expect(client.getPrompt({ name: SETUP_GRANE_PROMPT_NAME })).rejects.toThrow(
+        /prompt|not found|unknown|invalid|Method not found/i,
+      );
+    } finally {
+      await close();
+    }
+  });
+
   it("prompts/list is hidden from anonymous HTTP callers exactly like tools/list", async () => {
     const dir = tempDir();
     const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "http" });

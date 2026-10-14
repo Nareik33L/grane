@@ -9,7 +9,7 @@ import { loadConfig } from "../config/load.js";
 import { validateModel } from "../validate/validate.js";
 import { SemanticModel } from "../model/model.js";
 import type { DatabaseSchema } from "../connectors/types.js";
-import { isNumericType } from "../connectors/dialect.js";
+import { parseColumnRef } from "../model/refs.js";
 import {
   createSession,
   loadSession,
@@ -19,8 +19,14 @@ import {
   type OpenAmbiguity,
 } from "./session.js";
 import { createProposal, githubPrPlan, type GitHubPrPlan, type Proposal } from "./git.js";
-
-const AMOUNT_NAME = /(amount|revenue|total|price|sales|net|gross)/i;
+import {
+  detectAmbiguities,
+  fanoutAmbiguityId,
+  looksNonAdditive,
+  mergeAmbiguities,
+  parseNonAdditiveAmbiguityId,
+  resolvedTimeColumn,
+} from "./ambiguity.js";
 
 export function requireProjectDir(kernel: GraneKernel): string {
   if (!kernel.projectDir) {
@@ -57,23 +63,16 @@ function publicSchema(schema: DatabaseSchema) {
   };
 }
 
-function seedRevenueAmbiguities(schema: DatabaseSchema, existing: OpenAmbiguity[]): OpenAmbiguity[] {
-  if (existing.some((item) => item.kind === "revenue_like_columns")) return existing;
-  const candidates = schema.tables.flatMap((table) =>
-    table.columns
-      .filter((column) => isNumericType(column.dataType) && AMOUNT_NAME.test(column.name))
-      .map((column) => `${table.name}.${column.name}`),
+function seedAmbiguities(
+  schema: DatabaseSchema,
+  relationships: Record<string, { from: string; to: string; type: string }>,
+  session: AuthoringSession,
+): OpenAmbiguity[] {
+  return mergeAmbiguities(
+    session.open_ambiguities,
+    session.resolved_ambiguities,
+    detectAmbiguities({ schema, relationships }),
   );
-  if (candidates.length < 2) return existing;
-  return [
-    ...existing,
-    {
-      id: "amb-revenue-like",
-      kind: "revenue_like_columns",
-      question: "Which column is governed revenue?",
-      candidates,
-    },
-  ];
 }
 
 export function authoringStart(kernel: GraneKernel): { session: AuthoringSession } {
@@ -103,7 +102,7 @@ export async function discoverSchema(
   const schema = await discovery.introspectSchema();
   const relationships = await discovery.inferRelationships(schema);
   const session = loadSession(projectDir, sessionId);
-  const open_ambiguities = seedRevenueAmbiguities(schema, session.open_ambiguities);
+  const open_ambiguities = seedAmbiguities(schema, relationships, session);
   const snapshot_hash = hashDiscoverySnapshot({ schema: publicSchema(schema), relationships });
   updateSession(projectDir, sessionId, {
     discovered_snapshot_hash: snapshot_hash,
@@ -186,33 +185,54 @@ export async function proposeDefinitions(kernel: GraneKernel, sessionId: string)
     entities[table] = { table, primary_key: pk };
   };
 
-  const addMetric = (name: string, table: string, column: string, description?: string) => {
+  const addMetric = (
+    name: string,
+    table: string,
+    column: string,
+    description?: string,
+    additive?: "semi",
+  ) => {
     addEntity(table);
-    const time =
-      schema.tables
-        .find((item) => item.name === table)
-        ?.columns.find((item) => /(_at|date|time)$/i.test(item.name))?.name ?? null;
+    const time = resolvedTimeColumn(session, schema, table);
     metrics[name] = {
       entity: table,
       type: "sum",
       sql: `\${${table}.${column}}`,
       status: "experimental",
+      ...(additive ? { additive } : {}),
       ...(description ? { description } : {}),
       ...(time ? { time_dimension: `\${${table}.${time}}` } : {}),
     };
   };
 
   for (const resolved of session.resolved_ambiguities) {
+    if (resolved.kind === "fanout_join") continue;
+    if (resolved.kind === "date_columns") continue;
+    if (resolved.kind === "non_additive_measure") {
+      const parsed = parseNonAdditiveAmbiguityId(resolved.id) ?? parseColumn(resolved.candidates[0] ?? "");
+      if (!parsed) continue;
+      if (resolved.chosen === "unsupported") continue;
+      if (resolved.chosen === "semi") {
+        addMetric(parsed.column, parsed.table, parsed.column, undefined, "semi");
+      }
+      continue;
+    }
     const parsed = parseColumn(resolved.chosen);
     if (!parsed) continue;
+    const info = schema.tables
+      .find((item) => item.name === parsed.table)
+      ?.columns.find((column) => column.name === parsed.column);
+    if (info && looksNonAdditive(parsed.column, info.dataType)) continue;
     const name = resolved.kind === "revenue_like_columns" ? "revenue" : parsed.column;
-    addMetric(name, parsed.table, parsed.column, resolved.question);
+    addMetric(name, parsed.table, parsed.column);
   }
 
   for (const entry of session.glossary_answers) {
     const slug = entry.term.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
     if (!slug || metrics[slug]) continue;
-    const fromResolved = session.resolved_ambiguities.find((item) => parseColumn(item.chosen));
+    const fromResolved = session.resolved_ambiguities.find(
+      (item) => item.kind === "revenue_like_columns" && parseColumn(item.chosen),
+    );
     const parsed = fromResolved ? parseColumn(fromResolved.chosen) : null;
     if (!parsed) continue;
     if (slug === "revenue" && metrics.revenue) {
@@ -226,8 +246,23 @@ export async function proposeDefinitions(kernel: GraneKernel, sessionId: string)
     throw configError("Nothing to propose. Record glossary terms or resolve ambiguities first.");
   }
 
+  const skipFanout = new Set(
+    session.resolved_ambiguities
+      .filter((item) => item.kind === "fanout_join" && item.chosen === "do_not_join")
+      .map((item) => item.id),
+  );
   const relationships: Record<string, { from: string; to: string; type: string }> = {};
   for (const [name, rel] of Object.entries(inferred)) {
+    const from = parseColumnRef(rel.from);
+    const to = parseColumnRef(rel.to);
+    if (
+      from &&
+      to &&
+      (skipFanout.has(fanoutAmbiguityId(from.table, to.table)) ||
+        skipFanout.has(fanoutAmbiguityId(to.table, from.table)))
+    ) {
+      continue;
+    }
     relationships[name] = { from: rel.from, to: rel.to, type: rel.type };
   }
 

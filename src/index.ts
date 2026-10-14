@@ -102,5 +102,14 @@ export {
   type Discovery,
   type ColumnProfile,
 } from "./authoring/discover.js";
+export {
+  detectAmbiguities,
+  mergeAmbiguities,
+  resolvedTimeColumn,
+  AMBIGUITY_KINDS,
+  NON_ADDITIVE_CANDIDATES,
+  FANOUT_CANDIDATES,
+  type AmbiguityKind,
+} from "./authoring/ambiguity.js";
 export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

@@ -406,11 +406,18 @@ describe("authoring MCP tools", () => {
       await client.callTool({ name: "discover_schema", arguments: { session_id: sessionId } });
       const listed = parseTool(await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }));
       expect(Array.isArray(listed)).toBe(true);
-      const amb = (listed as { id: string; candidates: string[] }[])[0]!;
-      expect(amb.candidates).toContain("orders.net_amount");
+      const items = listed as { id: string; kind: string; question: string; candidates: string[] }[];
+      const amb = items.find((item) => item.candidates.includes("orders.net_amount"));
+      expect(amb).toBeTruthy();
+      expect(amb!.kind).toBe("revenue_like_columns");
+      expect(items.some((item) => item.kind === "fanout_join")).toBe(true);
+      for (const item of items) {
+        expect(item.question).not.toContain(SECRET_SAMPLE);
+        expect(item.question).not.toContain(SECRET_PASSWORD);
+      }
       await client.callTool({
         name: "resolve_ambiguity",
-        arguments: { session_id: sessionId, id: amb.id, chosen: "orders.net_amount" },
+        arguments: { session_id: sessionId, id: amb!.id, chosen: "orders.net_amount" },
       });
       await client.callTool({
         name: "record_term",
@@ -579,7 +586,8 @@ async function seedSession(client: Client, level: SeedLevel): Promise<string> {
   const listed = parseTool(
     await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }),
   ) as { id: string; candidates: string[] }[];
-  const amb = listed[0]!;
+  const amb = listed.find((item) => item.candidates.includes("orders.net_amount"));
+  if (!amb) throw new Error("expected a revenue-like ambiguity for orders.net_amount");
   await client.callTool({
     name: "resolve_ambiguity",
     arguments: { session_id: sessionId, id: amb.id, chosen: "orders.net_amount" },
@@ -607,7 +615,7 @@ function successArgs(tool: AuthoringMcpTool, sessionId: string): Record<string, 
     case "record_term":
       return { session_id: sessionId, term: "revenue", answer: "Net sales." };
     case "resolve_ambiguity":
-      return { session_id: sessionId, id: "amb-revenue-like", chosen: "orders.net_amount" };
+      return { session_id: sessionId, id: "amb-revenue-like-orders", chosen: "orders.net_amount" };
     case "submit_proposal":
       return { session_id: sessionId, slug: "add-gmv" };
   }

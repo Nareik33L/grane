@@ -20,6 +20,12 @@
   CI-certified (`mysql:8.4` is the CI engine).
 - `additive: none` is refused as unsupported (`invalid_query`). Validate
   reports `unsupported_additive_none`. It is not compiled as a governed SUM.
+- Authoring detects conflicting candidates (multiple revenue-like columns,
+  multiple date columns per entity, non-additive measures, fan-out joins via
+  the relationship graph) and surfaces them as questions through
+  `list_ambiguities` / `resolve_ambiguity`. It asks rather than guesses.
+  Non-additive measures default to safe: `additive: none` is refused or asked,
+  never emitted as a governed SUM.
 
 ## 0.7.0
 
