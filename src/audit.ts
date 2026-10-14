@@ -51,12 +51,100 @@ export interface AuthAuditEvent {
   user_agent?: string | null;
 }
 
+export type DiscoveryOperation = "introspect" | "relationships" | "profile";
+
+/** Warehouse object a discovery call touched. Omit fields that do not apply. */
+export interface DiscoveryTarget {
+  schema?: string;
+  table?: string;
+  column?: string;
+}
+
 /**
- * One append-only audit record. Never include row payloads, SQL bind params,
- * or agent tokens. Discriminate on `kind`: query/refusal events always have
- * `query`; auth events never do.
+ * One discovery call (schema introspect, relationship inference, or bounded
+ * column profile). Sample values are never fields on this event — only SQL,
+ * counts, and optional hashes. Tokens are never logged.
  */
-export type AuditEvent = SemanticAuditEvent | AuthAuditEvent;
+export interface DiscoveryAuditEvent {
+  ts: string;
+  kind: "discovery";
+  session_id: string | null;
+  agent: string | null;
+  operation: DiscoveryOperation;
+  connector: string;
+  target: DiscoveryTarget;
+  /** Exact statements issued, in order. */
+  sql: string[];
+  row_count: number;
+  duration_ms: number;
+  read_only: true;
+  /** Hash of the snapshot or sample set; never the sampled values. */
+  snapshot_hash?: string;
+  refusal?: {
+    status: string;
+    message: string;
+    requested?: string;
+  };
+  request_id?: string;
+  client_ip?: string | null;
+  user_agent?: string | null;
+}
+
+/**
+ * One append-only audit record. Never include row payloads, sample values,
+ * SQL bind params, or agent tokens. Discriminate on `kind`: query/refusal
+ * events always have `query`; auth and discovery events never do.
+ */
+export type AuditEvent = SemanticAuditEvent | AuthAuditEvent | DiscoveryAuditEvent;
+
+export interface DiscoveryAuditInput {
+  ts?: string;
+  session_id: string | null;
+  agent: string | null;
+  operation: DiscoveryOperation;
+  connector: string;
+  target: DiscoveryTarget;
+  sql: string | readonly string[];
+  row_count: number;
+  duration_ms: number;
+  snapshot_hash?: string;
+  refusal?: NonNullable<DiscoveryAuditEvent["refusal"]>;
+  http?: HttpAuditContext | null;
+}
+
+/**
+ * Build a discovery line from known fields only, so extra keys (samples,
+ * rows, tokens) cannot leak into JSONL.
+ */
+export function discoveryAuditEvent(input: DiscoveryAuditInput): DiscoveryAuditEvent {
+  const target: DiscoveryTarget = {};
+  if (input.target.schema) target.schema = input.target.schema;
+  if (input.target.table) target.table = input.target.table;
+  if (input.target.column) target.column = input.target.column;
+  const event: DiscoveryAuditEvent = {
+    ts: input.ts ?? new Date().toISOString(),
+    kind: "discovery",
+    session_id: input.session_id,
+    agent: input.agent,
+    operation: input.operation,
+    connector: input.connector,
+    target,
+    sql: (Array.isArray(input.sql) ? [...input.sql] : [input.sql]).map((statement) => String(statement)),
+    row_count: input.row_count,
+    duration_ms: input.duration_ms,
+    read_only: true,
+  };
+  if (input.snapshot_hash) event.snapshot_hash = input.snapshot_hash;
+  if (input.refusal) {
+    event.refusal = {
+      status: input.refusal.status,
+      message: input.refusal.message,
+      ...(input.refusal.requested ? { requested: input.refusal.requested } : {}),
+    };
+  }
+  Object.assign(event, httpFields(input.http));
+  return event;
+}
 
 export function refusalFromError(err: unknown): NonNullable<SemanticAuditEvent["refusal"]> {
   if (err instanceof GraneError) {
@@ -123,6 +211,15 @@ export function recordAudit(
   } catch (err) {
     if (config.audit.fail_closed) throw auditWriteFailed(err);
   }
+}
+
+/** Record one discovery call. Fail-closed uses the same `recordAudit` path as queries. */
+export function recordDiscoveryAudit(
+  config: GraneConfig,
+  projectDir: string | undefined,
+  input: DiscoveryAuditInput,
+): void {
+  recordAudit(config, projectDir, discoveryAuditEvent(input));
 }
 
 export function httpFields(http: HttpAuditContext | null | undefined): HttpAuditContext | Record<string, never> {

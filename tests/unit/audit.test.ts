@@ -8,7 +8,7 @@ import { getDialect } from "../../src/connectors/dialect.js";
 import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneError } from "../../src/errors.js";
 import { loadConfig } from "../../src/config/load.js";
-import { recordAudit } from "../../src/audit.js";
+import { appendAudit, recordAudit, recordDiscoveryAudit } from "../../src/audit.js";
 import { attributeCompiledSql } from "../../src/execute/executor.js";
 
 const secretRow = "SECRET_ROW_PAYLOAD";
@@ -276,6 +276,233 @@ describe("query audit log", () => {
       expect((err as GraneError).refusal.status).toBe("config_error");
       expect((err as GraneError).message).toMatch(/fail_closed/);
     }
+  });
+});
+
+describe("discovery audit log", () => {
+  const sampleValue = "SECRET_SAMPLE_VALUE";
+
+  function auditedConfig(dir: string, audit: Record<string, unknown> = {}) {
+    return exampleConfig({ audit: { enabled: true, path: ".grane/audit.jsonl", ...audit } });
+  }
+
+  it("writes exactly one JSONL line per discovery call with SQL and counts, never samples", () => {
+    const dir = tempProject();
+    const config = auditedConfig(dir);
+    const path = join(dir, ".grane", "audit.jsonl");
+    const calls = [
+      {
+        ts: "2026-10-14T12:00:00.000Z",
+        session_id: "sess-1",
+        agent: "authoring",
+        operation: "introspect" as const,
+        connector: "postgres",
+        target: { schema: "public" },
+        sql: ["SELECT table_name FROM information_schema.tables WHERE table_schema = $1"],
+        row_count: 3,
+        duration_ms: 12,
+        snapshot_hash: "aa".repeat(32),
+      },
+      {
+        ts: "2026-10-14T12:00:01.000Z",
+        session_id: "sess-1",
+        agent: "authoring",
+        operation: "relationships" as const,
+        connector: "postgres",
+        target: { schema: "public", table: "orders" },
+        sql: ["SELECT conname FROM pg_constraint WHERE contype = 'f'"],
+        row_count: 2,
+        duration_ms: 4,
+      },
+      {
+        ts: "2026-10-14T12:00:02.000Z",
+        session_id: "sess-1",
+        agent: "authoring",
+        operation: "profile" as const,
+        connector: "postgres",
+        target: { schema: "public", table: "orders", column: "status" },
+        sql: "SELECT COUNT(DISTINCT status) FROM orders",
+        row_count: 4,
+        duration_ms: 7,
+        snapshot_hash: "bb".repeat(32),
+        samples: [sampleValue, "completed"],
+        rows: [{ status: sampleValue }],
+        token: "SECRET_TOKEN",
+      },
+    ];
+    for (const call of calls) {
+      recordDiscoveryAudit(config, dir, call as Parameters<typeof recordDiscoveryAudit>[2]);
+    }
+
+    const raw = readFileSync(path, "utf8");
+    expect(raw.endsWith("\n")).toBe(true);
+    expect(raw.trimEnd().split("\n")).toHaveLength(3);
+    const events = readJsonl(path);
+    expect(events).toHaveLength(3);
+    expect(events.map((event) => event.operation)).toEqual(["introspect", "relationships", "profile"]);
+
+    for (const event of events) {
+      expect(event.kind).toBe("discovery");
+      expect(event.read_only).toBe(true);
+      expect(event.session_id).toBe("sess-1");
+      expect(Array.isArray(event.sql)).toBe(true);
+      expect((event.sql as string[]).length).toBeGreaterThan(0);
+      expect(typeof event.row_count).toBe("number");
+      expect(event).not.toHaveProperty("query");
+      expect(event).not.toHaveProperty("samples");
+      expect(event).not.toHaveProperty("rows");
+      expect(event).not.toHaveProperty("values");
+      expect(event).not.toHaveProperty("token");
+      expect(JSON.stringify(event)).not.toContain(sampleValue);
+      expect(JSON.stringify(event)).not.toContain("SECRET_TOKEN");
+    }
+
+    expect(events[0]!.sql).toEqual([
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = $1",
+    ]);
+    expect(events[0]!.row_count).toBe(3);
+    expect(events[0]!.snapshot_hash).toBe("aa".repeat(32));
+    expect(events[2]!.sql).toEqual(["SELECT COUNT(DISTINCT status) FROM orders"]);
+    expect(events[2]!.target).toEqual({ schema: "public", table: "orders", column: "status" });
+    expect(events[2]!.snapshot_hash).toBe("bb".repeat(32));
+  });
+
+  it("records an exploration-policy refusal as one discovery line", () => {
+    const dir = tempProject();
+    const config = auditedConfig(dir);
+    recordDiscoveryAudit(config, dir, {
+      ts: "2026-10-14T12:00:03.000Z",
+      session_id: "sess-1",
+      agent: "authoring",
+      operation: "profile",
+      connector: "postgres",
+      target: { schema: "public", table: "customers", column: "email" },
+      sql: [],
+      row_count: 0,
+      duration_ms: 1,
+      refusal: {
+        status: "column_not_permitted",
+        message: "excluded from exploration by company policy.",
+        requested: "customers.email",
+      },
+      http: { request_id: "req-disc", client_ip: "203.0.113.10", user_agent: "Cursor/1.0" },
+    });
+    const event = readJsonl(join(dir, ".grane", "audit.jsonl"))[0]!;
+    expect(event).toEqual({
+      ts: "2026-10-14T12:00:03.000Z",
+      kind: "discovery",
+      session_id: "sess-1",
+      agent: "authoring",
+      operation: "profile",
+      connector: "postgres",
+      target: { schema: "public", table: "customers", column: "email" },
+      sql: [],
+      row_count: 0,
+      duration_ms: 1,
+      read_only: true,
+      refusal: {
+        status: "column_not_permitted",
+        message: "excluded from exploration by company policy.",
+        requested: "customers.email",
+      },
+      request_id: "req-disc",
+      client_ip: "203.0.113.10",
+      user_agent: "Cursor/1.0",
+    });
+  });
+
+  it("swallows a failed discovery audit append by default", () => {
+    const dir = tempProject();
+    writeFileSync(join(dir, "blocked"), "not a directory");
+    const config = auditedConfig(dir, { path: "blocked/audit.jsonl" });
+    expect(() =>
+      recordDiscoveryAudit(config, dir, {
+        session_id: null,
+        agent: null,
+        operation: "introspect",
+        connector: "duckdb",
+        target: {},
+        sql: ["SELECT 1"],
+        row_count: 1,
+        duration_ms: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses the discovery call when fail_closed and the audit append fails", () => {
+    const dir = tempProject();
+    writeFileSync(join(dir, "blocked"), "not a directory");
+    const config = auditedConfig(dir, { path: "blocked/audit.jsonl", fail_closed: true });
+    try {
+      recordDiscoveryAudit(config, dir, {
+        session_id: "sess-1",
+        agent: "authoring",
+        operation: "introspect",
+        connector: "postgres",
+        target: { schema: "public" },
+        sql: ["SELECT 1"],
+        row_count: 1,
+        duration_ms: 0,
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).refusal.status).toBe("config_error");
+      expect((err as GraneError).message).toMatch(/fail_closed/);
+    }
+  });
+
+  it("keeps query audit JSON bytes identical after adding discovery events", () => {
+    const dir = tempProject();
+    const path = join(dir, "query.jsonl");
+    const event = {
+      ts: "2026-09-03T00:00:00.000Z",
+      agent: "finance" as string | null,
+      kind: "query" as const,
+      operation: "query" as const,
+      query: {
+        metrics: ["revenue"],
+        dimensions: ["country"],
+        time: { from: "2026-07-01", to: "2026-07-31" },
+      },
+      trust: "governed" as const,
+      query_id: "q_fixed",
+      sql: "SELECT 1",
+      row_count: 1,
+      duration_ms: 0,
+    };
+    appendAudit(event, { path });
+    expect(readFileSync(path, "utf8")).toBe(
+      '{"ts":"2026-09-03T00:00:00.000Z","agent":"finance","kind":"query","operation":"query","query":{"metrics":["revenue"],"dimensions":["country"],"time":{"from":"2026-07-01","to":"2026-07-31"}},"trust":"governed","query_id":"q_fixed","sql":"SELECT 1","row_count":1,"duration_ms":0}\n',
+    );
+  });
+
+  it("does not add discovery fields onto kernel query audit lines", async () => {
+    const dir = tempProject();
+    const kernel = kernelWithAudit(dir, {}, { id: "finance" });
+    await kernel.query({
+      metrics: ["revenue"],
+      dimensions: ["country"],
+      time: { from: "2026-07-01", to: "2026-07-31" },
+    });
+    const event = readJsonl(join(dir, ".grane", "audit.jsonl"))[0]!;
+    expect(Object.keys(event)).toEqual([
+      "ts",
+      "agent",
+      "kind",
+      "operation",
+      "query",
+      "trust",
+      "query_id",
+      "sql",
+      "row_count",
+      "duration_ms",
+    ]);
+    expect(event).not.toHaveProperty("session_id");
+    expect(event).not.toHaveProperty("connector");
+    expect(event).not.toHaveProperty("read_only");
+    expect(event).not.toHaveProperty("target");
+    expect(event).not.toHaveProperty("snapshot_hash");
   });
 });
 
