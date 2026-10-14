@@ -11,8 +11,11 @@
   quickstart links the guide. CI compares `example/` (postgres) and `demo/`
   (duckdb) certify reports to the pre-V2 main baseline (`7a7ffc6`); an
   existing-YAML compat cert loads those projects and allows only the
-  temporal warning as a new finding. Cloud `certify-cloud` with real
-  secrets is a pending release step (needs Kieran's credentials).
+  temporal warning as a new finding. Docs and README warehouse claims must
+  match `WAREHOUSE_CERTIFICATION` exactly (`certified` vs `self_certifiable`);
+  no cloud warehouse is certified until a credentialed `certify-cloud` run
+  has actually passed. Cloud `certify-cloud` with real secrets is a pending
+  release step (needs Kieran's credentials).
 - **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
   CRITICAL gate. Unexpected errors inside a security scenario score
   `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection

@@ -20,8 +20,11 @@ Writes `certification/<engine>.json` plus a human summary. JSON reports are
 gitignored; this is not a second gold set.
 
 Snowflake, BigQuery, Databricks, and Redshift stay `self_certifiable` until
-Grane CI actually runs this corpus against them. Postgres certification does
-not cover Redshift — use `--engine redshift`.
+a **credentialed `certify-cloud` run has actually passed** and
+`WAREHOUSE_CERTIFICATION` is updated. A pending dispatch, a skip-without-secrets
+job, or a connector that compiles is not certification. Postgres certification does
+not cover Redshift — use `--engine redshift`. Docs and README must match
+the map exactly (`certified` vs `self_certifiable`).
 
 ## Environment variables
 

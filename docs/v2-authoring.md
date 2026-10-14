@@ -245,7 +245,13 @@ projects and allows only the temporal `group_by` warning as a new finding.
 ## Cloud certify (release step)
 
 `.github/workflows/certify-cloud.yml` is dormant. Snowflake, BigQuery,
-Databricks, and Redshift skip unless `GRANE_CERT_*` secrets are set. Do not
-run that workflow on a public PR. **Pending release step:** Kieran adds the
-cloud warehouse credentials and dispatches `certify-cloud` once before the
-V2 tag. See [certify.md](certify.md).
+Databricks, and Redshift are `self_certifiable`, **not certified**. A
+pending or skipped dispatch does not change that. Do not write that a cloud
+warehouse is certified until a **credentialed `certify-cloud` run has
+actually passed** and `WAREHOUSE_CERTIFICATION` in
+`src/connectors/certification.ts` is updated to match. Docs and README must
+keep the map exactly (`certified` vs `self_certifiable`).
+
+**Pending release step:** Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
+once before the V2 tag. See [certify.md](certify.md). Do not run that
+workflow with real secrets from a public PR.

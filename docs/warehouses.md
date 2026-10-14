@@ -23,8 +23,10 @@ The map in `src/connectors/certification.ts` is the source of truth. `catalog.se
 exposes `{ type, certification, certified_version }`. Gold values for the shared corpus are
 TypeScript reductions over the seed, not SQL on the engine under test. Reports write to
 `certification/<engine>.json` (see `certification/README.md`). Self-certify Snowflake,
-BigQuery, Databricks, or Redshift with [`grane certify`](certify.md). Postgres CI
-certification does not cover Redshift.
+BigQuery, Databricks, or Redshift with [`grane certify`](certify.md). Those four
+stay `self_certifiable` until a credentialed `certify-cloud` run has actually
+passed and this map is updated — do not call them certified before that.
+Postgres CI certification does not cover Redshift.
 
 | State | Meaning |
 | --- | --- |

@@ -59,6 +59,8 @@ describe("V2 existing-YAML compat cert", () => {
     expect(docs).toMatch(/Demo Postgres: ready-made vs build-your-own/);
     expect(docs).toMatch(/Importers \(unchanged\)/);
     expect(docs).toMatch(/Pending release step/);
+    expect(docs).toMatch(/self_certifiable`, \*\*not certified\*\*/);
+    expect(docs).toMatch(/credentialed `certify-cloud` run has\s+actually passed/);
   });
 
   for (const rel of Object.keys(catalog.projects)) {
