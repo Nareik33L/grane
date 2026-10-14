@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { writeInitProject } from "../cli/init-project.js";
@@ -35,14 +36,20 @@ import {
 import {
   OWN_QUESTION,
   SETUP_BANNER,
+  demoAuthoringReadyLines,
   demoReadyLines,
   importInspectOnlyLines,
   importReadyLines,
   ownReadyLines,
   skipConnectHint,
 } from "./copy.js";
+import {
+  DEMO_AUTHORING_QUESTION,
+  ensureDemoAuthoringGitRepo,
+  writeDemoAuthoringProject,
+} from "./demo-postgres.js";
 import { createReadlinePrompter, type Prompter } from "./prompts.js";
-import type { SetupIo, SetupPath } from "./types.js";
+import type { DemoEngine, DemoYaml, SetupIo, SetupPath } from "./types.js";
 import { promptSetupAnswers } from "./wizard.js";
 
 export type { SetupIo, SetupPath };
@@ -63,6 +70,10 @@ export interface RunSetupOptions {
   importDir?: string;
   /** Import path only: allow pinning after `--offline` (no live schema checks). */
   activateOffline?: boolean;
+  /** Demo path: use demo Postgres instead of DuckDB. */
+  postgres?: boolean;
+  /** Demo Postgres: author YAML (b) instead of shipped demo YAML (a). */
+  authoring?: boolean;
   json?: boolean;
   cwd?: string;
   homeDir?: string;
@@ -74,6 +85,10 @@ export interface RunSetupOptions {
   stdinIsTty?: boolean;
   stdoutIsTty?: boolean;
   runDemoFn?: (options: Parameters<typeof runDemo>[0]) => Promise<DemoResult>;
+  runDemoAuthoringFn?: (opts: {
+    projectDir: string;
+    url: string;
+  }) => Promise<void> | void;
   connectMcpFn?: typeof connectMcp;
 }
 
@@ -86,6 +101,8 @@ export interface SetupResult {
   validated: boolean;
   live: boolean;
   connect: ConnectResult | null;
+  demoEngine?: DemoEngine;
+  demoYaml?: DemoYaml;
 }
 
 /** Human label for `SetupResult.warehouse`. Null (import before an engine is known) is "none". */
@@ -163,6 +180,9 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
   if (yes && !options.path) {
     throw new Error("Non-interactive setup requires --path demo or --path own, or --import <dir>.");
   }
+  if (options.authoring && !options.postgres && options.path === "demo") {
+    throw new Error("Demo authoring requires demo Postgres. Pass --postgres with --authoring.");
+  }
 
   const prompt = options.prompt ?? createReadlinePrompter(io);
   if (!options.json) {
@@ -182,7 +202,16 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
       listClients: () => listClients().map((c) => ({ id: c.id, label: c.label })),
     });
     if (answers.path === "demo") {
-      return runDemoPath({ ...options, io, cwd, env, client: answers.client, skipConnect });
+      return runDemoPath({
+        ...options,
+        io,
+        cwd,
+        env,
+        client: answers.client,
+        skipConnect,
+        postgres: answers.demoEngine === "postgres",
+        authoring: answers.demoYaml === "authoring",
+      });
     }
     if (answers.path === "import") {
       return runImportPath({
@@ -225,7 +254,16 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
       : null;
 
   if (path === "demo") {
-    return runDemoPath({ ...options, io, cwd, env, client, skipConnect });
+    return runDemoPath({
+      ...options,
+      io,
+      cwd,
+      env,
+      client,
+      skipConnect,
+      postgres: Boolean(options.postgres),
+      authoring: Boolean(options.authoring),
+    });
   }
   const resolved = resolveYesConnection(options, env);
   return runOwnPath({
@@ -292,21 +330,35 @@ async function runDemoPath(opts: {
   json?: boolean;
   client: string | null;
   skipConnect: boolean;
+  postgres?: boolean;
+  authoring?: boolean;
   homeDir?: string;
   workspaceDir?: string;
   platform?: NodeJS.Platform;
   runDemoFn?: RunSetupOptions["runDemoFn"];
+  runDemoAuthoringFn?: RunSetupOptions["runDemoAuthoringFn"];
   connectMcpFn?: RunSetupOptions["connectMcpFn"];
 }): Promise<SetupResult> {
+  if (opts.authoring && !opts.postgres) {
+    throw new Error("Demo authoring requires demo Postgres. Pass --postgres with --authoring.");
+  }
+  if (opts.postgres && opts.authoring) {
+    return runDemoAuthoringPath(opts);
+  }
   const demoFn = opts.runDemoFn ?? runDemo;
   opts.io.log("");
-  opts.io.log("Building the demo shop and running the investigation…");
+  opts.io.log(
+    opts.postgres
+      ? "Using demo Postgres and running the investigation…"
+      : "Building the demo shop and running the investigation…",
+  );
   const demo = await demoFn({
     dir: opts.dir,
     cwd: opts.cwd,
     io: opts.io,
     nextSteps: false,
     json: false,
+    postgres: Boolean(opts.postgres),
   });
 
   const connected = connectIfRequested(opts, demo.projectDir);
@@ -318,12 +370,70 @@ async function runDemoPath(opts: {
   return {
     path: "demo",
     projectDir: demo.projectDir,
-    warehouse: "duckdb",
+    warehouse: opts.postgres ? "postgres" : "duckdb",
     client: opts.client,
     question: DEMO_QUESTION,
     validated: true,
     live: true,
     connect: connected.result,
+    demoEngine: opts.postgres ? "postgres" : "duckdb",
+    demoYaml: opts.postgres ? "shipped" : undefined,
+  };
+}
+
+async function runDemoAuthoringPath(opts: {
+  io: SetupIo;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  dir?: string;
+  json?: boolean;
+  client: string | null;
+  skipConnect: boolean;
+  homeDir?: string;
+  workspaceDir?: string;
+  platform?: NodeJS.Platform;
+  runDemoAuthoringFn?: RunSetupOptions["runDemoAuthoringFn"];
+  connectMcpFn?: RunSetupOptions["connectMcpFn"];
+}): Promise<SetupResult> {
+  const projectDir = resolve(opts.dir ?? defaultOwnProjectDir(opts.cwd));
+  if (isGraneSourceTree(projectDir)) {
+    throw new Error(
+      `Refusing to write a new project into the Grane source tree (${projectDir}). ` +
+        `Pass --dir ./my-analytics (or another empty folder).`,
+    );
+  }
+  opts.io.log("");
+  opts.io.log("Preparing demo Postgres authoring (discovery → proposal PR). No pin, no production YAML writes.");
+  const written = writeDemoAuthoringProject(projectDir);
+  ensureDemoAuthoringGitRepo(projectDir, opts.io);
+  if (opts.runDemoAuthoringFn) {
+    await opts.runDemoAuthoringFn({ projectDir, url: written.url });
+  }
+  if (existsSync(join(projectDir, ACTIVE_PIN_PATH)) || readActivePin(projectDir)) {
+    throw new Error(`Demo authoring must not write ${ACTIVE_PIN_PATH}.`);
+  }
+
+  const connected = connectIfRequested(opts, projectDir);
+  printReady(
+    opts.io,
+    opts.json,
+    demoAuthoringReadyLines({
+      projectDir,
+      clientLabel: connected.label,
+    }),
+  );
+
+  return {
+    path: "demo",
+    projectDir,
+    warehouse: "postgres",
+    client: opts.client,
+    question: DEMO_AUTHORING_QUESTION,
+    validated: true,
+    live: true,
+    connect: connected.result,
+    demoEngine: "postgres",
+    demoYaml: "authoring",
   };
 }
 

@@ -73,6 +73,8 @@ program
   .option("--yes", "non-interactive; requires --path demo|own, or use --import")
   .option("--non-interactive", "alias for --yes")
   .option("--path <kind>", "demo | own")
+  .option("--postgres", "demo path: use demo Postgres (localhost:5433) instead of DuckDB")
+  .option("--authoring", "demo Postgres: build YAML via authoring (proposal PR). Requires --postgres")
   .option(
     "--import <dir>",
     "non-interactive: load, validate, and inspect existing Grane YAML (never pins; live import writes .grane/audit.jsonl)",
@@ -108,6 +110,8 @@ program
       skipConnect?: boolean;
       offline?: boolean;
       activateOffline?: boolean;
+      postgres?: boolean;
+      authoring?: boolean;
       json?: boolean;
     }) => {
       try {
@@ -145,6 +149,8 @@ program
           skipConnect: options.skipConnect,
           offline: options.offline,
           activateOffline: options.activateOffline,
+          postgres: options.postgres,
+          authoring: options.authoring,
           json,
           io: jsonIo,
         });

@@ -5,6 +5,8 @@
  */
 
 import { toGrant } from "../../../src/auth/agents.js";
+import { AUTHORING_MCP_TOOLS, CORE_MCP_TOOLS } from "../../../src/mcp/authoring.js";
+import { writeActivePin } from "../../../src/authoring/git.js";
 import { GOLD, GOLD_SQL } from "../gold.js";
 import { gauntletConfig } from "../model.js";
 import { BLOCKED_COLUMNS } from "../data.js";
@@ -29,6 +31,7 @@ export function trapScenarios(): Scenario[] {
     ...provenanceTraps(),
     ...readonlyTraps(),
     ...agentTraps(),
+    ...authoringActivateTraps(),
   ];
 }
 
@@ -810,6 +813,45 @@ function agentTraps(): Scenario[] {
       query: { metrics: ["revenue"], raw_dimensions: ["orders.discount_code"] },
       expectation: { kind: "refuse", statuses: ["exploration_disabled"], reason: "agent grant" },
       guessSeverity: "security",
+    }),
+  ];
+}
+
+function authoringActivateTraps(): Scenario[] {
+  return [
+    sc({
+      id: "mcp/agent-cannot-activate-demo-yaml",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "The agent tries to activate its own demo YAML and pin .grane/active.json.",
+      interpretation:
+        "MCP has no activate, approve, pin, or merge tools. Authoring may only submit_proposal. Pins stay TTY-only.",
+      expectedSqlBehaviour: "n/a — no warehouse SQL.",
+      expectation: { kind: "refuse", reason: "no activate tool", statuses: ["config_error"] },
+      custom: async () => {
+        const tools = [...CORE_MCP_TOOLS, ...AUTHORING_MCP_TOOLS];
+        const banned = /activate|approve|pin|merge|write_active|rollback/;
+        const leaked = tools.filter((name) => banned.test(name));
+        if (leaked.length > 0) {
+          return { code: "SECURITY CRITICAL", detail: `agent can activate via ${leaked.join(", ")}` };
+        }
+        if (!AUTHORING_MCP_TOOLS.includes("submit_proposal")) {
+          return { code: "FAIL", detail: "submit_proposal missing" };
+        }
+        try {
+          writeActivePin("/nonexistent/grane-agent-activate", {
+            ref: "main",
+            commit: "deadbeef",
+            approved_by: "agent",
+            approved_at: new Date().toISOString(),
+          });
+          return { code: "SECURITY CRITICAL", detail: "writeActivePin succeeded from the agent path" };
+        } catch {
+          return { code: "PASS — POLICY", detail: "no activate/approve/pin MCP tools; pin write refused" };
+        }
+      },
     }),
   ];
 }

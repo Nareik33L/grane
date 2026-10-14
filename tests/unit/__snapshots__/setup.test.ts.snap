@@ -21,6 +21,24 @@ exports[`wizard existing-YAML fork > demo path after answering no matches the fr
     "question": "How do you want to start?",
   },
   {
+    "allowBack": true,
+    "choices": [
+      {
+        "hint": "No database, no Docker. Today's demo shop (shipped YAML).",
+        "label": "Local DuckDB",
+        "value": "duckdb",
+      },
+      {
+        "hint": "Preloaded sample data (Docker on localhost:5433). Then shipped YAML or build your own.",
+        "label": "Demo Postgres",
+        "value": "postgres",
+      },
+    ],
+    "defaultValue": "duckdb",
+    "kind": "select",
+    "question": "Which demo warehouse?",
+  },
+  {
     "kind": "log",
     "line": "",
   },

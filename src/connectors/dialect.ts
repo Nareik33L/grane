@@ -457,6 +457,17 @@ export function isTemporalType(dataType: string): boolean {
 }
 
 /**
+ * Time-like column: warehouse temporal type, or a name that tracks time even
+ * when stored as number/text (`ts` bigint, `period` varchar, `as_of` text).
+ * Used to refuse those columns as semi-additive `group_by` keys.
+ */
+export function looksTemporal(column: string, dataType: string): boolean {
+  if (isTemporalType(dataType)) return true;
+  if (/(_at|_on|date|time|day)$/i.test(column)) return true;
+  return /^(ts|period|as_of|asof)$/i.test(column);
+}
+
+/**
  * Warehouse temporal kinds compilation can distinguish.
  *
  *   date               civil calendar value (DATE / Date32). Project timezone

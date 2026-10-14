@@ -383,6 +383,9 @@ describe("non-additive measures", () => {
     expect(
       isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "snapshot_at", "snapshot_at"),
     ).toBe(true);
+    expect(isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "ts")).toBe(true);
+    expect(isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "period")).toBe(true);
+    expect(isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "as_of")).toBe(true);
     expect(
       semiAdditiveGroupByAmbiguity(nonAdditiveSchema, "inventory", "balance", "snapshot_at").candidates,
     ).not.toContain("inventory.snapshot_at");
@@ -447,6 +450,21 @@ const missingPkSchema = schemaOf([
 describe("primary key grain", () => {
   it("does not ask to pick a composite PRIMARY KEY column as grain", () => {
     const found = detectAmbiguities({ schema: compositeSchema });
+    expect(found.some((item) => item.kind === "primary_key")).toBe(false);
+  });
+
+  it("does not offer a nullable UNIQUE column as grain on a composite-PK table", () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["loc_code"],
+        columns: [
+          ...compositeSchema.tables[0]!.columns,
+          { name: "loc_code", dataType: "text", nullable: true },
+        ],
+      },
+    ]);
+    const found = detectAmbiguities({ schema });
     expect(found.some((item) => item.kind === "primary_key")).toBe(false);
   });
 
@@ -585,6 +603,8 @@ describe("fanout joins", () => {
       candidates: [...FANOUT_CANDIDATES],
     });
     expect(amb?.question).toMatch(/multiplies rows/i);
+    expect(amb?.question).toMatch(/totals the many side first/i);
+    expect(amb?.question).toMatch(/not double-counted/i);
     expect(amb?.question).toContain(quoteIdent("customers"));
     expect(amb?.question).toContain(quoteIdent("orders"));
     expect(amb?.question).toMatch(/will not guess/i);

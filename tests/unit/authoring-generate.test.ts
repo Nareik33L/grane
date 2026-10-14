@@ -183,6 +183,30 @@ describe("generateDraftYaml", () => {
     expect(files["entities.yml"]).not.toMatch(/primary_key:\s*tenant_id/);
   });
 
+  it("refuses a nullable UNIQUE column as grain", () => {
+    const dir = tempDir();
+    const session = sessionWithRevenue(dir);
+    const schema = productsSchema();
+    schema.tables[0]!.primaryKey = undefined;
+    schema.tables[0]!.primaryKeyColumns = ["tenant_id", "product_id"];
+    schema.tables[0]!.uniqueColumns = ["sku"];
+    schema.tables[0]!.columns[0]!.nullable = true;
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      resolved_ambiguities: [
+        ...session.resolved_ambiguities,
+        {
+          id: primaryKeyAmbiguityId("products"),
+          kind: "primary_key",
+          question: "nullable unique",
+          candidates: ["products.sku", PRIMARY_KEY_SKIP],
+          chosen: "products.sku",
+        },
+      ],
+    });
+    expect(() => generateDraftYaml({ session: resolved, schema, inferred: {} })).toThrow(/products/);
+  });
+
   it("honours skip on a keyless table", () => {
     const dir = tempDir();
     const schema = productsSchema();

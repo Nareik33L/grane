@@ -1,4 +1,5 @@
 import { DEMO_QUESTION } from "../demo/run.js";
+import { DEMO_AUTHORING_QUESTION } from "./demo-postgres.js";
 
 export { DEMO_QUESTION };
 
@@ -98,6 +99,33 @@ export function ownReadyLines(opts: {
   lines.push("");
   lines.push(`Project  ${opts.projectDir}`);
   lines.push("Docs     https://github.com/Nareik33L/grane/blob/main/docs/first-week.md");
+  return lines;
+}
+
+export function demoAuthoringReadyLines(opts: {
+  projectDir: string;
+  clientLabel: string | null;
+}): string[] {
+  const lines = [
+    "────────────────────────────────────────",
+    "You're ready.",
+    "",
+    "Demo Postgres is connected. No production YAML or pin was written.",
+    "Open the Set up Grane prompt in your agent. It drives discovery, glossary,",
+    "ambiguities, the YAML generator, and a proposal pull request — the same",
+    "authoring path as your own warehouse. There are no shortcuts.",
+    "",
+    `  ${DEMO_AUTHORING_QUESTION}`,
+    "",
+    "submit_proposal opens a GitHub PR on a proposal branch.",
+    "Do not pin .grane/active.json. Do not merge the PR from the agent.",
+  ];
+  if (opts.clientLabel) {
+    lines.push("");
+    lines.push(`Reload ${opts.clientLabel} so it picks up Grane, then start a new chat.`);
+  }
+  lines.push("");
+  lines.push(`Project  ${opts.projectDir}`);
   return lines;
 }
 

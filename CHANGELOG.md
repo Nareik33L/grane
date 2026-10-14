@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Setup offers **demo Postgres** (preloaded sample data) nested under the
+  existing demo shop path. Inside it the user picks shipped demo YAML (today's
+  `grane demo --postgres` behaviour) or builds YAML against demo Postgres via
+  discovery, authoring tools, the Set up Grane prompt, the YAML generator, and
+  a proposal PR. No shortcuts, no production YAML writes, no pin. DuckDB demo
+  and own-data paths stay byte-identical. Back-nav on every new step.
+- Validator refuses semi-additive `group_by` on the metric `time_dimension` or
+  time-like columns stored as number/text (`ts` bigint, `period` varchar,
+  `as_of` text). Fan-out `preaggregate` copy explains that Grane totals the
+  many side first. Nullable UNIQUE columns are not a grain.
+- Demo Postgres schema includes a composite-PK table (`inventory_levels`), a
+  keyless table (`event_stream`), and a partitioned parent (`daily_rollups`).
 - `grane setup` (`grane onboard`) is a guided first-run after `git clone` +
   `npm install`: demo DuckDB or your own warehouse, validate, then
   `mcp connect`. Interactive prompts by default; `--yes --path demo|own` is

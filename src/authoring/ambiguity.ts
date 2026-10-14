@@ -1,11 +1,12 @@
 import {
+  grainUniqueColumns,
   isCompositePrimaryKey,
   tablePrimaryKey,
   tablePrimaryKeyColumns,
   type DatabaseSchema,
   type TableInfo,
 } from "../connectors/types.js";
-import { isNumericType, isTemporalType } from "../connectors/dialect.js";
+import { isNumericType, looksTemporal } from "../connectors/dialect.js";
 import { RelationshipGraph, describeJoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
 import type { RelationshipConfig } from "../config/schema.js";
@@ -88,9 +89,7 @@ export function looksNonAdditive(column: string, dataType: string): boolean {
   return isNumericType(dataType) && NON_ADDITIVE_NAME.test(column);
 }
 
-export function looksTemporal(column: string, dataType: string): boolean {
-  return isTemporalType(dataType) || /(_at|_on|date|time|day)$/i.test(column);
-}
+export { looksTemporal } from "../connectors/dialect.js";
 
 export function parseNonAdditiveAmbiguityId(id: string): { table: string; column: string } | null {
   const match = /^amb-non-additive-([A-Za-z_][A-Za-z0-9_]*)-([A-Za-z_][A-Za-z0-9_]*)$/.exec(id);
@@ -240,7 +239,10 @@ export function resolvedEntityPrimaryKey(
   if (chosen) {
     const parsed = parseColumnRef(chosen);
     if (parsed?.table === table) {
-      if (isCompositePrimaryKey(info) && !(info?.uniqueColumns ?? []).includes(parsed.column)) {
+      if (isCompositePrimaryKey(info) && !grainUniqueColumns(info).includes(parsed.column)) {
+        return undefined;
+      }
+      if ((info?.uniqueColumns ?? []).includes(parsed.column) && !grainUniqueColumns(info).includes(parsed.column)) {
         return undefined;
       }
       return parsed.column;
@@ -278,7 +280,7 @@ function primaryKeyAmbiguity(table: TableInfo): OpenAmbiguity | null {
   const pkCols = tablePrimaryKeyColumns(table);
   if (pkCols.length === 1) return null;
   if (isCompositePrimaryKey(table)) {
-    const unique = table.uniqueColumns ?? [];
+    const unique = grainUniqueColumns(table);
     if (unique.length === 0) return null;
     return {
       id: primaryKeyAmbiguityId(table.name),
@@ -424,11 +426,12 @@ function detectFanoutJoins(
           id,
           kind: "fanout_join",
           question:
-            `Joining ${quoteIdent(parent)} to ${quoteIdent(child)} multiplies rows ` +
-            `(one ${quoteIdent(parent)} row matches many ${quoteIdent(child)} rows). ` +
-            `How should measures be combined? Choose "preaggregate" to keep the relationship ` +
-            `(Grane pre-aggregates the many side at query time) or "do_not_join" to omit it ` +
-            `from the draft. Unresolved fan-out is not written. Grane will not guess.`,
+            `Joining ${quoteIdent(parent)} to ${quoteIdent(child)} multiplies rows: ` +
+            `one ${quoteIdent(parent)} row matches many ${quoteIdent(child)} rows, so measures ` +
+            `would be counted more than once. Choose "preaggregate" to keep the relationship — ` +
+            `Grane totals the many side first, then joins, so ${quoteIdent(parent)} measures are ` +
+            `not double-counted. Choose "do_not_join" to leave this relationship out of the draft. ` +
+            `Unresolved fan-out is not written. Grane will not guess.`,
           candidates: [...FANOUT_CANDIDATES],
         });
       }

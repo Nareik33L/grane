@@ -7,7 +7,7 @@ import {
   parseOwnDatabaseUrl,
   type ConnectionDraft,
 } from "./connection.js";
-import type { SetupIo, SetupPath } from "./types.js";
+import type { DemoEngine, DemoYaml, SetupIo, SetupPath } from "./types.js";
 import { BACK, type Choice, type Prompter } from "./prompts.js";
 
 export interface WizardAnswers {
@@ -15,6 +15,8 @@ export interface WizardAnswers {
   engine?: WarehouseType;
   connection?: ConnectionDraft;
   client: string | null;
+  demoEngine?: DemoEngine;
+  demoYaml?: DemoYaml;
 }
 
 export interface WizardOptions {
@@ -44,6 +46,36 @@ export const EXISTING_YAML_CHOICES: Choice<"yes" | "no">[] = [
 
 export const PATH_QUESTION = "How do you want to start?";
 
+export const DEMO_ENGINE_QUESTION = "Which demo warehouse?";
+
+export const DEMO_ENGINE_CHOICES: Choice<DemoEngine>[] = [
+  {
+    value: "duckdb",
+    label: "Local DuckDB",
+    hint: "No database, no Docker. Today's demo shop (shipped YAML).",
+  },
+  {
+    value: "postgres",
+    label: "Demo Postgres",
+    hint: "Preloaded sample data (Docker on localhost:5433). Then shipped YAML or build your own.",
+  },
+];
+
+export const DEMO_YAML_QUESTION = "How should Grane learn the demo shop?";
+
+export const DEMO_YAML_CHOICES: Choice<DemoYaml>[] = [
+  {
+    value: "shipped",
+    label: "Use the shipped demo YAML",
+    hint: "Same planted revenue-drop story as today's demo. No authoring.",
+  },
+  {
+    value: "authoring",
+    label: "Build my own YAML against demo Postgres",
+    hint: "Discovery, authoring tools, Set up Grane prompt, YAML generator, then a proposal PR. No production writes or pin.",
+  },
+];
+
 /** Demo/own copy frozen by the V2-04 snapshot in setup.test.ts. */
 export const PATH_CHOICES: Choice<"demo" | "own">[] = [
   {
@@ -64,6 +96,14 @@ export function pathReviewLine(path: SetupPath): string {
   return "own data";
 }
 
+export function demoReviewLine(demoEngine?: DemoEngine, demoYaml?: DemoYaml): string {
+  if (demoEngine === "postgres" && demoYaml === "authoring") {
+    return "demo Postgres (author YAML)";
+  }
+  if (demoEngine === "postgres") return "demo Postgres (shipped YAML)";
+  return pathReviewLine("demo");
+}
+
 /**
  * Interactive existing-YAML? → path → (engine + fields) → MCP client → confirm.
  * Every step after the first accepts `b` / `back`.
@@ -74,9 +114,11 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
   let engine: WarehouseType | undefined;
   let connection: ConnectionDraft | undefined;
   let client: string | null | undefined;
+  let demoEngine: DemoEngine | undefined;
+  let demoYaml: DemoYaml | undefined;
   let fieldIndex = 0;
 
-  type Step = "existing" | "path" | "engine" | "fields" | "client" | "confirm";
+  type Step = "existing" | "path" | "demo_engine" | "demo_yaml" | "engine" | "fields" | "client" | "confirm";
   let step: Step = "existing";
 
   while (true) {
@@ -93,6 +135,8 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         engine = undefined;
         connection = undefined;
         client = undefined;
+        demoEngine = undefined;
+        demoYaml = undefined;
         fieldIndex = 0;
         if (chosen === "yes") {
           path = "import";
@@ -114,10 +158,41 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
           break;
         }
         path = chosen;
-        step = path === "own" ? "engine" : "client";
         engine = undefined;
         connection = undefined;
+        demoEngine = undefined;
+        demoYaml = undefined;
         fieldIndex = 0;
+        step = path === "own" ? "engine" : "demo_engine";
+        break;
+      }
+      case "demo_engine": {
+        const chosen = await opts.prompt.select<DemoEngine>(
+          DEMO_ENGINE_QUESTION,
+          DEMO_ENGINE_CHOICES,
+          { defaultValue: "duckdb", allowBack: true },
+        );
+        if (chosen === BACK) {
+          step = "path";
+          break;
+        }
+        demoEngine = chosen;
+        demoYaml = undefined;
+        step = chosen === "postgres" ? "demo_yaml" : "client";
+        break;
+      }
+      case "demo_yaml": {
+        const chosen = await opts.prompt.select<DemoYaml>(
+          DEMO_YAML_QUESTION,
+          DEMO_YAML_CHOICES,
+          { defaultValue: "shipped", allowBack: true },
+        );
+        if (chosen === BACK) {
+          step = "demo_engine";
+          break;
+        }
+        demoYaml = chosen;
+        step = "client";
         break;
       }
       case "engine": {
@@ -214,9 +289,15 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
           { defaultValue: "cursor", allowBack: true },
         );
         if (chosen === BACK) {
-          step = path === "own" ? "fields" : "path";
-          if (step === "fields" && engine) {
-            fieldIndex = Math.max(0, connectionFields(engine).length - 1);
+          if (path === "own") {
+            step = "fields";
+            if (engine) fieldIndex = Math.max(0, connectionFields(engine).length - 1);
+          } else if (path === "demo" && demoEngine === "postgres") {
+            step = "demo_yaml";
+          } else if (path === "demo") {
+            step = "demo_engine";
+          } else {
+            step = "path";
           }
           break;
         }
@@ -227,7 +308,9 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
       case "confirm": {
         opts.io.log("");
         opts.io.log("Review");
-        opts.io.log(`  Path    ${pathReviewLine(path ?? "own")}`);
+        opts.io.log(
+          `  Path    ${path === "demo" ? demoReviewLine(demoEngine, demoYaml) : pathReviewLine(path ?? "own")}`,
+        );
         if (path === "own" && engine && connection) {
           const cert = WAREHOUSE_CERTIFICATION[engine];
           opts.io.log(`  Engine  ${cert.label} (${engine}) — ${engineHint(engine)}`);
@@ -248,7 +331,15 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         if (path === "own" && (!engine || !connection)) {
           throw new Error("Warehouse connection is incomplete. Go back and fill the fields.");
         }
-        return { path, engine, connection, client: client ?? null };
+        return {
+          path,
+          engine,
+          connection,
+          client: client ?? null,
+          demoEngine: path === "demo" ? (demoEngine ?? "duckdb") : undefined,
+          demoYaml:
+            path === "demo" && demoEngine === "postgres" ? (demoYaml ?? "shipped") : undefined,
+        };
       }
     }
   }
