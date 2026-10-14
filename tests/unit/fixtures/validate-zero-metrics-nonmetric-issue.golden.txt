@@ -1,0 +1,7 @@
+
+ERROR dimension:country: Dimension references undefined entity "order".
+
+0/0 metrics valid
+1 dimensions defined
+0 relationships defined
+providers     native

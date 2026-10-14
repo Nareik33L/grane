@@ -4,6 +4,19 @@ export { DEMO_QUESTION };
 
 export const OWN_QUESTION = "What can you see in the catalog?";
 
+export function importInspectOnlyLines(opts: { projectDir: string; warehouseLabel: string }): string[] {
+  return [
+    "────────────────────────────────────────",
+    "Import inspect only.",
+    "",
+    "Existing YAML loaded and validated. No files were edited. The active pin was not written.",
+    "Run `grane setup` from a terminal to activate.",
+    "",
+    `  Engine   ${opts.warehouseLabel}`,
+    `Project  ${opts.projectDir}`,
+  ];
+}
+
 export function importReadyLines(opts: {
   projectDir: string;
   pinRef: string;
