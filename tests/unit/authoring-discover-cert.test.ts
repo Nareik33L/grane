@@ -99,6 +99,17 @@ for (const engine of engines.filter((item) =>
           runDiscoveryQuery(connector, "INSERT INTO customers VALUES (1)", config.limits),
         ).rejects.toMatchObject({ refusal: { status: "unsafe_query" } });
 
+        await expect(
+          runDiscoveryQuery(connector, "SELECT 1; INSERT INTO customers VALUES (1)", config.limits),
+        ).rejects.toMatchObject({ refusal: { status: "unsafe_query" } });
+        await expect(
+          runDiscoveryQuery(
+            connector,
+            "SELECT 1; COMMIT; CREATE TABLE qa_disc_escape (id INTEGER)",
+            config.limits,
+          ),
+        ).rejects.toMatchObject({ refusal: { status: "unsafe_query" } });
+
         if (session.type === "postgres") {
           const ro = await runDiscoveryQuery(
             connector,
@@ -106,6 +117,9 @@ for (const engine of engines.filter((item) =>
             config.limits,
           );
           expect(String(ro.rows[0]?.ro).toLowerCase()).toMatch(/on|true|1/);
+          await expect(
+            connector.query("SELECT 1; COMMIT; CREATE TABLE qa_disc_escape (id INTEGER)", [], config.limits),
+          ).rejects.toThrow(/multiple commands|cannot insert multiple/i);
         }
         if (session.type === "mysql") {
           const ro = await runDiscoveryQuery(

@@ -9,8 +9,14 @@ import type { GraneConfig, LimitsConfig } from "../config/schema.js";
 import { inferRelationships } from "../discover/relationships.js";
 import type { InferredRelationship } from "../discover/relationships.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../connectors/types.js";
-import { isWriteSql } from "../connectors/types.js";
-import { columnNotPermitted, undefinedColumn, unsafeQuery } from "../errors.js";
+import { isWriteSql, stripLeadingSqlComments } from "../connectors/types.js";
+import {
+  GraneError,
+  columnNotPermitted,
+  explorationDisabled,
+  undefinedColumn,
+  unsafeQuery,
+} from "../errors.js";
 import {
   explorationPolicy,
   isExplorable,
@@ -51,23 +57,138 @@ export interface Discovery {
   profileColumn(table: string, column: string): Promise<ColumnProfile>;
 }
 
+const DISCOVERY_HEAD = /^(select|with)\b/i;
+const DISCOVERY_WITH_WRITE =
+  /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|merge|call|do|optimize|execute|commit|rollback|begin)\b/i;
+
+/** Driver errors are collapsed to this so DSN, passwords, and samples never leak. */
+export const DISCOVERY_WAREHOUSE_ERROR = "Warehouse query failed.";
+
 /**
- * Refuse write SQL before the connector. Discovery profiling always goes
- * through this so a write cannot skip `isWriteSql`.
+ * Refuse anything that is not a single SELECT/WITH statement. Discovery
+ * profiling always goes through this so multi-statement or SET/ATTACH/PRAGMA
+ * input cannot skip `isWriteSql` (which only inspects the first keyword).
  */
 export function assertDiscoverySql(sql: string): void {
-  if (isWriteSql(sql)) {
+  if (typeof sql !== "string" || !sql.trim()) {
+    throw unsafeQuery("Refusing to execute a non-SELECT statement.");
+  }
+  const structural = stripSqlCommentsAndLiterals(sql);
+  const single = structural.replace(/;+\s*$/, "").trim();
+  if (!single) {
+    throw unsafeQuery("Refusing to execute a non-SELECT statement.");
+  }
+  if (single.includes(";")) {
+    throw unsafeQuery("Refusing to execute multiple SQL statements.");
+  }
+  const head = stripLeadingSqlComments(sql);
+  if (!DISCOVERY_HEAD.test(head) || isWriteSql(sql)) {
+    throw unsafeQuery("Refusing to execute a non-SELECT statement.");
+  }
+  const keyword = head.match(/^([A-Za-z_]+)/)?.[1]?.toLowerCase();
+  if (keyword === "with" && DISCOVERY_WITH_WRITE.test(structural)) {
     throw unsafeQuery("Refusing to execute a non-SELECT statement.");
   }
 }
 
+/**
+ * Strip comments and string/identifier literals so `;` and keywords are
+ * checked against statement structure, not contents.
+ */
+export function stripSqlCommentsAndLiterals(sql: string): string {
+  let i = 0;
+  let out = "";
+  const n = sql.length;
+  while (i < n) {
+    const c = sql[i]!;
+    const next = i + 1 < n ? sql[i + 1] : "";
+    if (c === "-" && next === "-") {
+      i += 2;
+      while (i < n && sql[i] !== "\n" && sql[i] !== "\r") i += 1;
+      out += " ";
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      i += 2;
+      while (i + 1 < n && !(sql[i] === "*" && sql[i + 1] === "/")) i += 1;
+      i = i + 1 < n ? i + 2 : n;
+      out += " ";
+      continue;
+    }
+    if (c === "$") {
+      const tag = dollarQuoteTag(sql, i);
+      if (tag) {
+        const close = sql.indexOf(tag, i + tag.length);
+        if (close === -1) break;
+        i = close + tag.length;
+        out += " ";
+        continue;
+      }
+    }
+    if (c === "'" || c === '"' || c === "`") {
+      i = skipQuotedLiteral(sql, i, c);
+      out += " ";
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+function dollarQuoteTag(sql: string, i: number): string | null {
+  if (sql[i] !== "$") return null;
+  let j = i + 1;
+  while (j < sql.length && /[A-Za-z0-9_]/.test(sql[j]!)) j += 1;
+  if (sql[j] === "$") return sql.slice(i, j + 1);
+  return null;
+}
+
+function skipQuotedLiteral(sql: string, start: number, quote: string): number {
+  let i = start + 1;
+  while (i < sql.length) {
+    if (sql[i] === quote) {
+      if (sql[i + 1] === quote) {
+        i += 2;
+        continue;
+      }
+      return i + 1;
+    }
+    i += 1;
+  }
+  return sql.length;
+}
+
+export function redactDriverError(err: unknown): string {
+  const code =
+    err && typeof err === "object" && "code" in err && typeof (err as { code: unknown }).code === "string"
+      ? (err as { code: string }).code
+      : "";
+  if (/^[0-9A-Z]{5}$/.test(code)) return `${DISCOVERY_WAREHOUSE_ERROR} (${code}).`;
+  return DISCOVERY_WAREHOUSE_ERROR;
+}
+
+function sanitizeDiscoveryError(err: unknown): Error {
+  if (err instanceof GraneError) return err;
+  if (err instanceof Error && err.message.startsWith(DISCOVERY_WAREHOUSE_ERROR)) return err;
+  return new Error(redactDriverError(err));
+}
+
+/**
+ * @internal Discovery-only query path. Not part of the public API — callers
+ * must go through {@link createDiscovery}.
+ */
 export async function runDiscoveryQuery(
   connector: WarehouseConnector,
   sql: string,
   limits: LimitsConfig,
 ): Promise<ExecutedRows> {
   assertDiscoverySql(sql);
-  return connector.query(sql, [], limits);
+  try {
+    return await connector.query(sql, [], limits);
+  } catch (err) {
+    throw sanitizeDiscoveryError(err);
+  }
 }
 
 export function clampDiscoverySampleRows(requested: number): number {
@@ -108,15 +229,16 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
     try {
       schema = await options.connector.introspect();
     } catch (err) {
+      const safe = sanitizeDiscoveryError(err);
       emit({
         operation: "introspect",
         target: {},
         sql: [`/* connector.introspect() ${options.connector.type} */`],
         row_count: 0,
         duration_ms: Date.now() - started,
-        refusal: refusalFromError(err),
+        refusal: refusalFromError(safe),
       });
-      throw err;
+      throw safe;
     }
     const columnCount = schema.tables.reduce((n, table) => n + table.columns.length, 0);
     emit({
@@ -136,15 +258,16 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
     try {
       inferred = inferRelationships(schema);
     } catch (err) {
+      const safe = sanitizeDiscoveryError(err);
       emit({
         operation: "relationships",
         target: { schema: schema.schemaName },
         sql: [],
         row_count: 0,
         duration_ms: Date.now() - started,
-        refusal: refusalFromError(err),
+        refusal: refusalFromError(safe),
       });
-      throw err;
+      throw safe;
     }
     emit({
       operation: "relationships",
@@ -166,15 +289,16 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
     try {
       profile = await profileWork(table, column, requested, sql);
     } catch (err) {
+      const safe = sanitizeDiscoveryError(err);
       emit({
         operation: "profile",
         target,
         sql,
         row_count: 0,
         duration_ms: Date.now() - started,
-        refusal: refusalFromError(err),
+        refusal: refusalFromError(safe),
       });
-      throw err;
+      throw safe;
     }
     emit({
       operation: "profile",
@@ -193,6 +317,9 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
     requested: string,
     sql: string[],
   ): Promise<ColumnProfile> {
+    if (!policy.enabled) {
+      throw explorationDisabled(requested);
+    }
     const schema = await options.connector.introspect();
     const found = findColumn(schema, table, column);
     if (!found) {

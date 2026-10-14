@@ -354,6 +354,7 @@ audit:
     expect(logs.join("\n")).toContain("0/0 metrics valid");
     expect(logs.join("\n")).toContain("Catalog");
     expect(logs.join("\n")).toContain("Import inspect only");
+    expect(logs.join("\n")).toContain("Live import writes .grane/audit.jsonl");
     expect(logs.join("\n")).not.toMatch(/activate\s+.grane\/active.json/);
   });
 

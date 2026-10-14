@@ -11,11 +11,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import pg from "pg";
 import { DuckDbConnector } from "../../src/connectors/duckdb.js";
 import { PostgresConnector } from "../../src/connectors/postgres/client.js";
 import {
   POSTGRES_READ_ONLY_BEGIN,
   POSTGRES_SESSION_UTC,
+  POSTGRES_USER_QUERY_MODE,
   postgresStatementTimeoutSql,
 } from "../../src/connectors/postgres/client.js";
 import {
@@ -164,6 +166,13 @@ describe("single write guard", () => {
         expect(src, rel).not.toMatch(/\bWRITE_KEYWORDS\s*=/);
       }
     }
+  });
+
+  it("Postgres user SQL uses extended protocol (single-statement)", () => {
+    expect(POSTGRES_USER_QUERY_MODE).toBe("extended");
+    const src = readFileSync(join(repoRoot, "src/connectors/postgres/client.ts"), "utf8");
+    expect(src).toMatch(/queryMode:\s*POSTGRES_USER_QUERY_MODE/);
+    expect(src).toMatch(/queryMode:\s*"extended"|POSTGRES_USER_QUERY_MODE\s*=\s*"extended"/);
   });
 
   it("no other src/connectors file defines a write-keyword regex", () => {
@@ -506,6 +515,33 @@ describe.skipIf(!pgEnv)("Postgres connector safety", () => {
     await expect(runDiscoveryQuery(c, "INSERT INTO pg_catalog.pg_class VALUES (1)", LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
+  });
+
+  it("extended protocol rejects SELECT 1; COMMIT; CREATE so it cannot leave READ ONLY", async () => {
+    expect(POSTGRES_USER_QUERY_MODE).toBe("extended");
+    const c = live();
+    const table = `qa_disc_escape_${Date.now().toString(36)}`;
+    const escape = `SELECT 1; COMMIT; CREATE TABLE ${table} (id INTEGER)`;
+    expect(isWriteSql(escape)).toBe(false);
+    await expect(runDiscoveryQuery(c, "SELECT 1; INSERT INTO pg_catalog.pg_class VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+    await expect(runDiscoveryQuery(c, escape, LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+    await expect(c.query(escape, [], LIMITS)).rejects.toThrow(/multiple commands|cannot insert multiple/i);
+    const check = await c.query(
+      "SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_name = $1",
+      [table],
+      LIMITS,
+    );
+    expect(Number(check.rows[0]?.n)).toBe(0);
+    const cleanup = new pg.Pool({ connectionString: pgEnv!.writeUrl });
+    try {
+      await cleanup.query(`DROP TABLE IF EXISTS ${table}`);
+    } finally {
+      await cleanup.end();
+    }
   });
 
   it("READ ONLY transaction rejects SELECT FOR UPDATE at the engine", async () => {

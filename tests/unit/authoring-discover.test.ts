@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DISCOVERY_SAMPLE_ROW_HARD_CAP,
+  DISCOVERY_WAREHOUSE_ERROR,
   assertDiscoverySql,
   clampDiscoverySampleRows,
   createDiscovery,
+  redactDriverError,
   runDiscoveryQuery,
 } from "../../src/authoring/discover.js";
+import * as publicApi from "../../src/index.js";
 import { createSession, sessionPath } from "../../src/authoring/session.js";
 import { getDialect } from "../../src/connectors/dialect.js";
 import { isWriteSql, type DatabaseSchema, type ExecutedRows, type WarehouseConnector } from "../../src/connectors/types.js";
@@ -132,7 +135,15 @@ describe("discovery sample cap", () => {
   });
 });
 
+const LIMITS = { max_rows: 100, default_rows: 100, timeout_ms: 1000 };
+
 describe("assertDiscoverySql / runDiscoveryQuery", () => {
+  it("is not part of the public API", () => {
+    expect(publicApi).not.toHaveProperty("runDiscoveryQuery");
+    expect(publicApi).toHaveProperty("createDiscovery");
+    expect(publicApi).toHaveProperty("assertDiscoverySql");
+  });
+
   it("does not treat SELECT FOR UPDATE as write SQL (engine must still refuse it)", async () => {
     const { SELECT_FOR_UPDATE, selectForUpdateIsNotWriteSql } = await import("../helpers/discovery-readonly.js");
     expect(selectForUpdateIsNotWriteSql()).toBe(true);
@@ -144,24 +155,68 @@ describe("assertDiscoverySql / runDiscoveryQuery", () => {
     expect(() => assertDiscoverySql("INSERT INTO t VALUES (1)")).toThrow(GraneError);
     expect(isWriteSql("INSERT INTO t VALUES (1)")).toBe(true);
     const connector = recordingConnector();
-    await expect(
-      runDiscoveryQuery(connector, "INSERT INTO t VALUES (1)", {
-        max_rows: 100,
-        default_rows: 100,
-        timeout_ms: 1000,
-      }),
-    ).rejects.toMatchObject({ refusal: { status: "unsafe_query" } });
+    await expect(runDiscoveryQuery(connector, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
     expect(connector.sql).toEqual([]);
+    expect(() =>
+      assertDiscoverySql("WITH cte AS (SELECT 1) INSERT INTO t SELECT * FROM cte"),
+    ).toThrow(GraneError);
+  });
+
+  it("refuses multi-statement SQL even when the first keyword is SELECT", async () => {
+    const attacks = [
+      "SELECT 1; INSERT INTO t VALUES (1)",
+      "SELECT 1; COMMIT; CREATE TABLE qa_escape (id INTEGER)",
+      "SELECT 1;COMMIT;CREATE TABLE qa_escape (id INTEGER)",
+      "SELECT 1; /* comment */ INSERT INTO t VALUES (1)",
+    ];
+    for (const sql of attacks) {
+      expect(isWriteSql(sql), sql).toBe(false);
+      expect(() => assertDiscoverySql(sql), sql).toThrow(GraneError);
+      const connector = recordingConnector();
+      await expect(runDiscoveryQuery(connector, sql, LIMITS)).rejects.toMatchObject({
+        refusal: { status: "unsafe_query" },
+      });
+      expect(connector.sql, sql).toEqual([]);
+    }
+  });
+
+  it("allows semicolons hidden in comments or string/identifier literals", () => {
+    assertDiscoverySql("SELECT ';' AS v");
+    assertDiscoverySql("SELECT 1 /* ; INSERT INTO t VALUES (1) */ AS v");
+    assertDiscoverySql("SELECT 1 -- ; INSERT INTO t VALUES (1)\n");
+    assertDiscoverySql("SELECT $q$; INSERT INTO t VALUES (1)$q$ AS v");
+    assertDiscoverySql('SELECT "col;name" AS v');
+    assertDiscoverySql("SELECT 1 AS v;");
+    assertDiscoverySql("WITH cte AS (SELECT 1 AS v) SELECT v FROM cte");
+  });
+
+  it("refuses SET, ATTACH, PRAGMA, and COPY TO", async () => {
+    const attacks = [
+      "SET TimeZone = 'UTC'",
+      "ATTACH 'file.db' AS extra",
+      "PRAGMA disable_optimizer",
+      "COPY t TO '/tmp/out.csv'",
+      "COPY (SELECT 1) TO STDOUT",
+    ];
+    expect(isWriteSql("SET TimeZone = 'UTC'")).toBe(false);
+    expect(isWriteSql("ATTACH 'file.db' AS extra")).toBe(false);
+    expect(isWriteSql("PRAGMA disable_optimizer")).toBe(false);
+    for (const sql of attacks) {
+      expect(() => assertDiscoverySql(sql), sql).toThrow(GraneError);
+      const connector = recordingConnector();
+      await expect(runDiscoveryQuery(connector, sql, LIMITS)).rejects.toMatchObject({
+        refusal: { status: "unsafe_query" },
+      });
+      expect(connector.sql, sql).toEqual([]);
+    }
   });
 
   it("allows SELECT through the connector", async () => {
     assertDiscoverySql("SELECT 1 AS v");
     const connector = recordingConnector();
-    const result = await runDiscoveryQuery(connector, "SELECT 1 AS v", {
-      max_rows: 100,
-      default_rows: 100,
-      timeout_ms: 1000,
-    });
+    const result = await runDiscoveryQuery(connector, "SELECT 1 AS v", LIMITS);
     expect(connector.sql).toEqual(["SELECT 1 AS v"]);
     expect(result.rows.length).toBeGreaterThan(0);
   });
@@ -261,6 +316,7 @@ describe("createDiscovery", () => {
     const discovery = createDiscovery({
       config: exampleConfig({
         audit: { enabled: true, path: ".grane/audit.jsonl" },
+        exploration: { enabled: true },
         authoring: { sampling: false, sample_rows: 20 },
       }),
       connector,
@@ -293,6 +349,67 @@ describe("createDiscovery", () => {
     expect(event.operation).toBe("profile");
     expect(event.refusal).toMatchObject({ status: "column_not_permitted" });
     expect(JSON.stringify(event)).not.toContain(SECRET_SAMPLE);
+  });
+
+  it("refuses profiling when exploration.enabled is false and still emits one audit line", async () => {
+    const dir = tempProject();
+    const connector = recordingConnector();
+    const discovery = createDiscovery({
+      config: exampleConfig({
+        audit: { enabled: true, path: ".grane/audit.jsonl" },
+        exploration: { enabled: false },
+      }),
+      connector,
+      projectDir: dir,
+    });
+    await expect(discovery.profileColumn("customers", "status")).rejects.toMatchObject({
+      refusal: { status: "exploration_disabled" },
+    });
+    expect(connector.sql).toEqual([]);
+    const events = readJsonl(join(dir, ".grane", "audit.jsonl"));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "discovery",
+      operation: "profile",
+      read_only: true,
+      refusal: { status: "exploration_disabled" },
+    });
+  });
+
+  it("redacts driver error text so DSN, passwords, and samples never appear in errors or audit", async () => {
+    const dir = tempProject();
+    const leak = `password authentication failed for user "grane" ${SECRET_URL} password=${SECRET_PASSWORD} sample=${SECRET_SAMPLE}`;
+    const connector = recordingConnector({
+      query: async () => {
+        throw Object.assign(new Error(leak), { code: "28P01" });
+      },
+    });
+    const discovery = createDiscovery({
+      config: secretfulConfig(dir, { exploration: { enabled: true } }),
+      connector,
+      projectDir: dir,
+    });
+    let thrown: unknown;
+    try {
+      await discovery.profileColumn("customers", "status");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toBe(redactDriverError(Object.assign(new Error(leak), { code: "28P01" })));
+    expect(message).toBe(`${DISCOVERY_WAREHOUSE_ERROR} (28P01).`);
+    for (const secret of [SECRET_SAMPLE, SECRET_PASSWORD, SECRET_URL, "password authentication", leak]) {
+      expect(message).not.toContain(secret);
+    }
+    const raw = readFileSync(join(dir, ".grane", "audit.jsonl"), "utf8");
+    expect(raw.trimEnd().split("\n")).toHaveLength(1);
+    for (const secret of [SECRET_SAMPLE, SECRET_PASSWORD, SECRET_URL, leak]) {
+      expect(raw).not.toContain(secret);
+    }
+    const event = readJsonl(join(dir, ".grane", "audit.jsonl"))[0]!;
+    expect(event.operation).toBe("profile");
+    expect(event.refusal).toMatchObject({ status: "error", message: `${DISCOVERY_WAREHOUSE_ERROR} (28P01).` });
   });
 
   it("refuses the discovery call when fail_closed and the audit append fails", async () => {

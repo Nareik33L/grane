@@ -8,6 +8,7 @@ export type SetupInvocation =
 /**
  * Resolve `grane setup` flags. `--import <dir>` is non-interactive
  * load/validate/inspect and never pins (activation stays TTY-only).
+ * Live import still writes `.grane/audit.jsonl`.
  */
 export function resolveSetupInvocation(options: {
   import?: string;

@@ -84,7 +84,6 @@ export {
 } from "./audit.js";
 export {
   createDiscovery,
-  runDiscoveryQuery,
   assertDiscoverySql,
   DISCOVERY_SAMPLE_ROW_HARD_CAP,
   type Discovery,
