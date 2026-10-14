@@ -419,6 +419,31 @@ describe("git proposal library", () => {
     expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
   });
 
+  it("refuses a proposal that would write .grane/active.json", () => {
+    const dir = initRepo();
+    try {
+      createProposal(dir, {
+        slug: "agent-pin",
+        at: new Date("2026-10-14T00:00:00.000Z"),
+        files: {
+          ".grane/active.json": JSON.stringify({
+            ref: "main",
+            commit: git(dir, ["rev-parse", "HEAD"]),
+            approved_by: "agent",
+            approved_at: "2026-10-14T12:00:00.000Z",
+          }),
+        },
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/\.grane/);
+    }
+    expect(readActivePin(dir)).toBeNull();
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+  });
+
   it("ignores dirty files under .grane/ and still refuses a path that would write the active branch", () => {
     const dir = initRepo();
     mkdirSync(join(dir, ".grane", "authoring"), { recursive: true });

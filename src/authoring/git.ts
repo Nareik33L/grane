@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import { isAdopterTestYaml, loadConfig } from "../config/load.js";
+import { findProjectDir, isAdopterTestYaml, loadConfig, type LoadedConfig } from "../config/load.js";
 import { configError } from "../errors.js";
 import { combineSemanticYaml } from "./yaml-merge.js";
 
@@ -294,11 +294,69 @@ function gitPath(root: string, projectDir: string, rel: string): string {
 export function readActivePin(projectDir: string): ActivePin | null {
   const path = join(projectDir, ACTIVE_PIN_PATH);
   if (!existsSync(path)) return null;
+  let raw: unknown;
   try {
-    return activePinSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+    raw = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw configError(`Invalid ${ACTIVE_PIN_PATH}: ${(err as Error).message}`);
+    throw configError(
+      `Invalid ${ACTIVE_PIN_PATH}: ${(err as Error).message}. ` +
+        `Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
+    );
   }
+  const parsed = activePinSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`).join("; ");
+    throw configError(
+      `Invalid ${ACTIVE_PIN_PATH}: ${issues}. ` +
+        `Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
+    );
+  }
+  return parsed.data;
+}
+
+/** YAML `loadConfig` would merge from `commit` at `projectDir` (non-recursive). */
+export function yamlContentsAtCommit(projectDir: string, commit: string): Record<string, string> {
+  const dir = resolve(projectDir);
+  const root = gitRoot(dir);
+  const resolved = resolveCommit(root, commit);
+  let relProject = relative(root, dir).replaceAll("\\", "/");
+  if (relProject === "." || relProject === "") relProject = "";
+  const names = commitProjectYamlBasenames(root, resolved, relProject);
+  const contents: Record<string, string> = {};
+  for (const name of names) {
+    const path = relProject ? `${relProject}/${name}` : name;
+    contents[name] = git(root, ["show", `${resolved}:${path}`]);
+  }
+  return contents;
+}
+
+/**
+ * Config `grane serve` loads. No pin: identical to `loadConfig` (working tree).
+ * With a pin: YAML from that commit's tree. Malformed or missing-commit pins
+ * fail closed.
+ */
+export function loadServingConfig(projectDir: string): LoadedConfig & { pin: ActivePin | null } {
+  const dir = findProjectDir(projectDir);
+  const pin = readActivePin(dir);
+  if (!pin) {
+    return { ...loadConfig(dir), pin: null };
+  }
+  const root = gitRoot(dir);
+  const probe = runGit(root, ["rev-parse", "--verify", `${pin.commit}^{commit}`], { allowFail: true });
+  if (probe.status !== 0) {
+    throw configError(
+      `Pinned commit "${pin.commit}" is not in this repository. ` +
+        `Serve refuses to start. Restore the commit or fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  const commit = probe.stdout.trim();
+  const yamlContents = yamlContentsAtCommit(dir, commit);
+  if (!yamlContents["grane.yml"] && !yamlContents["grane.yaml"]) {
+    throw configError(
+      `Pinned commit ${commit} has no grane.yml. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  return { ...loadConfig(dir, { yamlContents }), pin: { ...pin, commit } };
 }
 
 function resolveCommit(root: string, rev: string): string {
