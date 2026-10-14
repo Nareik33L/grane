@@ -111,11 +111,14 @@ authoring tools cannot write the pin.
 `grane/proposal/*` branches. **Approve** pins the merge commit of a GitHub
 PR: it requires a human TTY or a PR that is already merged, and it is not
 an MCP tool. `approved_by` defaults to `git user.name`. **Rollback**
-re-pins `previous_commit` (or `--to` of a previously approved pin only).
+re-pins `previous_commit` (or `--to` of a previously approved pin only);
+`approved_by` defaults to `git user.name`. Pin writes and restores use
+temp+rename.
 **Reject** deletes the proposal ref only after writing the audit line (or
 restores the branch SHA if that write fails); a TTY prompts `y/N` unless
 `--yes`. None of these commands merge, reset, or move `main`. Each action
-writes one audit line. With `audit.fail_closed`, Grane proves the audit
+writes a proposal audit line (approve and rollback also write a pin
+line). With `audit.fail_closed`, Grane proves the audit
 path is writable before creating a proposal branch or writing the pin.
 `proposals diff` flags removed metrics and entities, keys the YAML merge
 restored from the base, and comments dropped by that merge. Approve,

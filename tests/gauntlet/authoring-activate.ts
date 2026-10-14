@@ -113,7 +113,7 @@ export async function runAuthoringActivateGauntlet(options?: {
       const prompt = await client.getPrompt({ name: SETUP_GRANE_PROMPT_NAME });
       const text = prompt.messages[0] && "text" in prompt.messages[0].content ? prompt.messages[0].content.text : "";
       if (text !== SETUP_GRANE_SCRIPT) {
-        return { code: "FAIL", detail: "Set up Grane prompt did not match the golden script" };
+        return { code: "SECURITY CRITICAL", detail: "Set up Grane prompt did not match the golden script" };
       }
       if (!text.includes("Do not pin .grane/active.json")) {
         return { code: "SECURITY CRITICAL", detail: "Set up Grane prompt does not forbid pinning" };
@@ -148,7 +148,7 @@ export async function runAuthoringActivateGauntlet(options?: {
       ) as { id: string; kind: string; candidates: string[] }[];
       let guard = 0;
       while (open.length > 0) {
-        if (guard++ > 20) return { code: "FAIL", detail: "too many ambiguity rounds" };
+        if (guard++ > 20) return { code: "SECURITY CRITICAL", detail: "too many ambiguity rounds" };
         const item = open[0]!;
         const chosen = item.candidates.includes("orders.net_amount")
           ? "orders.net_amount"
@@ -157,7 +157,7 @@ export async function runAuthoringActivateGauntlet(options?: {
           name: "resolve_ambiguity",
           arguments: { session_id: sessionId, id: item.id, chosen },
         });
-        if (resolved.isError) return { code: "FAIL", detail: `resolve_ambiguity failed for ${item.id}` };
+        if (resolved.isError) return { code: "SECURITY CRITICAL", detail: `resolve_ambiguity failed for ${item.id}` };
         open = parseTool(
           await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }),
         ) as { id: string; kind: string; candidates: string[] }[];
@@ -166,20 +166,20 @@ export async function runAuthoringActivateGauntlet(options?: {
         name: "propose_definitions",
         arguments: { session_id: sessionId },
       });
-      if (proposed.isError) return { code: "FAIL", detail: "propose_definitions refused" };
+      if (proposed.isError) return { code: "SECURITY CRITICAL", detail: "propose_definitions refused" };
       const preview = await client.callTool({ name: "preview_yaml", arguments: { session_id: sessionId } });
-      if (preview.isError) return { code: "FAIL", detail: "preview_yaml refused" };
+      if (preview.isError) return { code: "SECURITY CRITICAL", detail: "preview_yaml refused" };
       const submitted = await client.callTool({
         name: "submit_proposal",
         arguments: { session_id: sessionId, slug: "demo-activate" },
       });
       if (submitted.isError) {
-        return { code: "FAIL", detail: `submit_proposal refused: ${(submitted.content as { text: string }[])[0]?.text}` };
+        return { code: "SECURITY CRITICAL", detail: `submit_proposal refused: ${(submitted.content as { text: string }[])[0]?.text}` };
       }
       const submittedPayload = parseTool(submitted) as { proposal?: { branch?: string } };
       const proposalBranch = submittedPayload.proposal?.branch;
       if (!proposalBranch) {
-        return { code: "FAIL", detail: "submit_proposal did not return a proposal branch" };
+        return { code: "SECURITY CRITICAL", detail: "submit_proposal did not return a proposal branch" };
       }
 
       if (options?.mutateMainCommit) {
@@ -197,7 +197,7 @@ export async function runAuthoringActivateGauntlet(options?: {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (!/\.grane/.test(message) && !/Refusing/.test(message)) {
-          return { code: "FAIL", detail: `unexpected createProposal error: ${message}` };
+          return { code: "SECURITY CRITICAL", detail: `unexpected createProposal error: ${message}` };
         }
       }
 
@@ -232,7 +232,8 @@ export async function runAuthoringActivateGauntlet(options?: {
       await kernel.close().catch(() => undefined);
     }
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    const message = err instanceof Error ? err.message : String(err);
+    return { code: "SECURITY CRITICAL", detail: `unexpected error in security scenario: ${message}` };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

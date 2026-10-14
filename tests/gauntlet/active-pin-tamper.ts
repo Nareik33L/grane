@@ -37,7 +37,7 @@ function mustRefuse(dir: string, label: string): Verdict | null {
     };
   } catch (err) {
     if (!(err instanceof GraneError) && !(err instanceof Error)) {
-      return { code: "FAIL", detail: `${label}: threw non-error ${String(err)}` };
+      return { code: "SECURITY CRITICAL", detail: `${label}: threw non-error ${String(err)}` };
     }
     const message = err instanceof Error ? err.message : String(err);
     if (
@@ -45,7 +45,7 @@ function mustRefuse(dir: string, label: string): Verdict | null {
         message,
       )
     ) {
-      return { code: "FAIL", detail: `${label}: unexpected error: ${message}` };
+      return { code: "SECURITY CRITICAL", detail: `${label}: unexpected error: ${message}` };
     }
     return null;
   }
@@ -114,7 +114,7 @@ export async function runTamperedActivePinGauntlet(): Promise<Verdict> {
     writePinFile(dir, valid);
     const loaded = loadServingConfig(dir);
     if (loaded.pin?.approved_by !== "Reagent Smith") {
-      return { code: "FAIL", detail: `valid pin with approved_by "Reagent Smith" did not load` };
+      return { code: "SECURITY CRITICAL", detail: `valid pin with approved_by "Reagent Smith" did not load` };
     }
 
     return {
@@ -123,7 +123,10 @@ export async function runTamperedActivePinGauntlet(): Promise<Verdict> {
         "Hand-edited active.json (proposal commit/ref, HEAD, tag, other branch, abbreviated SHA, commit=main) failed closed; serve did not load the tampered tree",
     };
   } catch (err) {
-    return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };
+    return {
+      code: "SECURITY CRITICAL",
+      detail: `unexpected error in security scenario: ${err instanceof Error ? err.message : String(err)}`,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

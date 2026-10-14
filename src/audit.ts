@@ -148,8 +148,9 @@ export interface PinAuditEvent {
 }
 
 /**
- * One `grane proposals` action. Approve/rollback reuse the pin write line
- * (this event is for list/diff/reject, or a refused approve/rollback).
+ * One `grane proposals` action. Approve and rollback also write a pin line;
+ * this event is recorded for list/diff/reject and for every approve/rollback
+ * (success or refuse).
  */
 export interface ProposalAuditEvent {
   ts: string;

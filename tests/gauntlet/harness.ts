@@ -242,6 +242,9 @@ export async function runScenario(scenario: Scenario, harness: Harness): Promise
       const message = err instanceof Error ? err.message : String(err);
       const leaks = errorLeaksSecrets(message);
       if (leaks.length) return { code: "SECURITY CRITICAL", detail: `error leaked ${leaks.join(", ")}` };
+      if (scenario.guessSeverity === "security") {
+        return { code: "SECURITY CRITICAL", detail: `unexpected error in security scenario: ${message}` };
+      }
       return { code: "FAIL", detail: message };
     }
   }
@@ -468,6 +471,9 @@ function refuseOrFail(scenario: Scenario, err: unknown): Verdict {
       };
     }
     return { code: "FAIL", detail: `incorrect refusal ${err.refusal.status}: ${err.refusal.message}` };
+  }
+  if (scenario.guessSeverity === "security") {
+    return { code: "SECURITY CRITICAL", detail: `unexpected error in security scenario: ${message}` };
   }
   if (wantsExecution) {
     return { code: "FAIL", detail: message };

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
+  CRITICAL gate. Unexpected errors inside a security scenario score
+  `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection
+  in comments/samples, self-approve, active YAML / pin writes, discovery outside
+  the exploration policy, huge schemas, time-like `group_by` (`ts` bigint,
+  `period` varchar, `as_of` text), nullable UNIQUE grain, demo Postgres
+  composite-PK / keyless / partitioned tables, and hostile slug/path arguments
+  — grain, temporal `group_by`, and hostile slug/path are driven through MCP.
+  Each hostile path must be refused with Grane's own
+  `Refusing to commit path` (git's `Invalid path` is not a pass). Audit
+  asserts inspect only lines appended since the action under test.
+  SELECT-only INSERT hits the real adapter (`grane_readonly` Postgres when
+  live, else DuckDB), not the recording stub.
+  Missing pin write/refuse, proposal submit/approve/reject/rollback, or
+  discovery `read_only:true` audit lines are `SECURITY CRITICAL`. Successful
+  approve and rollback each write a proposal audit line in addition to the pin
+  write. Preview/submit refuse `..` and absolute `draft_yaml` paths before
+  writing. Unmerged
+  proposal commits are refused by approve, rollback, and `writeActivePin`.
+  Nested `.grane-demo` repos refuse approve/reject/rollback/pin write. First
+  pin is the configured base (`project.base_branch` / develop), never HEAD.
+  SELECT-only discovery refuses writes and still sees partitioned parents.
+  V2-13 `proposals list|diff|approve|reject|rollback` is exercised against a
+  merged proposal. Every authoring case asserts `main` SHA and proposal parent
+  are unchanged. The MCP byte-identical sweep and pin tamper table live in the
+  gauntlet; the sweep fails if a newly registered MCP tool is not included.
+  Rollback `approved_by` defaults to `git user.name`. Pin restore after a
+  failed audit write uses temp+rename.
 - **Review/approve/rollback CLI (V2-13).** `grane proposals list|diff|approve|reject|rollback`.
   Approve requires a human TTY or a merged GitHub PR and cannot be invoked
   from MCP (`src/mcp/**` must not import or call approve, rollback, reject,

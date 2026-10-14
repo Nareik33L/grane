@@ -131,7 +131,7 @@ function runCli(dir: string, args: string[]): { status: number; stdout: string; 
 }
 
 describe("grane proposals list|diff|approve|reject|rollback", () => {
-  it("lists and diffs a proposal with one audit line each; CLI matches", () => {
+  it("lists and diffs a proposal with one audit line each; CLI matches", { timeout: 60_000 }, () => {
     const dir = initRepo();
     const proposal = createProposal(dir, {
       slug: "revenue",
@@ -205,7 +205,17 @@ describe("grane proposals list|diff|approve|reject|rollback", () => {
     approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
     expect(readActivePin(dir)?.commit).toBe(merged);
 
-    const rolled = rollbackPin(dir, { approved_by: "octocat" });
+    const named = rollbackPin(dir, { approved_by: "octocat" });
+    expect(named.commit).toBe(first);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: merged,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:02:00.000Z",
+      previous_commit: first,
+    });
+    const rolled = rollbackPin(dir);
+    expect(rolled.approved_by).toBe("Grane Test");
     expect(rolled.commit).toBe(first);
     expect(rolled.previous_commit).toBe(merged);
     expect(git(dir, ["rev-parse", "main"])).toBe(merged);

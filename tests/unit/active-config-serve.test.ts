@@ -16,14 +16,11 @@ import {
   writeActivePin,
 } from "../../src/authoring/git.js";
 import { loadConfig } from "../../src/config/load.js";
-import { getDialect } from "../../src/connectors/dialect.js";
-import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { SemanticModel } from "../../src/model/model.js";
 import { buildMcpServer, AUTHORING_MCP_TOOLS, CORE_MCP_TOOLS } from "../../src/mcp/server.js";
 import { GraneError } from "../../src/errors.js";
 import { validateModel } from "../../src/validate/validate.js";
-import { runTamperedActivePinGauntlet } from "../gauntlet/active-pin-tamper.js";
 import * as publicApi from "../../src/index.js";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "../../src");
@@ -93,34 +90,6 @@ function initRepo(metrics = METRICS_YML): string {
   return dir;
 }
 
-function stubConnector(): WarehouseConnector {
-  return {
-    type: "postgres",
-    dialect: getDialect("postgres"),
-    async query() {
-      return { columns: ["revenue"], rows: [{ revenue: 1 }] };
-    },
-    async introspect() {
-      return {
-        schemaName: "public",
-        tables: [
-          {
-            schema: "public",
-            name: "orders",
-            primaryKey: "id",
-            columns: [
-              { name: "id", dataType: "integer", nullable: false },
-              { name: "net_amount", dataType: "numeric", nullable: true },
-            ],
-          },
-        ],
-        foreignKeys: [],
-      };
-    },
-    async close() {},
-  };
-}
-
 function readAudit(dir: string): Record<string, unknown>[] {
   const path = join(dir, ".grane", "audit.jsonl");
   if (!existsSync(path)) return [];
@@ -129,11 +98,6 @@ function readAudit(dir: string): Record<string, unknown>[] {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
-function parseToolPayload(result: { content: { type: string; text: string }[] }): Record<string, unknown> {
-  const text = result.content[0]!.text;
-  return JSON.parse(text.slice(text.indexOf("{"))) as Record<string, unknown>;
 }
 
 describe("loadServingConfig without a pin (compat)", () => {
@@ -459,68 +423,7 @@ describe("MCP and authoring cannot write the pin", () => {
     expect(readFileSync(join(srcRoot, "mcp/authoring.ts"), "utf8")).not.toMatch(/writeActivePin/);
     expect(readFileSync(join(srcRoot, "authoring/tools.ts"), "utf8")).not.toMatch(/writeActivePin/);
     expect(readFileSync(join(srcRoot, "authoring/git.ts"), "utf8")).toMatch(/renameSync/);
-  });
-
-  it("MCP sweep calls every tool including authoring and leaves the pin bytes and main SHA unmoved", async () => {
-    const dir = initRepo();
-    const main = git(dir, ["rev-parse", "main"]);
-    writeActivePin(dir, {
-      ref: "main",
-      commit: main,
-      approved_by: "Reagent Smith",
-      approved_at: "2026-10-14T12:00:00.000Z",
-    });
-    const pinBytes = readFileSync(join(dir, ACTIVE_PIN_PATH));
-    const serving = loadServingConfig(dir);
-    const kernel = new GraneKernel(serving.config, {
-      projectDir: serving.projectDir,
-      activePin: serving.pin,
-      connector: stubConnector(),
-    });
-    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "grane-pin-sweep", version: "0.0.1" });
-    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-    try {
-      const listed = (await client.listTools()).tools.map((tool) => tool.name).sort();
-      expect(listed).toEqual([...CORE_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
-
-      const start = await client.callTool({ name: "authoring_start", arguments: {} });
-      const startPayload = parseToolPayload(start as { content: { type: string; text: string }[] });
-      const sessionId = (startPayload.session as { id: string }).id;
-      expect(sessionId).toBeTruthy();
-
-      const query = { metrics: ["revenue"] };
-      const argsFor = (name: string): Record<string, unknown> => {
-        if (name === "catalog" || name === "authoring_start") return {};
-        if (name === "validate" || name === "query" || name === "explain") return { query };
-        if (name === "profile_column") return { session_id: sessionId, table: "orders", column: "net_amount" };
-        if (name === "record_term") return { session_id: sessionId, term: "revenue", answer: "net_amount" };
-        if (name === "resolve_ambiguity") {
-          return { session_id: sessionId, id: "missing", chosen: "orders.net_amount" };
-        }
-        return { session_id: sessionId };
-      };
-
-      for (const name of listed) {
-        await client.callTool({ name, arguments: argsFor(name) });
-      }
-      for (const banned of ["approve", "rollback", "reject", "proposals_approve", "proposals_rollback"]) {
-        try {
-          const result = await client.callTool({ name: banned, arguments: { id: "x" } });
-          expect(result.isError, `MCP exposed ${banned}`).toBe(true);
-        } catch {
-          // unknown tool — expected
-        }
-      }
-    } finally {
-      await client.close().catch(() => undefined);
-      await server.close().catch(() => undefined);
-    }
-
-    expect(readFileSync(join(dir, ACTIVE_PIN_PATH)).equals(pinBytes)).toBe(true);
-    expect(git(dir, ["rev-parse", "main"])).toBe(main);
-    expect(readActivePin(dir)?.commit).toBe(main);
+    expect(readFileSync(join(srcRoot, "authoring/git.ts"), "utf8")).toMatch(/function atomicWriteFile/);
   });
 
   it("src/mcp/** must not import or call approveProposal, rollbackPin, rejectProposal, or deleteProposalBranch", () => {
@@ -537,125 +440,6 @@ describe("MCP and authoring cannot write the pin", () => {
     walk(mcpRoot);
     const hits = files.filter((path) => banned.test(readFileSync(path, "utf8")));
     expect(hits.map((path) => path.slice(mcpRoot.length + 1).replaceAll("\\", "/"))).toEqual([]);
-  });
-
-  it("MCP sweep with a merged proposal leaves pin bytes, main, and proposal branches unmoved", async () => {
-    const dir = initRepo();
-    const mainBeforePin = git(dir, ["rev-parse", "main"]);
-    writeActivePin(dir, {
-      ref: "main",
-      commit: mainBeforePin,
-      approved_by: "Reagent Smith",
-      approved_at: "2026-10-14T12:00:00.000Z",
-    });
-    const open = createProposal(dir, {
-      slug: "open-draft",
-      at: new Date("2026-10-14T00:00:00.000Z"),
-      files: {
-        "metrics.yml": `metrics:
-  extra:
-    entity: order
-    type: count
-    sql: "\${orders.id}"
-    status: experimental
-`,
-      },
-    });
-    const mergedProposal = createProposal(dir, {
-      slug: "merged-revenue",
-      at: new Date("2026-10-15T00:00:00.000Z"),
-      files: {
-        "metrics.yml": `metrics:
-  extra_revenue:
-    entity: order
-    type: sum
-    sql: "\${orders.net_amount}"
-    status: experimental
-`,
-      },
-    });
-    git(dir, [
-      "merge",
-      "--no-ff",
-      "-m",
-      `Merge pull request #1 from ${mergedProposal.branch}\n\nGrane-Proposal: ${mergedProposal.id}`,
-      mergedProposal.branch,
-    ]);
-    const main = git(dir, ["rev-parse", "main"]);
-    const pinBytes = readFileSync(join(dir, ACTIVE_PIN_PATH));
-    const branchesBefore = git(dir, [
-      "for-each-ref",
-      "--format=%(refname)",
-      "refs/heads/grane/proposal/",
-    ]);
-    expect(branchesBefore).toContain(open.branch);
-    expect(branchesBefore).toContain(mergedProposal.branch);
-
-    const serving = loadServingConfig(dir);
-    const kernel = new GraneKernel(serving.config, {
-      projectDir: serving.projectDir,
-      activePin: serving.pin,
-      connector: stubConnector(),
-    });
-    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "grane-merged-sweep", version: "0.0.1" });
-    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-    try {
-      const listed = (await client.listTools()).tools.map((tool) => tool.name).sort();
-      expect(listed).toEqual([...CORE_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
-
-      const start = await client.callTool({ name: "authoring_start", arguments: {} });
-      const startPayload = parseToolPayload(start as { content: { type: string; text: string }[] });
-      const sessionId = (startPayload.session as { id: string }).id;
-      const query = { metrics: ["revenue"] };
-      const argsFor = (name: string): Record<string, unknown> => {
-        if (name === "catalog" || name === "authoring_start") return {};
-        if (name === "validate" || name === "query" || name === "explain") return { query };
-        if (name === "profile_column") return { session_id: sessionId, table: "orders", column: "net_amount" };
-        if (name === "record_term") return { session_id: sessionId, term: "revenue", answer: "net_amount" };
-        if (name === "resolve_ambiguity") {
-          return { session_id: sessionId, id: "missing", chosen: "orders.net_amount" };
-        }
-        return { session_id: sessionId };
-      };
-      for (const name of listed) {
-        await client.callTool({ name, arguments: argsFor(name) });
-      }
-      for (const banned of [
-        "approve",
-        "rollback",
-        "reject",
-        "approveProposal",
-        "rollbackPin",
-        "rejectProposal",
-        "deleteProposalBranch",
-        "proposals_approve",
-        "proposals_rollback",
-        "proposals_reject",
-      ]) {
-        try {
-          const result = await client.callTool({
-            name: banned,
-            arguments: { id: mergedProposal.id },
-          });
-          expect(result.isError, `MCP exposed ${banned}`).toBe(true);
-        } catch {
-          // unknown tool — expected
-        }
-      }
-    } finally {
-      await client.close().catch(() => undefined);
-      await server.close().catch(() => undefined);
-    }
-
-    expect(readFileSync(join(dir, ACTIVE_PIN_PATH)).equals(pinBytes)).toBe(true);
-    expect(git(dir, ["rev-parse", "main"])).toBe(main);
-    expect(
-      git(dir, ["for-each-ref", "--format=%(refname)", "refs/heads/grane/proposal/"]),
-    ).toBe(branchesBefore);
-    expect(git(dir, ["rev-parse", `refs/heads/${open.branch}`])).toBe(open.commit);
-    expect(git(dir, ["rev-parse", `refs/heads/${mergedProposal.branch}`])).toBe(mergedProposal.commit);
   });
 });
 
@@ -788,9 +572,3 @@ describe("merged proposal on a base that already had YAML", () => {
   });
 });
 
-describe("tampered active.json gauntlet", () => {
-  it("fails closed when commit, ref, HEAD, tag, other branch, or abbreviated SHA is hand-edited", async () => {
-    const verdict = await runTamperedActivePinGauntlet();
-    expect(verdict.code).toBe("PASS — POLICY");
-  });
-});
