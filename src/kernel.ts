@@ -306,20 +306,28 @@ export class GraneKernel {
         reason: u.reason,
         source: { provider: u.provider, ...(u.path ? { path: u.path } : {}) },
       }));
-    return { server: this.serverInfo(), metrics, dimensions, entities, unsupported };
+    return {
+      server: this.serverInfo(),
+      metrics,
+      dimensions,
+      entities,
+      unsupported,
+      ...(this.activePin
+        ? {
+            active: {
+              ref: this.activePin.ref,
+              commit: this.activePin.commit,
+              approved_by: this.activePin.approved_by,
+              approved_at: this.activePin.approved_at,
+            },
+          }
+        : {}),
+    };
   }
 
   async catalog(search?: string): Promise<Catalog> {
     const governed = this.governedCatalog(search);
     const policy = explorationPolicy(this.config);
-    const active = this.activePin
-      ? {
-          ref: this.activePin.ref,
-          commit: this.activePin.commit,
-          approved_by: this.activePin.approved_by,
-          approved_at: this.activePin.approved_at,
-        }
-      : undefined;
     if (!policy.enabled) {
       return {
         ...governed,
@@ -331,7 +339,6 @@ export class GraneKernel {
           excluded: this.config.exploration.exclude,
           columns: [],
         },
-        ...(active ? { active } : {}),
       };
     }
     const schema = await this.loadSchema();
@@ -345,7 +352,6 @@ export class GraneKernel {
         excluded: this.config.exploration.exclude,
         columns: listExplorableColumns(this.model, schema, search),
       },
-      ...(active ? { active } : {}),
     };
   }
 

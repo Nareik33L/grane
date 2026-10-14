@@ -1,22 +1,31 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ACTIVE_PIN_PATH,
+  configuredBaseBranch,
   createProposal,
   loadServingConfig,
   readActivePin,
+  resolveActiveRef,
   writeActivePin,
 } from "../../src/authoring/git.js";
 import { loadConfig } from "../../src/config/load.js";
 import { GraneKernel } from "../../src/kernel.js";
+import { SemanticModel } from "../../src/model/model.js";
 import { buildMcpServer, AUTHORING_MCP_TOOLS, CORE_MCP_TOOLS } from "../../src/mcp/server.js";
 import { GraneError } from "../../src/errors.js";
+import { validateModel } from "../../src/validate/validate.js";
+import { runTamperedActivePinGauntlet } from "../gauntlet/active-pin-tamper.js";
 import * as publicApi from "../../src/index.js";
+
+const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "../../src");
+const demoAnalytics = join(dirname(fileURLToPath(import.meta.url)), "../../demo/analytics");
 
 const temps: string[] = [];
 
@@ -113,6 +122,63 @@ describe("loadServingConfig without a pin (compat)", () => {
     expect(JSON.stringify(await new GraneKernel(serving.config).catalog())).toBe(
       JSON.stringify(await new GraneKernel(today.config).catalog()),
     );
+  });
+
+  it("demo analytics without a pin matches today; temporal warning is the only extra validate finding", () => {
+    const today = loadConfig(demoAnalytics);
+    const serving = loadServingConfig(demoAnalytics);
+    expect(serving.pin).toBeNull();
+    expect(serving.files).toEqual(today.files);
+    expect(serving.config).toEqual(today.config);
+
+    const todayReport = validateModel(new SemanticModel(today.config));
+    const servingReport = validateModel(new SemanticModel(serving.config));
+    expect(servingReport).toEqual(todayReport);
+    const extraCodes = [
+      ...new Set(
+        [...servingReport.issues, ...servingReport.metrics.flatMap((m) => m.issues)]
+          .filter((issue) => issue.code !== "temporal_semi_additive_group_by")
+          .map((issue) => issue.code),
+      ),
+    ].sort();
+    const todayCodes = [
+      ...new Set(
+        [...todayReport.issues, ...todayReport.metrics.flatMap((m) => m.issues)]
+          .filter((issue) => issue.code !== "temporal_semi_additive_group_by")
+          .map((issue) => issue.code),
+      ),
+    ].sort();
+    expect(extraCodes).toEqual(todayCodes);
+  });
+
+  it("unpinned existing YAML keeps temporal semi-additive group_by as a warning, not an error", () => {
+    const dir = tempDir();
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC }
+connection: { type: postgres, schema: public }
+entities:
+  order: { table: orders, primary_key: id }
+metrics:
+  on_hand:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+    time_dimension: "\${orders.completed_at}"
+    additive: semi
+    semi_additive: { window: last, group_by: ["\${orders.completed_at}"] }
+`,
+    );
+    const today = validateModel(new SemanticModel(loadConfig(dir).config));
+    const serving = validateModel(new SemanticModel(loadServingConfig(dir).config));
+    expect(serving).toEqual(today);
+    expect(serving.ok).toBe(true);
+    expect(serving.issues.some((i) => i.code === "temporal_semi_additive_group_by" && i.severity === "warning")).toBe(
+      true,
+    );
+    expect(serving.issues.some((i) => i.severity === "error")).toBe(false);
+    const generated = validateModel(new SemanticModel(loadServingConfig(dir).config), undefined, { generated: true });
+    expect(generated.ok).toBe(false);
   });
 });
 
@@ -268,5 +334,124 @@ describe("MCP and authoring cannot write the pin", () => {
     const before = readFileSync(join(dir, ACTIVE_PIN_PATH), "utf8");
     loadServingConfig(dir);
     expect(readFileSync(join(dir, ACTIVE_PIN_PATH), "utf8")).toBe(before);
+  });
+
+  it("writeActivePin is only called from CLI/TTY setup and git rollback, never MCP or authoring tools", () => {
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (name.endsWith(".ts")) files.push(path);
+      }
+    };
+    walk(srcRoot);
+    const hits = files.filter((path) => readFileSync(path, "utf8").includes("writeActivePin"));
+    const rel = hits.map((path) => path.slice(srcRoot.length + 1).replaceAll("\\", "/")).sort();
+    expect(rel).toEqual(["authoring/git.ts", "setup/run.ts"]);
+    expect(readFileSync(join(srcRoot, "setup/run.ts"), "utf8")).toMatch(/Activation requires a TTY/);
+    expect(readFileSync(join(srcRoot, "mcp/authoring.ts"), "utf8")).not.toMatch(/writeActivePin/);
+    expect(readFileSync(join(srcRoot, "authoring/tools.ts"), "utf8")).not.toMatch(/writeActivePin/);
+  });
+});
+
+describe("first pin is the configured base branch, not HEAD", () => {
+  it("refuses to pin a feature-branch HEAD and pins main's tip instead", () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "main"]);
+    git(dir, ["remote", "add", "origin", "git@github.com:Nareik33L/grane.git"]);
+    git(dir, ["update-ref", "refs/remotes/origin/main", main]);
+    git(dir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    git(dir, ["checkout", "-b", "feature"]);
+    writeFileSync(join(dir, "metrics.yml"), EXTRA_METRIC);
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "feature work"]);
+    const feature = git(dir, ["rev-parse", "HEAD"]);
+    expect(feature).not.toBe(main);
+    expect(configuredBaseBranch(dir)).toBe("main");
+    expect(resolveActiveRef(dir)).toEqual({ branch: "main", commit: main, pinned: false });
+
+    expect(() =>
+      writeActivePin(dir, {
+        ref: "feature",
+        commit: feature,
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      }),
+    ).toThrow(/not HEAD|pin ref must be "main"/);
+
+    expect(() =>
+      writeActivePin(dir, {
+        ref: "main",
+        commit: feature,
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:00:00.000Z",
+      }),
+    ).toThrow(/not reachable from "main"/);
+
+    const pin = writeActivePin(dir, {
+      ref: "main",
+      commit: main,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    expect(pin.ref).toBe("main");
+    expect(pin.commit).toBe(main);
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("feature");
+  });
+});
+
+describe("merged proposal on a base that already had YAML", () => {
+  it("still pins and validates after merge", () => {
+    const dir = initRepo(`metrics:
+  orders:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+    status: approved
+`);
+    const proposal = createProposal(dir, {
+      slug: "add-revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: {
+        "metrics.yml": `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+    status: experimental
+`,
+      },
+    });
+    git(dir, [
+      "merge",
+      "--no-ff",
+      "-m",
+      `Merge pull request #1 from ${proposal.branch}\n\nGrane-Proposal: ${proposal.id}`,
+      proposal.branch,
+    ]);
+    const merged = git(dir, ["rev-parse", "HEAD"]);
+    const pin = writeActivePin(dir, {
+      ref: "main",
+      commit: merged,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    expect(pin.commit).toBe(merged);
+    const serving = loadServingConfig(dir);
+    expect(Object.keys(serving.config.metrics).sort()).toEqual(["orders", "revenue"]);
+    const report = validateModel(new SemanticModel(serving.config));
+    expect(report.ok).toBe(true);
+    expect(report.issues.some((i) => i.severity === "error")).toBe(false);
+    const catalog = new GraneKernel(serving.config, { activePin: serving.pin }).governedCatalog();
+    expect(catalog.metrics.map((m) => m.name).sort()).toEqual(["orders", "revenue"]);
+    expect(catalog.active?.commit).toBe(merged);
+  });
+});
+
+describe("tampered active.json gauntlet", () => {
+  it("fails closed when commit, ref, or approved_by is hand-edited", async () => {
+    const verdict = await runTamperedActivePinGauntlet();
+    expect(verdict.code).toBe("PASS — POLICY");
   });
 });

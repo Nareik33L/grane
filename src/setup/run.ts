@@ -514,7 +514,8 @@ function defaultOwnProjectDir(cwd: string): string {
 
 /**
  * Existing YAML: loadConfig → validateModel (same messages as `grane validate`)
- * → kernel catalog → pin HEAD via writeActivePin. Never edits the user's YAML.
+ * → kernel catalog → pin the configured base branch (not HEAD) via writeActivePin.
+ * Never edits the user's YAML. Activation is TTY-only.
  */
 async function runImportPath(opts: {
   io: SetupIo;

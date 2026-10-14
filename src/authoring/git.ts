@@ -196,7 +196,7 @@ export function assertProjectYamlMatchesCommit(projectDir: string, commit: strin
       throw configError(
         `Refusing to activate: "${name}" does not match commit ${commit.slice(0, 7)}. ` +
           `Import pins that commit, not the working tree (untracked and ignored *.yml count). ` +
-          `Commit, revert, or remove the file so the project directory matches HEAD.`,
+          `Commit, revert, or remove the file so the project directory matches the configured base branch.`,
       );
     }
   }
@@ -227,6 +227,23 @@ function currentBranch(root: string): string {
     );
   }
   return name;
+}
+
+/**
+ * GitHub PR base: `origin/HEAD` when set, otherwise local `main` / `master`.
+ * Never HEAD — a feature branch must not become the first pin's ref.
+ */
+export function configuredBaseBranch(projectDir: string): string {
+  const root = gitRoot(projectDir);
+  const originHead = git(root, ["rev-parse", "--abbrev-ref", "origin/HEAD"], { allowFail: true }).trim();
+  if (originHead && originHead !== "origin/HEAD") {
+    return originHead.replace(/^origin\//, "");
+  }
+  for (const name of ["main", "master"]) {
+    const probe = runGit(root, ["rev-parse", "--verify", `refs/heads/${name}`], { allowFail: true });
+    if (probe.status === 0) return name;
+  }
+  return currentBranch(root);
 }
 
 function requireProposalBranch(branch: string): string {
@@ -330,10 +347,52 @@ export function yamlContentsAtCommit(projectDir: string, commit: string): Record
   return contents;
 }
 
+function assertServablePin(projectDir: string, pin: ActivePin): string {
+  const approvedBy = pin.approved_by.trim();
+  if (!approvedBy) {
+    throw configError(
+      `Invalid ${ACTIVE_PIN_PATH}: approved_by is empty. Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
+    );
+  }
+  if (/agent|mcp|authoring/i.test(approvedBy)) {
+    throw configError(
+      `Pinned approved_by "${pin.approved_by}" cannot come from MCP or authoring. ` +
+        `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  const ref = normalizeBranchRef(pin.ref);
+  if (ref.startsWith(PROPOSAL_BRANCH_PREFIX) || ref === PROPOSAL_BRANCH_PREFIX) {
+    throw configError(
+      `Pinned ref "${pin.ref}" is a proposal branch. Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  const root = gitRoot(projectDir);
+  const commitProbe = runGit(root, ["rev-parse", "--verify", `${pin.commit}^{commit}`], { allowFail: true });
+  if (commitProbe.status !== 0) {
+    throw configError(
+      `Pinned commit "${pin.commit}" is not in this repository. ` +
+        `Serve refuses to start. Restore the commit or fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  const commit = commitProbe.stdout.trim();
+  const refProbe = runGit(root, ["rev-parse", "--verify", `${ref}^{commit}`], { allowFail: true });
+  if (refProbe.status !== 0) {
+    throw configError(
+      `Pinned ref "${pin.ref}" is not a branch in this repository. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  if (!isAncestor(root, commit, ref)) {
+    throw configError(
+      `Pinned commit ${commit} is not on "${ref}". Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
+  return commit;
+}
+
 /**
  * Config `grane serve` loads. No pin: identical to `loadConfig` (working tree).
- * With a pin: YAML from that commit's tree. Malformed or missing-commit pins
- * fail closed.
+ * With a pin: YAML from that commit's tree. Malformed, missing-commit, or
+ * tampered pins fail closed.
  */
 export function loadServingConfig(projectDir: string): LoadedConfig & { pin: ActivePin | null } {
   const dir = findProjectDir(projectDir);
@@ -341,15 +400,7 @@ export function loadServingConfig(projectDir: string): LoadedConfig & { pin: Act
   if (!pin) {
     return { ...loadConfig(dir), pin: null };
   }
-  const root = gitRoot(dir);
-  const probe = runGit(root, ["rev-parse", "--verify", `${pin.commit}^{commit}`], { allowFail: true });
-  if (probe.status !== 0) {
-    throw configError(
-      `Pinned commit "${pin.commit}" is not in this repository. ` +
-        `Serve refuses to start. Restore the commit or fix ${ACTIVE_PIN_PATH}.`,
-    );
-  }
-  const commit = probe.stdout.trim();
+  const commit = assertServablePin(dir, pin);
   const yamlContents = yamlContentsAtCommit(dir, commit);
   if (!yamlContents["grane.yml"] && !yamlContents["grane.yaml"]) {
     throw configError(
@@ -384,7 +435,7 @@ function normalizeBranchRef(ref: string): string {
 
 /**
  * The pin ref is the GitHub PR base, never a proposal branch. On the first pin it
- * must match `resolveActiveRef().branch`; afterwards it must keep the existing pin's ref.
+ * must match `configuredBaseBranch()` (not HEAD); afterwards it must keep the existing pin's ref.
  */
 function assertPinRef(projectDir: string, requested: string): string {
   const ref = normalizeBranchRef(requested);
@@ -400,10 +451,10 @@ function assertPinRef(projectDir: string, requested: string): string {
       `Existing pin ref "${existing.ref}" is a proposal branch and cannot be used. Delete ${ACTIVE_PIN_PATH} and pin the GitHub PR base.`,
     );
   }
-  const expected = existing?.ref ?? resolveActiveRef(projectDir).branch;
+  const expected = existing?.ref ?? configuredBaseBranch(projectDir);
   if (ref !== expected) {
     throw configError(
-      `Refusing to pin against "${requested}". The pin ref must be "${expected}" (the approved/active base branch).`,
+      `Refusing to pin against "${requested}". The pin ref must be "${expected}" (the approved/active base branch, not HEAD).`,
     );
   }
   return expected;
@@ -445,14 +496,14 @@ export interface ActiveRef {
 export function resolveActiveRef(projectDir: string): ActiveRef {
   const root = gitRoot(projectDir);
   const pin = readActivePin(projectDir);
-  const branch = pin?.ref ?? currentBranch(root);
+  const branch = pin?.ref ?? configuredBaseBranch(projectDir);
   if (branch.startsWith(PROPOSAL_BRANCH_PREFIX)) {
     throw configError(
       `Active ref is proposal branch "${branch}". Check out the base branch (the GitHub PR base) first. ` +
         `Grane never writes proposals onto another proposal or the active branch.`,
     );
   }
-  const commit = pin?.commit ?? git(root, ["rev-parse", "HEAD"]).trim();
+  const commit = pin?.commit ?? git(root, ["rev-parse", `${branch}^{commit}`]).trim();
   const verify = runGit(root, ["rev-parse", "--verify", `${commit}^{commit}`], { allowFail: true });
   if (verify.status !== 0) {
     throw configError(`Active commit "${commit}" is not in this repository.`);

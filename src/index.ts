@@ -2,7 +2,14 @@
 
 export { GraneKernel, GRANE_VERSION, type ActiveConfigPin } from "./kernel.js";
 export { loadConfig, findProjectDir } from "./config/load.js";
-export { loadServingConfig, readActivePin, ACTIVE_PIN_PATH, type ActivePin } from "./authoring/git.js";
+export {
+  loadServingConfig,
+  readActivePin,
+  configuredBaseBranch,
+  resolveActiveRef,
+  ACTIVE_PIN_PATH,
+  type ActivePin,
+} from "./authoring/git.js";
 export {
   graneConfigSchema,
   type GraneConfig,

@@ -5,9 +5,12 @@
 - **Active-config pin (V2-12).** `.grane/active.json` is `{ref, commit,
   approved_by, approved_at}`. `grane serve` loads that commit's YAML tree
   when the pin exists; uncommitted edits do not affect serving. Projects
-  without a pin behave as today. `catalog` reports the active commit.
-  MCP/authoring still cannot write the pin. A malformed or missing-commit
-  pin fails closed with a clear error.
+  without a pin behave as today (the only extra validate finding allowed is
+  the `temporal_semi_additive_group_by` warning). The first pin is verified
+  against the configured base branch (`origin/HEAD` / `main`), not HEAD. A
+  merged proposal on a base that already had YAML still pins and validates.
+  MCP/authoring cannot write the pin (CLI/TTY only). Malformed, missing-commit,
+  or hand-edited (tampered commit/ref/approved_by) pins fail closed.
 - Setup offers **demo Postgres** (preloaded sample data) nested under the
   existing demo shop path. Inside it the user picks shipped demo YAML (today's
   `grane demo --postgres` behaviour) or builds YAML against demo Postgres via
