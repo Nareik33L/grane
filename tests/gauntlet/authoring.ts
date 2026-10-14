@@ -314,29 +314,41 @@ export function readAuditLines(dir: string): Record<string, unknown>[] {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+/** Count of audit lines already on disk — pass to asserts so they ignore older events. */
+export function auditMark(dir: string): number {
+  return readAuditLines(dir).length;
+}
+
 export function assertAuditLine(
   dir: string,
   match: (event: Record<string, unknown>) => boolean,
   label: string,
+  since: number,
 ): Verdict | null {
-  const events = readAuditLines(dir);
+  const events = readAuditLines(dir).slice(since);
   if (!events.some(match)) {
     return securityCritical(`missing audit line: ${label}`);
   }
   return null;
 }
 
-export function assertPinAudit(dir: string, operation: "load" | "refuse" | "write"): Verdict | null {
+export function assertPinAudit(
+  dir: string,
+  operation: "load" | "refuse" | "write",
+  since: number,
+): Verdict | null {
   return assertAuditLine(
     dir,
     (event) => event.kind === "pin" && event.operation === operation,
     `pin ${operation}`,
+    since,
   );
 }
 
 export function assertProposalAudit(
   dir: string,
   operation: "submit" | "approve" | "reject" | "rollback" | "list" | "diff",
+  since: number,
 ): Verdict | null {
   if (operation === "submit") {
     return assertAuditLine(
@@ -346,17 +358,19 @@ export function assertProposalAudit(
           (event.operation === "proposal_created" || event.operation === "submit_proposal")) ||
         (event.kind === "proposal" && event.operation === "submit"),
       "proposal submit",
+      since,
     );
   }
   return assertAuditLine(
     dir,
     (event) => event.kind === "proposal" && event.operation === operation,
     `proposal ${operation}`,
+    since,
   );
 }
 
-export function assertDiscoveryAudit(dir: string): Verdict | null {
-  const events = readAuditLines(dir);
+export function assertDiscoveryAudit(dir: string, since: number): Verdict | null {
+  const events = readAuditLines(dir).slice(since);
   const line = events.find((event) => event.kind === "discovery");
   if (!line) return securityCritical("missing discovery audit line");
   if (line.read_only !== true) {

@@ -10,6 +10,11 @@
   `period` varchar, `as_of` text), nullable UNIQUE grain, demo Postgres
   composite-PK / keyless / partitioned tables, and hostile slug/path arguments
   — grain, temporal `group_by`, and hostile slug/path are driven through MCP.
+  Each hostile path must be refused with Grane's own
+  `Refusing to commit path` (git's `Invalid path` is not a pass). Audit
+  asserts inspect only lines appended since the action under test.
+  SELECT-only INSERT hits the real adapter (`grane_readonly` Postgres when
+  live, else DuckDB), not the recording stub.
   Missing pin write/refuse, proposal submit/approve/reject/rollback, or
   discovery `read_only:true` audit lines are `SECURITY CRITICAL`. Successful
   approve and rollback each write a proposal audit line in addition to the pin

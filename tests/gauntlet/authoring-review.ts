@@ -22,6 +22,7 @@ import {
   assertDiscoveryAudit,
   assertPinAudit,
   assertProposalAudit,
+  auditMark,
   EMPTY_METRICS_YAML,
   git,
   initAuthoringRepo,
@@ -68,6 +69,7 @@ export async function runAuthoringAuditAssertions(): Promise<Verdict> {
         };
         const sessionId = started.session.id;
         await client.callTool({ name: "discover_schema", arguments: { session_id: sessionId } });
+        const afterDiscoverMcp = auditMark(repo.dir);
         const discovery = createDiscovery({
           config: kernel.config,
           connector,
@@ -77,7 +79,7 @@ export async function runAuthoringAuditAssertions(): Promise<Verdict> {
         });
         await discovery.introspectSchema();
         await discovery.profileColumn("orders", "net_amount");
-        const discoveryLine = assertDiscoveryAudit(repo.dir);
+        const discoveryLine = assertDiscoveryAudit(repo.dir, afterDiscoverMcp);
         if (discoveryLine) return discoveryLine;
 
         await client.callTool({
@@ -91,6 +93,7 @@ export async function runAuthoringAuditAssertions(): Promise<Verdict> {
         if (proposed.isError) {
           return securityCritical(`propose_definitions failed: ${toolMessage(proposed)}`);
         }
+        const beforeSubmit = auditMark(repo.dir);
         const submitted = await client.callTool({
           name: "submit_proposal",
           arguments: { session_id: sessionId, slug: "audit-submit" },
@@ -98,12 +101,13 @@ export async function runAuthoringAuditAssertions(): Promise<Verdict> {
         if (submitted.isError) {
           return securityCritical(`submit_proposal failed: ${toolMessage(submitted)}`);
         }
-        const submitLine = assertProposalAudit(repo.dir, "submit");
+        const submitLine = assertProposalAudit(repo.dir, "submit", beforeSubmit);
         if (submitLine) return submitLine;
         const payload = parseTool(submitted) as { proposal: { id: string; branch: string; commit: string } };
 
+        const beforePin = auditMark(repo.dir);
         pinMain(repo.dir, repo.mainSha);
-        const writeLine = assertPinAudit(repo.dir, "write");
+        const writeLine = assertPinAudit(repo.dir, "write", beforePin);
         if (writeLine) return writeLine;
 
         try {
@@ -127,28 +131,31 @@ export async function runAuthoringAuditAssertions(): Promise<Verdict> {
             approved_at: "2026-10-14T12:00:00.000Z",
           }),
         );
+        const beforeRefuse = auditMark(repo.dir);
         try {
           loadServingConfig(repo.dir);
           return securityCritical("loadServingConfig accepted a truncated SHA pin");
         } catch {
-          const refuseLine = assertPinAudit(repo.dir, "refuse");
+          const refuseLine = assertPinAudit(repo.dir, "refuse", beforeRefuse);
           if (refuseLine) return refuseLine;
         }
 
         pinMain(repo.dir, repo.mainSha);
         const merged = mergeProposal(repo.dir, payload.proposal);
         const afterMerge = git(repo.dir, ["rev-parse", "main"]);
+        const beforeApprove = auditMark(repo.dir);
         approveProposal(repo.dir, payload.proposal.id, { tty: false, approved_by: "gauntlet" });
-        const approveLine = assertProposalAudit(repo.dir, "approve");
+        const approveLine = assertProposalAudit(repo.dir, "approve", beforeApprove);
         if (approveLine) return approveLine;
-        const pinWrite = assertPinAudit(repo.dir, "write");
+        const pinWrite = assertPinAudit(repo.dir, "write", beforeApprove);
         if (pinWrite) return pinWrite;
         if (readActivePin(repo.dir)?.commit !== merged) {
           return securityCritical("approve did not pin the merge commit");
         }
 
+        const beforeRollback = auditMark(repo.dir);
         rollbackPin(repo.dir, { approved_by: "gauntlet" });
-        const rollbackLine = assertProposalAudit(repo.dir, "rollback");
+        const rollbackLine = assertProposalAudit(repo.dir, "rollback", beforeRollback);
         if (rollbackLine) return rollbackLine;
 
         const other = createProposal(repo.dir, {
@@ -156,8 +163,9 @@ export async function runAuthoringAuditAssertions(): Promise<Verdict> {
           at: new Date("2026-10-16T00:00:00.000Z"),
           files: { "metrics.yml": EXTRA_METRIC },
         });
+        const beforeReject = auditMark(repo.dir);
         rejectProposal(repo.dir, other.id, { yes: true });
-        const rejectLine = assertProposalAudit(repo.dir, "reject");
+        const rejectLine = assertProposalAudit(repo.dir, "reject", beforeReject);
         if (rejectLine) return rejectLine;
 
         const moved = assertBranchUnmoved(repo.dir, "main", afterMerge);
@@ -355,6 +363,7 @@ entities:
       const refuse = mustRefuse(err, /not reachable from "develop"|Refusing to pin/i, "feature commit pin");
       if (refuse) return refuse;
     }
+    const beforePin = auditMark(repo.dir);
     const pin = writeActivePin(repo.dir, {
       ref: "develop",
       commit: develop,
@@ -364,7 +373,7 @@ entities:
     if (pin.ref !== "develop" || pin.commit !== develop) {
       return securityCritical(`first pin was ${pin.ref}@${pin.commit}, expected develop@${develop}`);
     }
-    const writeLine = assertPinAudit(repo.dir, "write");
+    const writeLine = assertPinAudit(repo.dir, "write", beforePin);
     if (writeLine) return writeLine;
     if (git(repo.dir, ["rev-parse", "--abbrev-ref", "HEAD"]) !== "feature") {
       return securityCritical("pin write moved HEAD off feature");
@@ -390,6 +399,7 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
       at: new Date("2026-10-14T00:00:00.000Z"),
       files: { "metrics.yml": EXTRA_METRIC },
     });
+    const beforeList = auditMark(repo.dir);
     const listedBefore = runProposalsCli(repo.dir, ["proposals", "list", "--json"]);
     if (listedBefore.status !== 0) {
       return securityCritical(`proposals list failed: ${listedBefore.stderr || listedBefore.stdout}`);
@@ -397,9 +407,10 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
     if (!listedBefore.stdout.includes(proposal.id)) {
       return securityCritical("proposals list omitted the open proposal");
     }
-    const listLine = assertProposalAudit(repo.dir, "list");
+    const listLine = assertProposalAudit(repo.dir, "list", beforeList);
     if (listLine) return listLine;
 
+    const beforeDiff = auditMark(repo.dir);
     const diffed = runProposalsCli(repo.dir, ["proposals", "diff", proposal.id, "--json"]);
     if (diffed.status !== 0) {
       return securityCritical(`proposals diff failed: ${diffed.stderr || diffed.stdout}`);
@@ -408,7 +419,7 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
     if (!diffPayload.semantic?.metrics?.added?.includes("extra")) {
       return securityCritical("proposals diff did not report the added extra metric");
     }
-    const diffLine = assertProposalAudit(repo.dir, "diff");
+    const diffLine = assertProposalAudit(repo.dir, "diff", beforeDiff);
     if (diffLine) return diffLine;
 
     const parent = git(repo.dir, ["rev-parse", `${proposal.branch}^`]);
@@ -416,6 +427,7 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
     const afterMerge = git(repo.dir, ["rev-parse", "main"]);
     pinMain(repo.dir, repo.mainSha);
 
+    const beforeApprove = auditMark(repo.dir);
     const approved = runProposalsCli(repo.dir, [
       "proposals",
       "approve",
@@ -431,9 +443,10 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
     if (pin.commit !== merged || pin.ref !== "main") {
       return securityCritical(`approve pinned ${pin.ref}@${pin.commit}, expected main@${merged}`);
     }
-    const approveLine = assertProposalAudit(repo.dir, "approve");
+    const approveLine = assertProposalAudit(repo.dir, "approve", beforeApprove);
     if (approveLine) return approveLine;
 
+    const beforeRollback = auditMark(repo.dir);
     const rolled = runProposalsCli(repo.dir, ["proposals", "rollback", "--json", "--approved-by", "gauntlet"]);
     if (rolled.status !== 0) {
       return securityCritical(`proposals rollback failed: ${rolled.stderr || rolled.stdout}`);
@@ -442,7 +455,7 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
     if (rolledPin.commit !== repo.mainSha) {
       return securityCritical(`rollback pinned ${rolledPin.commit}, expected ${repo.mainSha}`);
     }
-    const rollbackLine = assertProposalAudit(repo.dir, "rollback");
+    const rollbackLine = assertProposalAudit(repo.dir, "rollback", beforeRollback);
     if (rollbackLine) return rollbackLine;
 
     const leftover = createProposal(repo.dir, {
@@ -450,11 +463,12 @@ export async function runAuthoringReviewMergedProposal(): Promise<Verdict> {
       at: new Date("2026-10-16T00:00:00.000Z"),
       files: { "metrics.yml": EXTRA_METRIC },
     });
+    const beforeReject = auditMark(repo.dir);
     const rejected = runProposalsCli(repo.dir, ["proposals", "reject", leftover.id, "--yes", "--json"]);
     if (rejected.status !== 0) {
       return securityCritical(`proposals reject failed: ${rejected.stderr || rejected.stdout}`);
     }
-    const rejectLine = assertProposalAudit(repo.dir, "reject");
+    const rejectLine = assertProposalAudit(repo.dir, "reject", beforeReject);
     if (rejectLine) return rejectLine;
 
     if (git(repo.dir, ["rev-parse", `${proposal.branch}^`]) !== parent) {

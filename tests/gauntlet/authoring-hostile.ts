@@ -299,8 +299,10 @@ export async function runAuthoringHostileArgs(): Promise<Verdict> {
           const freeze = frozen(repo.dir, repo.mainSha);
           if (freeze) return freeze;
           const message = toolMessage(submitted);
-          if (!/Refusing|proposal|\.grane|\.\.|git/i.test(message)) {
-            return securityCritical(`unexpected path error for ${path}: ${message}`);
+          if (!/Refusing to commit path/.test(message)) {
+            return securityCritical(
+              `hostile path ${path} must be refused by Grane ("Refusing to commit path"), not git: ${message}`,
+            );
           }
         }
         if (git(repo.dir, ["rev-parse", "main"]) !== repo.mainSha) {

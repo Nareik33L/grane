@@ -5,13 +5,16 @@
  */
 import { PRIMARY_KEY_SKIP, primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
 import { loadSession, updateSession } from "../../src/authoring/session.js";
+import { createConnector } from "../../src/connectors/create.js";
 import {
   applyPrimaryKeys,
   applySingleColumnUniques,
   isWriteSql,
   type DatabaseSchema,
+  type WarehouseConnector,
 } from "../../src/connectors/types.js";
 import { exampleConfig } from "../fixtures.js";
+import { postgresLiveEnv } from "../helpers/postgres-live.js";
 import {
   assertMainUnmoved,
   assertNoPin,
@@ -402,11 +405,14 @@ export async function runAuthoringDemoGrain(): Promise<Verdict> {
 
 /**
  * SELECT-only warehouse role: discovery/profile may only issue SELECT, and
- * introspected PKs (including partitioned parents) stay visible.
+ * introspected PKs (including partitioned parents) stay visible. The INSERT
+ * probe hits a real adapter (`PostgresConnector` on `grane_readonly` when
+ * live, else `DuckDbConnector`) — not the recording stub.
  */
 export async function runAuthoringSelectOnlyRole(): Promise<Verdict> {
   const repo = initAuthoringRepo();
   const sqlLog: string[] = [];
+  let writeAdapter: WarehouseConnector | undefined;
   try {
     const schema = demoPostgresTrapSchema();
     const connector = recordingConnector(schema, { sqlLog });
@@ -446,13 +452,19 @@ export async function runAuthoringSelectOnlyRole(): Promise<Verdict> {
         if (sqlLog.some((sql) => isWriteSql(sql))) {
           return securityCritical(`SELECT-only role issued write SQL: ${sqlLog.join(" | ")}`);
         }
+        const live = await postgresLiveEnv();
+        writeAdapter = live
+          ? createConnector({ type: "postgres", url: live.readUrl, schema: "public" })
+          : createConnector({ type: "duckdb", path: ":memory:", schema: "main" });
         try {
-          await kernel.getConnector().query("INSERT INTO orders (id) VALUES (1)");
+          await writeAdapter.query("INSERT INTO orders (id) VALUES (1)", [], kernel.config.limits);
           return securityCritical("SELECT-only connector accepted INSERT");
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          if (!/write SQL|INSERT|Refusing/i.test(message)) {
-            return securityCritical(`unexpected write refusal: ${message}`);
+          if (!/Refusing to execute a non-SELECT statement/.test(message)) {
+            return securityCritical(
+              `INSERT must be refused by the adapter ("Refusing to execute a non-SELECT statement"), not a stub: ${message}`,
+            );
           }
         }
         const freeze = assertFrozen(repo.dir, repo.mainSha);
@@ -466,6 +478,7 @@ export async function runAuthoringSelectOnlyRole(): Promise<Verdict> {
   } catch (err) {
     return thrownSecurity(err, "SELECT-only role");
   } finally {
+    await writeAdapter?.close().catch(() => undefined);
     repo.cleanup();
   }
 }
