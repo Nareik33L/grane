@@ -7,6 +7,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   AUTHORING_MCP_PROMPTS,
+  AUTHORING_MCP_TOOLS,
+  CORE_MCP_TOOLS,
   SETUP_GRANE_PROMPT_NAME,
   SETUP_GRANE_PROMPT_TITLE,
   buildMcpServer,
@@ -88,15 +90,46 @@ describe("authoring MCP prompts gating", () => {
     expect(await listPromptNames(k, { transport: "http" })).toEqual([]);
   });
 
-  it("anonymous HTTP never lists the prompt even with --authoring", async () => {
+  it("prompts/list is hidden from anonymous HTTP callers exactly like tools/list", async () => {
     const dir = tempDir();
-    expect(await listPromptNames(kernelFor(dir), { authoring: true, transport: "http" })).toEqual([]);
+    const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "http" });
+    try {
+      const tools = (await client.listTools()).tools.map((tool) => tool.name).sort();
+      let prompts: string[] = [];
+      try {
+        prompts = (await client.listPrompts()).prompts.map((prompt) => prompt.name).sort();
+      } catch {
+        prompts = [];
+      }
+      expect(tools).toEqual([...CORE_MCP_TOOLS].sort());
+      for (const name of AUTHORING_MCP_TOOLS) {
+        expect(tools).not.toContain(name);
+      }
+      expect(prompts).toEqual([]);
+      for (const name of AUTHORING_MCP_PROMPTS) {
+        expect(prompts).not.toContain(name);
+      }
+    } finally {
+      await close();
+    }
   });
 
-  it("authenticated HTTP lists the prompt when authoring is on", async () => {
+  it("authenticated HTTP lists the prompt when authoring is on, matching tools/list", async () => {
     const dir = tempDir();
-    const k = kernelFor(dir).bindAgent(authorGrant());
-    expect(await listPromptNames(k, { authoring: true, transport: "http" })).toEqual([...AUTHORING_MCP_PROMPTS]);
+    const { client, close } = await connectClient(kernelFor(dir).bindAgent(authorGrant()), {
+      authoring: true,
+      transport: "http",
+    });
+    try {
+      const tools = (await client.listTools()).tools.map((tool) => tool.name);
+      const prompts = (await client.listPrompts()).prompts.map((prompt) => prompt.name);
+      for (const name of AUTHORING_MCP_TOOLS) {
+        expect(tools).toContain(name);
+      }
+      expect(prompts).toEqual([...AUTHORING_MCP_PROMPTS]);
+    } finally {
+      await close();
+    }
   });
 
   it("--authoring lists Set up Grane on stdio", async () => {
@@ -137,16 +170,40 @@ describe("Set up Grane golden transcript", () => {
     }
   });
 
+  it("references only the nine authoring tools, never raw SQL or query", () => {
+    const snake = [...new Set(golden.match(/\b[a-z]+_[a-z_]+\b/g) ?? [])].sort();
+    expect(snake).toEqual([...AUTHORING_MCP_TOOLS].sort());
+    for (const name of AUTHORING_MCP_TOOLS) {
+      expect(golden).toContain(name);
+    }
+    expect(golden).not.toMatch(/\bquery\b/i);
+    expect(golden).not.toMatch(/\bSQL\b/i);
+    expect(golden).not.toMatch(/\b(SELECT|INSERT|UPDATE|DELETE|WITH)\b/);
+    expect(golden).not.toMatch(/\b(catalog|explain|validate)\s*\(/);
+    expect(golden).not.toMatch(/query\s*\(/);
+  });
+
+  it("does not instruct echoing profile_column samples; summarise shape, types, and counts only", () => {
+    expect(golden).toMatch(/profile_column/);
+    expect(golden).toMatch(/shape/i);
+    expect(golden).toMatch(/types/i);
+    expect(golden).toMatch(/counts/i);
+    expect(golden).toMatch(/Do not echo or repeat sample values to the user/);
+    expect(golden).not.toMatch(/show them in this chat/i);
+    expect(golden).not.toMatch(/peek at example values/i);
+  });
+
+  it("golden transcript contains no sample values, tokens, or credentials", () => {
+    expect(golden).not.toMatch(/postgres:\/\//i);
+    expect(golden).not.toMatch(/mysql:\/\//i);
+    expect(golden).not.toMatch(/password|passwd|token_sha256|\bBearer\b|api[_-]?key|credential/i);
+    expect(golden).not.toMatch(/SECRET[_-]/);
+    expect(golden).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+    expect(golden).not.toMatch(/sk-[A-Za-z0-9]+/);
+    expect(JSON.stringify(golden)).not.toContain("SUPERSECRET");
+  });
+
   it("never tells the AI to write production config or pins; PR path only", () => {
-    expect(golden).toContain("authoring_start");
-    expect(golden).toContain("discover_schema");
-    expect(golden).toContain("profile_column");
-    expect(golden).toContain("record_term");
-    expect(golden).toContain("list_ambiguities");
-    expect(golden).toContain("resolve_ambiguity");
-    expect(golden).toContain("propose_definitions");
-    expect(golden).toContain("preview_yaml");
-    expect(golden).toContain("submit_proposal");
     expect(golden).toMatch(/experimental/);
     expect(golden).toMatch(/pull request/i);
     expect(golden).toMatch(/until (a pull request is )?merged/i);
