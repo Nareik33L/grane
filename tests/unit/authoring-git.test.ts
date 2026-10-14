@@ -362,6 +362,63 @@ describe("git proposal library", () => {
     expect(listProposals(dir)).toEqual([]);
   });
 
+  it("combines draft metrics with the base-branch file instead of replacing it", () => {
+    const dir = initRepo();
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  orders:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+    status: approved
+`,
+    );
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "existing orders metric"]);
+
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT_METRICS },
+    });
+    const committed = git(dir, ["show", `${proposal.commit}:metrics.yml`]);
+    expect(committed).toMatch(/orders:/);
+    expect(committed).toMatch(/revenue:/);
+    expect(committed).toMatch(/status: approved/);
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).toMatch(/orders:/);
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).not.toMatch(/revenue:/);
+  });
+
+  it("refuses when a draft key conflicts with the base-branch definition", () => {
+    const dir = initRepo();
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.gross_amount}"
+    status: approved
+`,
+    );
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "existing revenue"]);
+
+    try {
+      createProposal(dir, {
+        slug: "revenue",
+        at: new Date("2026-10-14T00:00:00.000Z"),
+        files: { "metrics.yml": DRAFT_METRICS },
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as Error).message).toMatch(/overwrite existing metrics "revenue"/i);
+    }
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+  });
+
   it("ignores dirty files under .grane/ and still refuses a path that would write the active branch", () => {
     const dir = initRepo();
     mkdirSync(join(dir, ".grane", "authoring"), { recursive: true });

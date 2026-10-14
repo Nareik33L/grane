@@ -13,6 +13,8 @@ import {
   fanoutAmbiguityId,
   mergeAmbiguities,
   nonAdditiveAmbiguityId,
+  primaryKeyAmbiguityId,
+  PRIMARY_KEY_SKIP,
   parseNonAdditiveAmbiguityId,
   isForbiddenSemiGroupByColumn,
   quoteIdent,
@@ -58,7 +60,15 @@ function tempDir(): string {
 function table(
   name: string,
   columns: { name: string; dataType: string; nullable?: boolean }[],
+  primaryKey?: string | string[],
 ): DatabaseSchema["tables"][number] {
+  const pkCols = Array.isArray(primaryKey)
+    ? primaryKey
+    : primaryKey
+      ? [primaryKey]
+      : columns.find((column) => column.name === "id")
+        ? ["id"]
+        : [];
   return {
     schema: "public",
     name,
@@ -67,6 +77,8 @@ function table(
       dataType: column.dataType,
       nullable: column.nullable ?? true,
     })),
+    ...(pkCols.length === 1 ? { primaryKey: pkCols[0], primaryKeyColumns: pkCols } : {}),
+    ...(pkCols.length > 1 ? { primaryKeyColumns: pkCols } : {}),
   };
 }
 
@@ -91,7 +103,7 @@ function stubConnector(schema: DatabaseSchema): WarehouseConnector {
   };
 }
 
-function kernelFor(dir: string, schema: DatabaseSchema): GraneKernel {
+function kernelFor(dir: string, schema: DatabaseSchema, overrides: Record<string, unknown> = {}): GraneKernel {
   return new GraneKernel(
     exampleConfig({
       connection: {
@@ -101,6 +113,7 @@ function kernelFor(dir: string, schema: DatabaseSchema): GraneKernel {
         password: SECRET_PASSWORD,
       },
       audit: { enabled: false },
+      ...overrides,
     }),
     { projectDir: dir, connector: stubConnector(schema) },
   );
@@ -183,7 +196,9 @@ describe("public API", () => {
   it("exports the ambiguity engine", () => {
     expect(publicApi).toHaveProperty("detectAmbiguities");
     expect(publicApi).toHaveProperty("mergeAmbiguities");
+    expect(publicApi).toHaveProperty("PRIMARY_KEY_SKIP");
     expect(publicApi.AMBIGUITY_KINDS).toEqual([...AMBIGUITY_KINDS]);
+    expect(publicApi.PRIMARY_KEY_SKIP).toBe("skip");
   });
 });
 
@@ -377,6 +392,182 @@ describe("non-additive measures", () => {
     );
     expect(listAmbiguities(k, sessionId).some((item) => item.id === follow.id)).toBe(true);
   });
+
+  it("refuses the introspected primary key with a message distinct from the temporal one", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, nonAdditiveSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const snapshot = listAmbiguities(k, sessionId).find((item) => item.kind === "non_additive_measure")!;
+    await resolveAmbiguity(k, sessionId, snapshot.id, "semi");
+    const follow = listAmbiguities(k, sessionId).find((item) => item.kind === "semi_additive_group_by")!;
+    expect(follow.candidates).not.toContain("inventory.id");
+
+    try {
+      await resolveAmbiguity(k, sessionId, follow.id, "inventory.id");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as Error).message).toMatch(/primary key|introspected grain|vacuous_semi_additive_group_by/i);
+      expect((err as Error).message).not.toMatch(/time dimension|every snapshot|double count/i);
+    }
+    try {
+      await resolveAmbiguity(k, sessionId, follow.id, "inventory.snapshot_at");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).toMatch(/time dimension|temporal|every snapshot|double count/i);
+      expect((err as Error).message).not.toMatch(/introspected grain/i);
+    }
+  });
+});
+
+const compositeSchema = schemaOf([
+  table(
+    "orders",
+    [
+      { name: "tenant_id", dataType: "integer", nullable: false },
+      { name: "order_id", dataType: "integer", nullable: false },
+      { name: "net_amount", dataType: "numeric" },
+      { name: "gross_amount", dataType: "numeric" },
+      { name: "completed_at", dataType: "timestamp" },
+    ],
+    ["tenant_id", "order_id"],
+  ),
+]);
+
+const missingPkSchema = schemaOf([
+  table("orders", [
+    { name: "sku", dataType: "text", nullable: false },
+    { name: "net_amount", dataType: "numeric" },
+    { name: "gross_amount", dataType: "numeric" },
+    { name: "completed_at", dataType: "timestamp" },
+  ]),
+]);
+
+describe("primary key grain", () => {
+  it("does not ask to pick a composite PRIMARY KEY column as grain", () => {
+    const found = detectAmbiguities({ schema: compositeSchema });
+    expect(found.some((item) => item.kind === "primary_key")).toBe(false);
+  });
+
+  it("offers only single-column UNIQUE constraints on a composite-PK table", () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["order_id"],
+      },
+    ]);
+    const found = detectAmbiguities({ schema });
+    const amb = found.find((item) => item.kind === "primary_key");
+    expect(amb).toMatchObject({
+      id: primaryKeyAmbiguityId("orders"),
+      kind: "primary_key",
+      candidates: ["orders.order_id", PRIMARY_KEY_SKIP],
+    });
+    expect(amb?.question).toMatch(/composite PRIMARY KEY/i);
+    expect(amb?.question).toMatch(/false grain/i);
+    expect(amb?.question).toMatch(/UNIQUE/i);
+    expect(amb?.candidates).not.toContain("orders.tenant_id");
+  });
+
+  it("asks which column is the grain when PRIMARY KEY metadata is missing and offers skip", () => {
+    const found = detectAmbiguities({ schema: missingPkSchema });
+    const amb = found.find((item) => item.kind === "primary_key");
+    expect(amb).toMatchObject({
+      id: primaryKeyAmbiguityId("orders"),
+      kind: "primary_key",
+    });
+    expect(amb?.question).toMatch(/No PRIMARY KEY/i);
+    expect(amb?.question).toMatch(/will not guess/i);
+    expect(amb?.candidates).toContain("orders.sku");
+    expect(amb?.candidates).toContain("orders.net_amount");
+    expect(amb?.candidates).toContain(PRIMARY_KEY_SKIP);
+    expect(amb?.candidates.at(-1)).toBe(PRIMARY_KEY_SKIP);
+  });
+
+  it("skips composite-PK tables instead of using one key column as grain", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, compositeSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    expect(listAmbiguities(k, sessionId).some((item) => item.kind === "primary_key")).toBe(false);
+    const revenue = listAmbiguities(k, sessionId).find((item) => item.kind === "revenue_like_columns")!;
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(
+      /Skipped tables without a usable primary key: orders/,
+    );
+  });
+
+  it("uses a unique column on a composite-PK table when the user chooses it", async () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["order_id"],
+      },
+    ]);
+    const dir = tempDir();
+    const k = kernelFor(dir, schema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const pk = listed.find((item) => item.kind === "primary_key")!;
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    await resolveAmbiguity(k, sessionId, pk.id, "orders.order_id");
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    const proposed = await proposeDefinitions(k, sessionId);
+    expect(proposed.draft_yaml["entities.yml"]).toMatch(/primary_key:\s*order_id/);
+    expect(proposed.draft_yaml["entities.yml"]).not.toMatch(/primary_key:\s*tenant_id/);
+    expect(proposed.skipped_tables).toEqual([]);
+  });
+
+  it("lists skipped tables instead of silently dropping metrics when the grain is unresolved", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, missingPkSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const revenue = listAmbiguities(k, sessionId).find((item) => item.kind === "revenue_like_columns")!;
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(/Skipped tables without a usable primary key: orders/);
+    expect(listAmbiguities(k, sessionId).some((item) => item.kind === "primary_key")).toBe(true);
+  });
+
+  it("accepts skip on a composite-PK table with a UNIQUE column", async () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["order_id"],
+      },
+    ]);
+    const dir = tempDir();
+    const k = kernelFor(dir, schema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const pk = listed.find((item) => item.kind === "primary_key")!;
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    expect(pk.candidates.at(-1)).toBe(PRIMARY_KEY_SKIP);
+    await resolveAmbiguity(k, sessionId, pk.id, PRIMARY_KEY_SKIP);
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(
+      /Skipped tables without a usable primary key: orders/,
+    );
+  });
+
+  it("accepts skip on a keyless table and omits it from the draft", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, missingPkSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const pk = listed.find((item) => item.kind === "primary_key")!;
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    await resolveAmbiguity(k, sessionId, pk.id, PRIMARY_KEY_SKIP);
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(
+      /Skipped tables without a usable primary key: orders/,
+    );
+    expect(listAmbiguities(k, sessionId).some((item) => item.kind === "primary_key")).toBe(false);
+  });
 });
 
 describe("fanout joins", () => {
@@ -425,7 +616,7 @@ describe("fanout joins", () => {
 
   it("omits unresolved and do_not_join fan-out; preaggregate writes the relationship", async () => {
     const dir = tempDir();
-    const k = kernelFor(dir, fanoutSchema);
+    const k = kernelFor(dir, fanoutSchema, { relationships: {} });
     const sessionId = authoringStart(k).session.id;
     await discoverSchema(k, sessionId);
     const listed = listAmbiguities(k, sessionId);
@@ -445,7 +636,7 @@ describe("fanout joins", () => {
 
   it("omits a do_not_join relationship from draft YAML", async () => {
     const dir = tempDir();
-    const k = kernelFor(dir, fanoutSchema);
+    const k = kernelFor(dir, fanoutSchema, { relationships: {} });
     const sessionId = authoringStart(k).session.id;
     await discoverSchema(k, sessionId);
     const listed = listAmbiguities(k, sessionId);

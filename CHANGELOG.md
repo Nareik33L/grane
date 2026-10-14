@@ -31,6 +31,25 @@
   `vacuous_semi_additive_group_by`. The metric time dimension and other
   temporal columns are not group_by candidates (grouping by `snapshot_at`
   would sum every snapshot). `submit_proposal` refuses invalid preview YAML.
+- Authoring sessions generate draft YAML (`src/authoring/generate.ts`) in the
+  current schema. `propose_definitions` delegates to it. Output is deterministic
+  and must pass `loadConfig` + `validateModel` before `submit_proposal`.
+  Relationships go through `planRelationshipWrite` using existing file and
+  catalog maps. `createProposal` unions semantic YAML with the base branch
+  (refuses on key conflicts) so drafts do not clobber adopter files.
+  Exploration allow-list wildcards are never emitted. Entity `primary_key`
+  comes from introspected PRIMARY KEY metadata only — never `id`, the first
+  column, or a composite-key column (false grain). Composite-PK tables are
+  skipped unless a column has its own single-column UNIQUE constraint.
+  Keyless tables are asked, with `skip` to omit them. Unresolved/skipped
+  tables are listed, not silently dropped. Glossary answers become metric
+  `description`. Postgres PK lookup uses `pg_constraint` (visible to
+  SELECT-only roles) and includes partitioned parents (`relkind` `p`).
+  DuckDB PK lookup is schema-filtered. YAML map keys sort in ordinal (not
+  locale) order.
+  Semi-additive group_by refusals for the primary key and for temporal columns
+  have distinct messages. Postgres, MySQL, and DuckDB introspection populate
+  that metadata.
 
 ## 0.7.0
 

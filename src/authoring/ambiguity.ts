@@ -1,4 +1,10 @@
-import type { DatabaseSchema } from "../connectors/types.js";
+import {
+  isCompositePrimaryKey,
+  tablePrimaryKey,
+  tablePrimaryKeyColumns,
+  type DatabaseSchema,
+  type TableInfo,
+} from "../connectors/types.js";
 import { isNumericType, isTemporalType } from "../connectors/dialect.js";
 import { RelationshipGraph, describeJoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
@@ -15,6 +21,7 @@ export const AMBIGUITY_KINDS = [
   "non_additive_measure",
   "semi_additive_group_by",
   "fanout_join",
+  "primary_key",
 ] as const;
 export type AmbiguityKind = (typeof AMBIGUITY_KINDS)[number];
 
@@ -32,6 +39,8 @@ export const NON_ADDITIVE_CANDIDATES = ["semi", "unsupported"] as const;
 /** One snapshot date for the whole result — never vacuous. */
 export const GLOBAL_SNAPSHOT_GROUP_BY = "[]";
 export const FANOUT_CANDIDATES = ["preaggregate", "do_not_join"] as const;
+/** Decline to author a table that has no usable single-column grain. */
+export const PRIMARY_KEY_SKIP = "skip";
 
 /** Quote a SQL identifier in question text. Candidates stay unquoted. */
 export function quoteIdent(name: string): string {
@@ -65,6 +74,10 @@ export function semiAdditiveGroupById(table: string, column: string): string {
 
 export function fanoutAmbiguityId(fromTable: string, toTable: string): string {
   return `amb-fanout-${fromTable}-${toTable}`;
+}
+
+export function primaryKeyAmbiguityId(table: string): string {
+  return `amb-primary-key-${table}`;
 }
 
 export function looksRevenueLike(column: string, dataType: string): boolean {
@@ -122,12 +135,29 @@ export function semiAdditiveGroupByAmbiguity(
   };
 }
 
+export type SemiGroupByRefusal = "primary_key" | "temporal" | "measure";
+
 /**
- * True when `groupColumn` must not be a semi-additive series key: the measure
- * itself, the entity primary key, any temporal column, or the metric's
- * time_dimension. Grouping by the snapshot date keeps one row per timestamp
- * and sums every snapshot — the double count `additive: semi` exists to prevent.
+ * Why `groupColumn` must not be a semi-additive series key. Uses introspected
+ * PRIMARY KEY metadata only — never guesses `id` or the first column.
  */
+export function semiGroupByRefusalReason(
+  schema: DatabaseSchema,
+  table: string,
+  measureColumn: string,
+  groupColumn: string,
+  timeColumn?: string,
+): SemiGroupByRefusal | null {
+  if (groupColumn === measureColumn) return "measure";
+  if (timeColumn && groupColumn === timeColumn) return "temporal";
+  const info = schema.tables.find((item) => item.name === table);
+  if (tablePrimaryKey(info) === groupColumn) return "primary_key";
+  const col = info?.columns.find((item) => item.name === groupColumn);
+  if (col && looksTemporal(col.name, col.dataType)) return "temporal";
+  if (!col && looksTemporal(groupColumn, "")) return "temporal";
+  return null;
+}
+
 export function isForbiddenSemiGroupByColumn(
   schema: DatabaseSchema,
   table: string,
@@ -135,24 +165,29 @@ export function isForbiddenSemiGroupByColumn(
   groupColumn: string,
   timeColumn?: string,
 ): boolean {
-  if (groupColumn === measureColumn) return true;
-  if (timeColumn && groupColumn === timeColumn) return true;
-  const info = schema.tables.find((item) => item.name === table);
-  const pk = info?.columns.find((item) => item.name === "id")?.name ?? info?.columns[0]?.name;
-  if (groupColumn === pk) return true;
-  const col = info?.columns.find((item) => item.name === groupColumn);
-  if (col && looksTemporal(col.name, col.dataType)) return true;
-  if (!col && looksTemporal(groupColumn, "")) return true;
-  return false;
+  return semiGroupByRefusalReason(schema, table, measureColumn, groupColumn, timeColumn) !== null;
 }
 
-export function forbiddenSemiGroupByMessage(chosen: string): string {
+export function forbiddenSemiGroupByTemporalMessage(chosen: string): string {
   return (
     `"${chosen}" is a temporal column or the metric time dimension. ` +
     `Grouping by it keeps one row per timestamp and sums every snapshot — ` +
     `the double count additive: semi exists to prevent. ` +
     `Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" or a non-temporal series key.`
   );
+}
+
+export function forbiddenSemiGroupByPrimaryKeyMessage(chosen: string): string {
+  return (
+    `"${chosen}" is the entity primary key (introspected grain). ` +
+    `group_by on that key is vacuous_semi_additive_group_by: first/last cannot ` +
+    `collapse history. Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" or a non-key series column.`
+  );
+}
+
+/** @deprecated Use forbiddenSemiGroupByTemporalMessage — kept as the temporal wording. */
+export function forbiddenSemiGroupByMessage(chosen: string): string {
+  return forbiddenSemiGroupByTemporalMessage(chosen);
 }
 
 /** Parse a resolved group_by choice into the YAML list (`[]` or `${table.column}`). */
@@ -187,6 +222,34 @@ export function resolvedTimeColumn(
 }
 
 /**
+ * Entity grain: a resolved `primary_key` choice, or an introspected
+ * single-column PRIMARY KEY. Never a composite-key column (false grain)
+ * unless that column has its own single-column UNIQUE constraint. `skip`
+ * means do not author the table.
+ */
+export function resolvedEntityPrimaryKey(
+  session: { resolved_ambiguities: ReadonlyArray<Pick<ResolvedAmbiguity, "id" | "kind" | "chosen">> },
+  schema: DatabaseSchema,
+  table: string,
+): string | undefined {
+  const info = schema.tables.find((item) => item.name === table);
+  const chosen = session.resolved_ambiguities.find(
+    (item) => item.kind === "primary_key" && item.id === primaryKeyAmbiguityId(table),
+  )?.chosen;
+  if (chosen === PRIMARY_KEY_SKIP) return undefined;
+  if (chosen) {
+    const parsed = parseColumnRef(chosen);
+    if (parsed?.table === table) {
+      if (isCompositePrimaryKey(info) && !(info?.uniqueColumns ?? []).includes(parsed.column)) {
+        return undefined;
+      }
+      return parsed.column;
+    }
+  }
+  return tablePrimaryKey(info);
+}
+
+/**
  * Detect conflicting candidates from schema + inferred relationships.
  * Questions name tables/columns only — never sample values or tokens.
  */
@@ -196,6 +259,7 @@ export function detectAmbiguities(input: DetectAmbiguitiesInput): OpenAmbiguity[
     ...detectDateColumns(input.schema),
     ...detectNonAdditive(input.schema),
     ...detectFanoutJoins(input.relationships ?? {}),
+    ...detectPrimaryKeys(input.schema),
   ];
   return found;
 }
@@ -208,6 +272,47 @@ export function mergeAmbiguities(
 ): OpenAmbiguity[] {
   const skip = new Set([...existingOpen.map((item) => item.id), ...resolved.map((item) => item.id)]);
   return [...existingOpen, ...detected.filter((item) => !skip.has(item.id))];
+}
+
+function primaryKeyAmbiguity(table: TableInfo): OpenAmbiguity | null {
+  const pkCols = tablePrimaryKeyColumns(table);
+  if (pkCols.length === 1) return null;
+  if (isCompositePrimaryKey(table)) {
+    const unique = table.uniqueColumns ?? [];
+    if (unique.length === 0) return null;
+    return {
+      id: primaryKeyAmbiguityId(table.name),
+      kind: "primary_key",
+      question:
+        `Table ${quoteIdent(table.name)} has a composite PRIMARY KEY ` +
+        `(${pkCols.map(quoteIdent).join(", ")}). Picking one key column would be a false grain. ` +
+        `Choose a column that has its own single-column UNIQUE constraint, or "${PRIMARY_KEY_SKIP}". ` +
+        `Grane will not guess.`,
+      candidates: [...unique.map((column) => `${table.name}.${column}`), PRIMARY_KEY_SKIP],
+    };
+  }
+  const hasMeasure = table.columns.some((column) => isNumericType(column.dataType));
+  if (!hasMeasure) return null;
+  const candidates = table.columns.map((column) => `${table.name}.${column.name}`);
+  if (candidates.length === 0) return null;
+  return {
+    id: primaryKeyAmbiguityId(table.name),
+    kind: "primary_key",
+    question:
+      `No PRIMARY KEY was introspected on ${quoteIdent(table.name)}. ` +
+      `Which column is the entity grain? Choose "${PRIMARY_KEY_SKIP}" to omit this table. ` +
+      `Grane will not guess id or the first column.`,
+    candidates: [...candidates, PRIMARY_KEY_SKIP],
+  };
+}
+
+function detectPrimaryKeys(schema: DatabaseSchema): OpenAmbiguity[] {
+  const out: OpenAmbiguity[] = [];
+  for (const table of schema.tables) {
+    const item = primaryKeyAmbiguity(table);
+    if (item) out.push(item);
+  }
+  return out;
 }
 
 function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {

@@ -46,6 +46,7 @@ const SCHEMA: DatabaseSchema = {
     {
       schema: "public",
       name: "customers",
+      primaryKey: "id",
       columns: [
         { name: "id", dataType: "integer", nullable: false },
         { name: "email", dataType: "text", nullable: true },
@@ -55,6 +56,7 @@ const SCHEMA: DatabaseSchema = {
     {
       schema: "public",
       name: "orders",
+      primaryKey: "id",
       columns: [
         { name: "id", dataType: "integer", nullable: false },
         { name: "customer_id", dataType: "integer", nullable: false },
@@ -649,7 +651,7 @@ function pickResolvedCandidate(item: { kind: string; candidates: string[] }): st
   if (item.kind === "non_additive_measure" && item.candidates.includes("unsupported")) return "unsupported";
   if (item.candidates.includes("do_not_join")) return "do_not_join";
   if (item.candidates.includes("[]")) return "[]";
-  const first = item.candidates[0];
+  const first = item.candidates.find((candidate) => candidate !== "skip") ?? item.candidates[0];
   if (!first) throw new Error(`ambiguity ${item.kind} has no candidates`);
   return first;
 }

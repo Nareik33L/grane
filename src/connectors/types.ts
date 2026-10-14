@@ -11,6 +11,78 @@ export interface TableInfo {
   schema: string;
   name: string;
   columns: ColumnInfo[];
+  /**
+   * Single-column warehouse PRIMARY KEY, when introspected.
+   * Composite keys leave this unset — using the first column would be a false grain.
+   * Authoring never guesses `id` or the first column.
+   */
+  primaryKey?: string;
+  /** All PRIMARY KEY columns in ordinal order. Length > 1 is composite. */
+  primaryKeyColumns?: string[];
+  /** Columns that each have their own single-column UNIQUE constraint. */
+  uniqueColumns?: string[];
+}
+
+/** Apply introspected PRIMARY KEY columns. Composite keys are recorded, not truncated. */
+export function applyPrimaryKeys(
+  tables: Iterable<TableInfo>,
+  keys: ReadonlyArray<{ table: string; column: string }>,
+): void {
+  const grouped = new Map<string, string[]>();
+  for (const key of keys) {
+    const list = grouped.get(key.table) ?? [];
+    if (!list.includes(key.column)) list.push(key.column);
+    grouped.set(key.table, list);
+  }
+  for (const table of tables) {
+    const cols = grouped.get(table.name);
+    if (!cols || cols.length === 0) continue;
+    table.primaryKeyColumns = cols;
+    table.primaryKey = cols.length === 1 ? cols[0] : undefined;
+  }
+}
+
+/** Introspected single-column grain only — never `id`, columns[0], or a composite first column. */
+export function tablePrimaryKey(table: TableInfo | undefined): string | undefined {
+  return table?.primaryKey;
+}
+
+/** All introspected PRIMARY KEY columns in ordinal order. */
+export function tablePrimaryKeyColumns(table: TableInfo | undefined): string[] {
+  if (table?.primaryKeyColumns && table.primaryKeyColumns.length > 0) return table.primaryKeyColumns;
+  return table?.primaryKey ? [table.primaryKey] : [];
+}
+
+export function isCompositePrimaryKey(table: TableInfo | undefined): boolean {
+  return tablePrimaryKeyColumns(table).length > 1;
+}
+
+/**
+ * Record columns that appear in a single-column UNIQUE constraint.
+ * Composite UNIQUE indexes are ignored — they are not a Grane grain.
+ */
+export function applySingleColumnUniques(
+  tables: Iterable<TableInfo>,
+  keys: ReadonlyArray<{ table: string; column: string; constraint: string }>,
+): void {
+  const byConstraint = new Map<string, { table: string; columns: string[] }>();
+  for (const key of keys) {
+    const id = `${key.table}\0${key.constraint}`;
+    const entry = byConstraint.get(id) ?? { table: key.table, columns: [] };
+    if (!entry.columns.includes(key.column)) entry.columns.push(key.column);
+    byConstraint.set(id, entry);
+  }
+  const byTable = new Map<string, string[]>();
+  for (const { table, columns } of byConstraint.values()) {
+    if (columns.length !== 1) continue;
+    const list = byTable.get(table) ?? [];
+    if (!list.includes(columns[0]!)) list.push(columns[0]!);
+    byTable.set(table, list);
+  }
+  for (const table of tables) {
+    const cols = byTable.get(table.name);
+    if (cols && cols.length > 0) table.uniqueColumns = cols;
+  }
 }
 
 export interface ForeignKeyInfo {

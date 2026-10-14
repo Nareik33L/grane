@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { isAdopterTestYaml, loadConfig } from "../config/load.js";
 import { configError } from "../errors.js";
+import { combineSemanticYaml } from "./yaml-merge.js";
 
 /**
  * Git proposal library (V2-03). Shells out to `git` only — no GitHub SDK.
@@ -272,6 +273,12 @@ function resolveProposalBranch(root: string, idOrBranch: string): string {
   return branch;
 }
 
+function fileAtCommit(root: string, commit: string, path: string): string | undefined {
+  const probe = runGit(root, ["cat-file", "-e", `${commit}:${path}`], { allowFail: true });
+  if (probe.status !== 0) return undefined;
+  return git(root, ["show", `${commit}:${path}`]);
+}
+
 function gitPath(root: string, projectDir: string, rel: string): string {
   if (isAbsolute(rel) || rel.split(/[/\\]/).includes("..") || rel.startsWith(".git/") || rel === ".git") {
     throw configError(`Refusing to commit path "${rel}" onto a proposal branch.`);
@@ -472,7 +479,8 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
   }
   const staged: Record<string, string> = {};
   for (const [rel, contents] of entries) {
-    staged[gitPath(root, projectDir, rel)] = contents;
+    const path = gitPath(root, projectDir, rel);
+    staged[path] = combineSemanticYaml(fileAtCommit(root, active.commit, path), contents, rel);
   }
   const title = input.title?.trim() || `Grane proposal: ${id}`;
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();

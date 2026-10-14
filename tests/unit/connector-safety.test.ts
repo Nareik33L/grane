@@ -479,6 +479,31 @@ describe.skipIf(!duckOk)("DuckDB connector safety", () => {
     expect(isTemporalType(byName.ts ?? "")).toBe(true);
     expect(isTemporalType(byName.tstz ?? "")).toBe(true);
   });
+
+  it("filters PRIMARY KEY introspection to the connection schema", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-cs-"));
+    const path = join(dir, "pk.duckdb");
+    const mod = (await import("@duckdb/node-api")) as {
+      DuckDBInstance: { create: (p: string) => Promise<{ connect: () => Promise<{
+        runAndReadAll: (sql: string) => Promise<unknown>;
+        closeSync?: () => void;
+      }> }> };
+    };
+    const instance = await mod.DuckDBInstance.create(path);
+    const conn = await instance.connect();
+    await conn.runAndReadAll("CREATE SCHEMA other");
+    await conn.runAndReadAll("CREATE TABLE other.type_probe (sku VARCHAR PRIMARY KEY)");
+    await conn.runAndReadAll("CREATE TABLE type_probe (product_id INTEGER PRIMARY KEY, n DECIMAL(18,2))");
+    conn.closeSync?.();
+
+    const c = new DuckDbConnector({ type: "duckdb", path, schema: "main" });
+    connectors.push(c);
+    const schema = await c.introspect();
+    const probe = schema.tables.find((t) => t.name === "type_probe");
+    expect(probe?.primaryKey).toBe("product_id");
+    expect(probe?.primaryKeyColumns).toEqual(["product_id"]);
+    expect(probe?.primaryKey).not.toBe("sku");
+  });
 });
 
 const pgEnv = await postgresLiveEnv();

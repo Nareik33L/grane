@@ -3,6 +3,7 @@ import { configError } from "../errors.js";
 import { mysqlDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import {
+  applyPrimaryKeys,
   loadOptionalModule,
   isWriteSql,
   warehouseSslOptions,
@@ -215,6 +216,24 @@ export class MysqlConnector implements WarehouseConnector {
       refTable: row.ref_table,
       refColumn: row.ref_column,
     }));
+    try {
+      const [pkRows] = await pool.query(
+        `SELECT table_name AS table_name, column_name AS column_name
+         FROM information_schema.key_column_usage
+         WHERE table_schema = ? AND constraint_name = 'PRIMARY'
+         ORDER BY table_name, ordinal_position`,
+        [schemaName],
+      );
+      applyPrimaryKeys(
+        tablesByName.values(),
+        (pkRows as { table_name: string; column_name: string }[]).map((row) => ({
+          table: row.table_name,
+          column: row.column_name,
+        })),
+      );
+    } catch {
+      /* PRIMARY KEY metadata is optional; authoring will not guess a grain. */
+    }
     return { schemaName, tables: [...tablesByName.values()], foreignKeys };
   }
 
