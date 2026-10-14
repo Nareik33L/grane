@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -113,12 +113,24 @@ interface GitRunOptions {
   allowFail?: boolean;
 }
 
+/** Drop inherited GIT_* so a hostile env cannot redirect the repo (GIT_DIR, GIT_WORK_TREE, …). */
+function envWithoutInheritedGit(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("GIT_")) continue;
+    env[key] = value;
+  }
+  env.GIT_OPTIONAL_LOCKS = "0";
+  if (overrides) Object.assign(env, overrides);
+  return env;
+}
+
 function runGit(repoDir: string, args: string[], options: GitRunOptions = {}): { stdout: string; status: number; stderr: string } {
   const result = spawnSync("git", args, {
     cwd: repoDir,
     encoding: "utf8",
     input: options.input,
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...options.env },
+    env: envWithoutInheritedGit(options.env),
   });
   if (result.error) {
     throw configError(
@@ -242,16 +254,53 @@ function localHeadsBranch(root: string, name: string): boolean {
   return runGit(root, ["rev-parse", "--verify", `refs/heads/${name}`], { allowFail: true }).status === 0;
 }
 
-/** `project.base_branch` from working-tree `grane.yml` / `grane.yaml` only. */
-function explicitBaseBranchFromYaml(projectDir: string): string | null {
+function originHeadBranch(root: string): string | null {
+  const originHead = git(root, ["rev-parse", "--abbrev-ref", "origin/HEAD"], { allowFail: true }).trim();
+  if (originHead && originHead !== "origin/HEAD") {
+    return originHead.replace(/^origin\//, "");
+  }
+  return null;
+}
+
+function parseBaseBranchFromYamlContents(contents: Record<string, string>): string | null {
   for (const name of ["grane.yml", "grane.yaml"]) {
-    const path = join(projectDir, name);
-    if (!existsSync(path)) continue;
+    const raw = contents[name];
+    if (!raw) continue;
     try {
-      const doc = parseYaml(readFileSync(path, "utf8"));
+      const doc = parseYaml(raw);
       if (!doc || typeof doc !== "object") continue;
       const value = (doc as { project?: { base_branch?: unknown } }).project?.base_branch;
       if (typeof value === "string" && value.trim()) return value.trim();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * `project.base_branch` from the committed tree at the conventional base
+ * (`origin/HEAD`, else `main`/`master`). Never the working-tree YAML.
+ * When those refs are absent, HEAD's committed tree is the last resort.
+ */
+function committedExplicitBaseBranch(projectDir: string): string | null {
+  const root = gitRoot(projectDir);
+  const refs: string[] = [];
+  if (originHeadBranch(root)) refs.push("origin/HEAD");
+  for (const name of ["main", "master"]) {
+    if (localHeadsBranch(root, name)) refs.push(`refs/heads/${name}`);
+  }
+  if (refs.length === 0) refs.push("HEAD");
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const probe = runGit(root, ["rev-parse", "--verify", `${ref}^{commit}`], { allowFail: true });
+    if (probe.status !== 0) continue;
+    const commit = probe.stdout.trim();
+    if (seen.has(commit)) continue;
+    seen.add(commit);
+    try {
+      const explicit = parseBaseBranchFromYamlContents(yamlContentsAtCommit(projectDir, commit));
+      if (explicit) return explicit;
     } catch {
       continue;
     }
@@ -269,29 +318,46 @@ function isUsableBaseName(name: string): boolean {
 }
 
 /**
- * GitHub PR / pin base: `origin/HEAD` when set, otherwise local `main` /
- * `master`, otherwise `project.base_branch` when that `refs/heads/` ref exists.
- * Never falls back to HEAD — a feature branch must not become the first pin's ref.
+ * GitHub PR / pin base. Committed `project.base_branch` wins. When it is set
+ * and `origin/HEAD` names a different branch, refuse — do not silently pick
+ * either. `origin/HEAD` (else local `main` / `master`) is the fallback only
+ * when no `base_branch` is committed. Working-tree `grane.yml` is never read.
+ * Never falls back to the current HEAD branch name.
  */
 export function configuredBaseBranch(projectDir: string): string {
   const root = gitRoot(projectDir);
-  const originHead = git(root, ["rev-parse", "--abbrev-ref", "origin/HEAD"], { allowFail: true }).trim();
-  if (originHead && originHead !== "origin/HEAD") {
-    return originHead.replace(/^origin\//, "");
+  const originHead = originHeadBranch(root);
+  const explicit = committedExplicitBaseBranch(projectDir);
+  if (explicit) {
+    if (!isUsableBaseName(explicit)) {
+      throw configError(
+        `Committed project.base_branch "${explicit}" is not a usable branch name. ` +
+          `Set project.base_branch in the committed grane.yml to an existing local refs/heads/ branch.`,
+      );
+    }
+    if (originHead && originHead !== explicit) {
+      throw configError(
+        `Refusing to resolve the configured base: origin/HEAD is "${originHead}" but committed ` +
+          `project.base_branch is "${explicit}". Point origin/HEAD at the configured base, or ` +
+          `change project.base_branch on that base and commit it. Working-tree edits are ignored.`,
+      );
+    }
+    if (!localHeadsBranch(root, explicit)) {
+      throw configError(
+        `Committed project.base_branch "${explicit}" is not an existing local refs/heads/ branch. ` +
+          `Create that branch or set project.base_branch to an existing local branch and commit it.`,
+      );
+    }
+    return explicit;
   }
+  if (originHead) return originHead;
   for (const name of ["main", "master"]) {
     if (localHeadsBranch(root, name)) return name;
   }
-  const explicit = explicitBaseBranchFromYaml(projectDir);
-  if (explicit && isUsableBaseName(explicit) && localHeadsBranch(root, explicit)) {
-    return explicit;
-  }
   throw configError(
-    `Cannot determine the configured base branch (no origin/HEAD, refs/heads/main, or refs/heads/master` +
-      (explicit
-        ? `, and project.base_branch "${explicit}" is not an existing local refs/heads/ branch`
-        : "") +
-      `). Set project.base_branch in grane.yml to an existing local branch.`,
+    `Cannot determine the configured base branch (no committed project.base_branch, origin/HEAD, ` +
+      `refs/heads/main, or refs/heads/master). Set project.base_branch in grane.yml to an existing ` +
+      `local branch and commit it.`,
   );
 }
 
@@ -303,9 +369,18 @@ function assertNotDemoAuthoring(projectDir: string, action: string): void {
   );
 }
 
+/**
+ * Audit settings for pin / proposal writes come from the committed config at
+ * the configured base — never the working tree. `audit.enabled: false` on
+ * disk must not silence approve or pin-write.
+ */
 function pinAuditConfig(projectDir: string): { config: GraneConfig; dir: string } {
   try {
-    const loaded = loadConfig(projectDir);
+    const root = gitRoot(projectDir);
+    const base = configuredBaseBranch(projectDir);
+    const commit = git(root, ["rev-parse", `refs/heads/${base}`]).trim();
+    const yamlContents = yamlContentsAtCommit(projectDir, commit);
+    const loaded = loadConfig(projectDir, { yamlContents });
     return { config: loaded.config, dir: loaded.projectDir };
   } catch {
     return { config: graneConfigSchema.parse({}), dir: projectDir };
@@ -383,8 +458,23 @@ function gitPath(root: string, projectDir: string, rel: string): string {
   return fromRoot;
 }
 
+function assertRegularPinFile(path: string): void {
+  try {
+    const st = lstatSync(path);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw configError(
+        `Refusing ${ACTIVE_PIN_PATH}: must be a regular file, not a symlink or special file.`,
+      );
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+}
+
 export function readActivePin(projectDir: string): ActivePin | null {
   const path = join(projectDir, ACTIVE_PIN_PATH);
+  assertRegularPinFile(path);
   if (!existsSync(path)) return null;
   let raw: unknown;
   try {
@@ -596,6 +686,7 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   const audit = pinAuditConfig(projectDir);
   preflightAuditWrite(audit.config, audit.dir);
   const path = join(projectDir, ACTIVE_PIN_PATH);
+  assertRegularPinFile(path);
   const previous = existsSync(path) ? readFileSync(path) : null;
   mkdirSync(dirname(path), { recursive: true });
   atomicWriteFile(path, `${JSON.stringify(next, null, 2)}\n`);
@@ -1016,15 +1107,16 @@ export function readMergedApproval(
       ? git(root, ["rev-parse", `refs/heads/${base_branch}`]).trim()
       : resolveActiveRef(projectDir).commit;
   const ancestor = isAncestor(root, proposal_commit, tip);
-  const trailer_commit = findExactProposalTrailer(root, tip, proposal_id);
-  const merged = ancestor || Boolean(trailer_commit);
+  // Trailer-only "merges" (forged Grane-Proposal on an empty commit) are not
+  // merged. The proposal commit itself must be reachable from the base tip.
+  const merged = ancestor;
   return {
     merged,
     proposal_id,
     proposal_branch: branch,
     proposal_commit,
     base_branch,
-    merge_commit: merged ? (ancestor ? tip : trailer_commit) : null,
+    merge_commit: merged ? tip : null,
     metric_trust: merged ? "governed" : "experimental",
   };
 }

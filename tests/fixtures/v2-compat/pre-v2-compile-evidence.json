@@ -1,0 +1,570 @@
+{
+  "baseline_commit": "7a7ffc6",
+  "generated_note": "Pre-V2 baseline is 7a7ffc6. YAML hashes must match that commit. Metric meaning and compiled SQL are produced by the current compiler on that identical YAML (no silent semantic change).",
+  "projects": [
+    {
+      "project": "example/analytics",
+      "yaml_bytes_identical_to_pre_v2": true,
+      "yaml_hashes_now": {
+        "dimensions.yml": "c34c7703c9cb28df2b062c0afb40350e8f8dd9b00df5fbc616225eeaaa831731",
+        "grane.yml": "03e3c45ecd92e53791076058c2136c52e16a423768cd54f0191fa95524a97460",
+        "metrics.yml": "64c4756a85f1c232e7e76e7213563bfabc2225756e9df55b1fdcad96f0d62fa0",
+        "relationships.yml": "e1192d8735bbd0fb9a6f8afd5e6a305bebcda1deb9979f6bf06bb2593cb833dd"
+      },
+      "yaml_hashes_pre_v2": {
+        "grane.yml": "03e3c45ecd92e53791076058c2136c52e16a423768cd54f0191fa95524a97460",
+        "metrics.yml": "64c4756a85f1c232e7e76e7213563bfabc2225756e9df55b1fdcad96f0d62fa0",
+        "dimensions.yml": "c34c7703c9cb28df2b062c0afb40350e8f8dd9b00df5fbc616225eeaaa831731",
+        "relationships.yml": "e1192d8735bbd0fb9a6f8afd5e6a305bebcda1deb9979f6bf06bb2593cb833dd"
+      },
+      "metrics": [
+        {
+          "name": "average_order_value",
+          "type": "ratio",
+          "description": "Average net revenue per completed order.",
+          "entity": "order",
+          "numerator": "revenue",
+          "denominator": "orders",
+          "filters": {},
+          "definition_version": "66e45ff3"
+        },
+        {
+          "name": "customers",
+          "type": "count",
+          "description": "Number of registered customers (a row in customers, whether or not they have ordered).",
+          "entity": "customer",
+          "sql": "${customers.id}",
+          "time_dimension": "${customers.created_at}",
+          "filters": {},
+          "definition_version": "19680357"
+        },
+        {
+          "name": "orders",
+          "type": "count",
+          "description": "Number of completed orders.",
+          "entity": "order",
+          "sql": "${orders.id}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "orders.status": "completed"
+          },
+          "definition_version": "f55b8a02"
+        },
+        {
+          "name": "payments_received",
+          "type": "sum",
+          "description": "Total successfully collected payments. Payments are one_to_many from orders, so Grane pre-aggregates them at the order grain before joining.",
+          "entity": "order",
+          "sql": "${payments.amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "payments.status": "succeeded"
+          },
+          "definition_version": "c65d21dc"
+        },
+        {
+          "name": "refunded_amount",
+          "type": "sum",
+          "description": "Total refunded amount, at the order grain.",
+          "entity": "order",
+          "sql": "${refunds.amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {},
+          "definition_version": "3651d01b"
+        },
+        {
+          "name": "revenue",
+          "type": "sum",
+          "description": "Net revenue from completed orders, booked on completed_at (not created_at, paid_at or settled_at).",
+          "entity": "order",
+          "sql": "${orders.net_amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "orders.status": "completed"
+          },
+          "definition_version": "03a599e5"
+        }
+      ],
+      "validate_ok": true,
+      "compiles": [
+        {
+          "name": "average_order_value",
+          "input": {
+            "metrics": [
+              "average_order_value"
+            ]
+          },
+          "sql": "SELECT (SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1))::numeric / NULLIF((COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $2))::numeric, 0) AS \"average_order_value\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"public\".\"orders\" WHERE \"orders\".\"completed_at\" >= $3::timestamp AND \"orders\".\"completed_at\" < $4::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "customers",
+          "input": {
+            "metrics": [
+              "customers"
+            ]
+          },
+          "sql": "SELECT COUNT(\"customers\".\"id\") AS \"customers\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"public\".\"customers\" WHERE \"customers\".\"created_at\" >= $1::timestamp AND \"customers\".\"created_at\" < $2::timestamp LIMIT 1000",
+          "params": [
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "orders",
+          "input": {
+            "metrics": [
+              "orders"
+            ]
+          },
+          "sql": "SELECT COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"orders\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"public\".\"orders\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "payments_received",
+          "input": {
+            "metrics": [
+              "payments_received"
+            ]
+          },
+          "sql": "WITH \"m_payments_received\" AS ( SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\" FROM \"public\".\"payments\" WHERE \"payments\".\"status\" = $1 GROUP BY \"payments\".\"order_id\" ) SELECT SUM(\"m_payments_received\".\"value\") AS \"payments_received\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"public\".\"orders\" LEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "succeeded",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "refunded_amount",
+          "input": {
+            "metrics": [
+              "refunded_amount"
+            ]
+          },
+          "sql": "WITH \"m_refunded_amount\" AS ( SELECT \"refunds\".\"order_id\" AS \"_key\", SUM(\"refunds\".\"amount\") AS \"value\" FROM \"public\".\"refunds\" GROUP BY \"refunds\".\"order_id\" ) SELECT SUM(\"m_refunded_amount\".\"value\") AS \"refunded_amount\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"public\".\"orders\" LEFT JOIN \"m_refunded_amount\" ON \"m_refunded_amount\".\"_key\" = \"orders\".\"id\" WHERE \"orders\".\"completed_at\" >= $1::timestamp AND \"orders\".\"completed_at\" < $2::timestamp LIMIT 1000",
+          "params": [
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "revenue",
+          "input": {
+            "metrics": [
+              "revenue"
+            ]
+          },
+          "sql": "SELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"public\".\"orders\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "revenue_by_country",
+          "input": {
+            "metrics": [
+              "revenue"
+            ],
+            "dimensions": [
+              "country"
+            ]
+          },
+          "sql": "WITH \"__grane_pop\" AS ( SELECT * FROM \"public\".\"orders\" WHERE \"orders\".\"completed_at\" >= $1::timestamp AND \"orders\".\"completed_at\" < $2::timestamp ), \"__grane_contrib\" AS ( SELECT * FROM \"__grane_pop\" AS \"orders\" WHERE (\"orders\".\"status\" = $3) ), \"__grane_reach_customers\" AS ( SELECT * FROM \"public\".\"customers\" WHERE \"customers\".\"id\" IN ( SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL) ), \"__grane_card\" AS ( SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\" FROM (SELECT 1 AS \"_x\") AS \"_grane_one\" ), \"__grane_result\" AS ( SELECT \"customers\".\"country\" AS \"country\", SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $4) AS \"revenue\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"__grane_pop\" AS \"orders\" LEFT JOIN \"public\".\"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\" GROUP BY 1 ORDER BY \"revenue\" DESC LIMIT 1000 ) SELECT \"__grane_result\".\"country\", \"__grane_result\".\"revenue\", \"__grane_result\".\"__grane_n\", \"__grane_result\".\"__grane_row\", \"__grane_card\".\"__grane_card_customers\" FROM \"__grane_card\" LEFT JOIN \"__grane_result\" ON TRUE ORDER BY \"__grane_result\".\"revenue\" DESC",
+          "params": [
+            "2026-08-01",
+            "2026-09-01",
+            "completed",
+            "completed"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "example/analytics-duckdb",
+      "yaml_bytes_identical_to_pre_v2": true,
+      "yaml_hashes_now": {
+        "dimensions.yml": "c34c7703c9cb28df2b062c0afb40350e8f8dd9b00df5fbc616225eeaaa831731",
+        "grane.yml": "fe7fb1d7086e595ee2aaf3f863f21de049974452fbad52ed0e4560fb755365a3",
+        "metrics.yml": "64c4756a85f1c232e7e76e7213563bfabc2225756e9df55b1fdcad96f0d62fa0",
+        "relationships.yml": "e1192d8735bbd0fb9a6f8afd5e6a305bebcda1deb9979f6bf06bb2593cb833dd"
+      },
+      "yaml_hashes_pre_v2": {
+        "grane.yml": "fe7fb1d7086e595ee2aaf3f863f21de049974452fbad52ed0e4560fb755365a3",
+        "metrics.yml": "64c4756a85f1c232e7e76e7213563bfabc2225756e9df55b1fdcad96f0d62fa0",
+        "dimensions.yml": "c34c7703c9cb28df2b062c0afb40350e8f8dd9b00df5fbc616225eeaaa831731",
+        "relationships.yml": "e1192d8735bbd0fb9a6f8afd5e6a305bebcda1deb9979f6bf06bb2593cb833dd"
+      },
+      "metrics": [
+        {
+          "name": "average_order_value",
+          "type": "ratio",
+          "description": "Average net revenue per completed order.",
+          "entity": "order",
+          "numerator": "revenue",
+          "denominator": "orders",
+          "filters": {},
+          "definition_version": "66e45ff3"
+        },
+        {
+          "name": "customers",
+          "type": "count",
+          "description": "Number of registered customers (a row in customers, whether or not they have ordered).",
+          "entity": "customer",
+          "sql": "${customers.id}",
+          "time_dimension": "${customers.created_at}",
+          "filters": {},
+          "definition_version": "19680357"
+        },
+        {
+          "name": "orders",
+          "type": "count",
+          "description": "Number of completed orders.",
+          "entity": "order",
+          "sql": "${orders.id}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "orders.status": "completed"
+          },
+          "definition_version": "f55b8a02"
+        },
+        {
+          "name": "payments_received",
+          "type": "sum",
+          "description": "Total successfully collected payments. Payments are one_to_many from orders, so Grane pre-aggregates them at the order grain before joining.",
+          "entity": "order",
+          "sql": "${payments.amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "payments.status": "succeeded"
+          },
+          "definition_version": "c65d21dc"
+        },
+        {
+          "name": "refunded_amount",
+          "type": "sum",
+          "description": "Total refunded amount, at the order grain.",
+          "entity": "order",
+          "sql": "${refunds.amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {},
+          "definition_version": "3651d01b"
+        },
+        {
+          "name": "revenue",
+          "type": "sum",
+          "description": "Net revenue from completed orders, booked on completed_at (not created_at, paid_at or settled_at).",
+          "entity": "order",
+          "sql": "${orders.net_amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "orders.status": "completed"
+          },
+          "definition_version": "03a599e5"
+        }
+      ],
+      "validate_ok": true,
+      "compiles": [
+        {
+          "name": "average_order_value",
+          "input": {
+            "metrics": [
+              "average_order_value"
+            ]
+          },
+          "sql": "SELECT (SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1))::numeric / NULLIF((COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $2))::numeric, 0) AS \"average_order_value\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $3::timestamp AND \"orders\".\"completed_at\" < $4::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "customers",
+          "input": {
+            "metrics": [
+              "customers"
+            ]
+          },
+          "sql": "SELECT COUNT(\"customers\".\"id\") AS \"customers\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"customers\" WHERE \"customers\".\"created_at\" >= $1::timestamp AND \"customers\".\"created_at\" < $2::timestamp LIMIT 1000",
+          "params": [
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "orders",
+          "input": {
+            "metrics": [
+              "orders"
+            ]
+          },
+          "sql": "SELECT COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"orders\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "payments_received",
+          "input": {
+            "metrics": [
+              "payments_received"
+            ]
+          },
+          "sql": "WITH \"m_payments_received\" AS ( SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\" FROM \"payments\" WHERE \"payments\".\"status\" = $1 GROUP BY \"payments\".\"order_id\" ) SELECT SUM(\"m_payments_received\".\"value\") AS \"payments_received\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" LEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "succeeded",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "refunded_amount",
+          "input": {
+            "metrics": [
+              "refunded_amount"
+            ]
+          },
+          "sql": "WITH \"m_refunded_amount\" AS ( SELECT \"refunds\".\"order_id\" AS \"_key\", SUM(\"refunds\".\"amount\") AS \"value\" FROM \"refunds\" GROUP BY \"refunds\".\"order_id\" ) SELECT SUM(\"m_refunded_amount\".\"value\") AS \"refunded_amount\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" LEFT JOIN \"m_refunded_amount\" ON \"m_refunded_amount\".\"_key\" = \"orders\".\"id\" WHERE \"orders\".\"completed_at\" >= $1::timestamp AND \"orders\".\"completed_at\" < $2::timestamp LIMIT 1000",
+          "params": [
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "revenue",
+          "input": {
+            "metrics": [
+              "revenue"
+            ]
+          },
+          "sql": "SELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "revenue_by_country",
+          "input": {
+            "metrics": [
+              "revenue"
+            ],
+            "dimensions": [
+              "country"
+            ]
+          },
+          "sql": "WITH \"__grane_pop\" AS ( SELECT * FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $1::timestamp AND \"orders\".\"completed_at\" < $2::timestamp ), \"__grane_contrib\" AS ( SELECT * FROM \"__grane_pop\" AS \"orders\" WHERE (\"orders\".\"status\" = $3) ), \"__grane_reach_customers\" AS ( SELECT * FROM \"customers\" WHERE \"customers\".\"id\" IN ( SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL) ), \"__grane_card\" AS ( SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\" FROM (SELECT 1 AS \"_x\") AS \"_grane_one\" ), \"__grane_result\" AS ( SELECT \"customers\".\"country\" AS \"country\", SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $4) AS \"revenue\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"__grane_pop\" AS \"orders\" LEFT JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\" GROUP BY 1 ORDER BY \"revenue\" DESC LIMIT 1000 ) SELECT \"__grane_result\".\"country\", \"__grane_result\".\"revenue\", \"__grane_result\".\"__grane_n\", \"__grane_result\".\"__grane_row\", \"__grane_card\".\"__grane_card_customers\" FROM \"__grane_card\" LEFT JOIN \"__grane_result\" ON TRUE ORDER BY \"__grane_result\".\"revenue\" DESC",
+          "params": [
+            "2026-08-01",
+            "2026-09-01",
+            "completed",
+            "completed"
+          ]
+        }
+      ]
+    },
+    {
+      "project": "demo/analytics",
+      "yaml_bytes_identical_to_pre_v2": true,
+      "yaml_hashes_now": {
+        "dimensions.yml": "c34c7703c9cb28df2b062c0afb40350e8f8dd9b00df5fbc616225eeaaa831731",
+        "grane.yml": "4649c709468e8c1d0e5f65c35ed85f4f2c4822a8e9fa6fd12fbd18cc61c1c324",
+        "metrics.yml": "64c4756a85f1c232e7e76e7213563bfabc2225756e9df55b1fdcad96f0d62fa0",
+        "relationships.yml": "e1192d8735bbd0fb9a6f8afd5e6a305bebcda1deb9979f6bf06bb2593cb833dd"
+      },
+      "yaml_hashes_pre_v2": {
+        "grane.yml": "4649c709468e8c1d0e5f65c35ed85f4f2c4822a8e9fa6fd12fbd18cc61c1c324",
+        "metrics.yml": "64c4756a85f1c232e7e76e7213563bfabc2225756e9df55b1fdcad96f0d62fa0",
+        "dimensions.yml": "c34c7703c9cb28df2b062c0afb40350e8f8dd9b00df5fbc616225eeaaa831731",
+        "relationships.yml": "e1192d8735bbd0fb9a6f8afd5e6a305bebcda1deb9979f6bf06bb2593cb833dd"
+      },
+      "metrics": [
+        {
+          "name": "average_order_value",
+          "type": "ratio",
+          "description": "Average net revenue per completed order.",
+          "entity": "order",
+          "numerator": "revenue",
+          "denominator": "orders",
+          "filters": {},
+          "definition_version": "66e45ff3"
+        },
+        {
+          "name": "customers",
+          "type": "count",
+          "description": "Number of registered customers (a row in customers, whether or not they have ordered).",
+          "entity": "customer",
+          "sql": "${customers.id}",
+          "time_dimension": "${customers.created_at}",
+          "filters": {},
+          "definition_version": "19680357"
+        },
+        {
+          "name": "orders",
+          "type": "count",
+          "description": "Number of completed orders.",
+          "entity": "order",
+          "sql": "${orders.id}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "orders.status": "completed"
+          },
+          "definition_version": "f55b8a02"
+        },
+        {
+          "name": "payments_received",
+          "type": "sum",
+          "description": "Total successfully collected payments. Payments are one_to_many from orders, so Grane pre-aggregates them at the order grain before joining.",
+          "entity": "order",
+          "sql": "${payments.amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "payments.status": "succeeded"
+          },
+          "definition_version": "c65d21dc"
+        },
+        {
+          "name": "refunded_amount",
+          "type": "sum",
+          "description": "Total refunded amount, at the order grain.",
+          "entity": "order",
+          "sql": "${refunds.amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {},
+          "definition_version": "3651d01b"
+        },
+        {
+          "name": "revenue",
+          "type": "sum",
+          "description": "Net revenue from completed orders, booked on completed_at (not created_at, paid_at or settled_at).",
+          "entity": "order",
+          "sql": "${orders.net_amount}",
+          "time_dimension": "${orders.completed_at}",
+          "filters": {
+            "orders.status": "completed"
+          },
+          "definition_version": "03a599e5"
+        }
+      ],
+      "validate_ok": true,
+      "compiles": [
+        {
+          "name": "average_order_value",
+          "input": {
+            "metrics": [
+              "average_order_value"
+            ]
+          },
+          "sql": "SELECT (SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1))::numeric / NULLIF((COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $2))::numeric, 0) AS \"average_order_value\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $3::timestamp AND \"orders\".\"completed_at\" < $4::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "customers",
+          "input": {
+            "metrics": [
+              "customers"
+            ]
+          },
+          "sql": "SELECT COUNT(\"customers\".\"id\") AS \"customers\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"customers\" WHERE \"customers\".\"created_at\" >= $1::timestamp AND \"customers\".\"created_at\" < $2::timestamp LIMIT 1000",
+          "params": [
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "orders",
+          "input": {
+            "metrics": [
+              "orders"
+            ]
+          },
+          "sql": "SELECT COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"orders\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "payments_received",
+          "input": {
+            "metrics": [
+              "payments_received"
+            ]
+          },
+          "sql": "WITH \"m_payments_received\" AS ( SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\" FROM \"payments\" WHERE \"payments\".\"status\" = $1 GROUP BY \"payments\".\"order_id\" ) SELECT SUM(\"m_payments_received\".\"value\") AS \"payments_received\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" LEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "succeeded",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "refunded_amount",
+          "input": {
+            "metrics": [
+              "refunded_amount"
+            ]
+          },
+          "sql": "WITH \"m_refunded_amount\" AS ( SELECT \"refunds\".\"order_id\" AS \"_key\", SUM(\"refunds\".\"amount\") AS \"value\" FROM \"refunds\" GROUP BY \"refunds\".\"order_id\" ) SELECT SUM(\"m_refunded_amount\".\"value\") AS \"refunded_amount\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" LEFT JOIN \"m_refunded_amount\" ON \"m_refunded_amount\".\"_key\" = \"orders\".\"id\" WHERE \"orders\".\"completed_at\" >= $1::timestamp AND \"orders\".\"completed_at\" < $2::timestamp LIMIT 1000",
+          "params": [
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "revenue",
+          "input": {
+            "metrics": [
+              "revenue"
+            ]
+          },
+          "sql": "SELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $2::timestamp AND \"orders\".\"completed_at\" < $3::timestamp LIMIT 1000",
+          "params": [
+            "completed",
+            "2026-08-01",
+            "2026-09-01"
+          ]
+        },
+        {
+          "name": "revenue_by_country",
+          "input": {
+            "metrics": [
+              "revenue"
+            ],
+            "dimensions": [
+              "country"
+            ]
+          },
+          "sql": "WITH \"__grane_pop\" AS ( SELECT * FROM \"orders\" WHERE \"orders\".\"completed_at\" >= $1::timestamp AND \"orders\".\"completed_at\" < $2::timestamp ), \"__grane_contrib\" AS ( SELECT * FROM \"__grane_pop\" AS \"orders\" WHERE (\"orders\".\"status\" = $3) ), \"__grane_reach_customers\" AS ( SELECT * FROM \"customers\" WHERE \"customers\".\"id\" IN ( SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL) ), \"__grane_card\" AS ( SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\" FROM (SELECT 1 AS \"_x\") AS \"_grane_one\" ), \"__grane_result\" AS ( SELECT \"customers\".\"country\" AS \"country\", SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $4) AS \"revenue\", COUNT(*) OVER() AS \"__grane_n\", 1 AS \"__grane_row\" FROM \"__grane_pop\" AS \"orders\" LEFT JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\" GROUP BY 1 ORDER BY \"revenue\" DESC LIMIT 1000 ) SELECT \"__grane_result\".\"country\", \"__grane_result\".\"revenue\", \"__grane_result\".\"__grane_n\", \"__grane_result\".\"__grane_row\", \"__grane_card\".\"__grane_card_customers\" FROM \"__grane_card\" LEFT JOIN \"__grane_result\" ON TRUE ORDER BY \"__grane_result\".\"revenue\" DESC",
+          "params": [
+            "2026-08-01",
+            "2026-09-01",
+            "completed",
+            "completed"
+          ]
+        }
+      ]
+    }
+  ]
+}

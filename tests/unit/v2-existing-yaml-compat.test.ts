@@ -61,6 +61,13 @@ describe("V2 existing-YAML compat cert", () => {
     expect(docs).toMatch(/Pending release step/);
     expect(docs).toMatch(/self_certifiable`, \*\*not certified\*\*/);
     expect(docs).toMatch(/credentialed `certify-cloud` run has\s+actually passed/);
+    expect(docs).toMatch(/runtime-certified/);
+    expect(docs).toMatch(/compile-supported/);
+    expect(docs).toMatch(/not yet certified/);
+    expect(docs).toMatch(/Real-world corpora/);
+    expect(docs).toMatch(/release-checklist/);
+    expect(docs).toMatch(/never write `\.grane\/active\.json`/);
+    expect(docs).toMatch(/[Hh]ow to fix/);
   });
 
   for (const rel of Object.keys(catalog.projects)) {

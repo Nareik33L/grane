@@ -101,8 +101,9 @@ working tree. Only `serve` honours the pin — `validate`, `query`, and
 includes `active.commit`. Without a pin, serve is unchanged. The pin `ref`
 must be the configured base branch under `refs/heads/` (not `HEAD`, a tag,
 another branch, or a proposal ref) and `commit` must be a full 40-character
-hex SHA. The configured base is `origin/HEAD`, else local `main` / `master`,
-else `project.base_branch` — never `HEAD`. A malformed pin, a commit that
+hex SHA. The configured base is committed `project.base_branch` when set (and
+`origin/HEAD` must agree), else `origin/HEAD`, else local `main` /
+`master` — never `HEAD` and never the working-tree YAML. A malformed pin, a commit that
 is not in the repository, or a tampered ref refuses to start. Pin load,
 refuse (with reason), and write are appended to the audit log. MCP and
 authoring tools cannot write the pin.

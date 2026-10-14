@@ -22,6 +22,16 @@ import {
   runAuthoringUnmergedPin,
 } from "../gauntlet/authoring-review.js";
 import { runTamperedActivePinGauntlet } from "../gauntlet/active-pin-tamper.js";
+import {
+  runActivePinSymlinkRefused,
+  runAuditPathMustBeRegularFile,
+  runFailClosedQueryAndDiscovery,
+  runForgedProposalTrailerRefused,
+  runGitEnvStripped,
+  runOriginHeadDisagreesWithBaseBranch,
+  runWorkingTreeAuditDisableIgnored,
+  runWorkingTreeBaseBranchIgnored,
+} from "../gauntlet/authoring-committed.js";
 
 describe("V2-14 authoring gauntlet", () => {
   it("MCP sweep covers every registered tool and leaves pin/main/proposal refs unmoved", async () => {
@@ -106,6 +116,46 @@ describe("V2-14 authoring gauntlet", () => {
 
   it("activate walk still refuses pins and keeps main SHA", async () => {
     const verdict = await runAuthoringActivateGauntlet();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("working-tree base_branch does not redirect the configured base", async () => {
+    const verdict = await runWorkingTreeBaseBranchIgnored();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("refuses when origin/HEAD disagrees with committed project.base_branch", async () => {
+    const verdict = await runOriginHeadDisagreesWithBaseBranch();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("working-tree audit.enabled:false does not silence approve/pin-write", async () => {
+    const verdict = await runWorkingTreeAuditDisableIgnored();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("fail_closed audit refuses symlink and /dev/null", async () => {
+    const verdict = await runAuditPathMustBeRegularFile();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("runGit strips inherited GIT_* env vars", async () => {
+    const verdict = await runGitEnvStripped();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("forged Grane-Proposal trailer is not a merge", async () => {
+    const verdict = await runForgedProposalTrailerRefused();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("query and discovery fail closed when audit cannot write", async () => {
+    const verdict = await runFailClosedQueryAndDiscovery();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("active.json symlink is refused", async () => {
+    const verdict = await runActivePinSymlinkRefused();
     expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
   });
 });

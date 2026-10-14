@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { GraneKernel } from "../../src/kernel.js";
 import { WAREHOUSE_TYPES, type WarehouseType } from "../../src/connectors/dialect.js";
 import {
+  CERTIFICATION_CATEGORY,
   CERTIFICATION_STATES,
   WAREHOUSE_CERTIFICATION,
   readmeCertificationLine,
@@ -48,7 +49,7 @@ function lineMentionsEngine(line: string, entry: WarehouseCertification): boolea
 
 /** Lines that mention certified only to deny it, or to say self_certifiable. */
 function lineDeniesCertification(line: string): boolean {
-  return /self_certifiable|self-certify|not\s+CI-certified|not certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n't)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include/i.test(
+  return /self_certifiable|self-certify|not\s+CI-certified|not certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n't)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified/i.test(
     line,
   );
 }
@@ -221,6 +222,36 @@ describe("warehouse certification map", () => {
         new RegExp(WAREHOUSE_CERTIFICATION[type].label, "i"),
       );
     }
+  });
+
+  it("docs separate runtime-certified, compile-supported, and not yet certified", () => {
+    for (const { rel, text } of documentationMarkdown()) {
+      if (!rel.startsWith("docs/") && rel !== "README.md" && rel !== "CHANGELOG.md") continue;
+      if (rel === "docs/connect-an-agent.md" || rel === "docs/mcp-setup.md") continue;
+    }
+    const warehouses = readFileSync(join(ROOT, "docs/warehouses.md"), "utf8");
+    const authoring = readFileSync(join(ROOT, "docs/v2-authoring.md"), "utf8");
+    const checklist = readFileSync(join(ROOT, "docs/release-checklist.md"), "utf8");
+    for (const text of [warehouses, authoring, checklist]) {
+      expect(text).toMatch(/runtime-certified/);
+      expect(text).toMatch(/compile-supported/);
+      expect(text).toMatch(/not yet certified/);
+    }
+    expect(CERTIFICATION_CATEGORY.certified).toBe("runtime-certified");
+    expect(CERTIFICATION_CATEGORY.self_certifiable).toBe("compile-supported");
+    expect(CERTIFICATION_CATEGORY.compile_only).toBe("not yet certified");
+    const runtimeSection = (warehouses.split("### Runtime-certified")[1] ?? "").split("###")[0] ?? "";
+    for (const type of CLOUD_CERT_ENGINES) {
+      expect(WAREHOUSE_CERTIFICATION[type].certification).not.toBe("certified");
+      expect(CERTIFICATION_CATEGORY[WAREHOUSE_CERTIFICATION[type].certification]).not.toBe("runtime-certified");
+      expect(runtimeSection, `${type} listed under runtime-certified`).not.toMatch(
+        new RegExp(WAREHOUSE_CERTIFICATION[type].label, "i"),
+      );
+    }
+    expect(checklist).toMatch(/Credentialed `certify-cloud`/);
+    expect(checklist).toMatch(/QA independent RC/);
+    expect(checklist).toMatch(/npm publish/);
+    expect(checklist).toMatch(/Do not (run|attempt)/);
   });
 
   it("validate --production warning is one line and absent when certified", () => {

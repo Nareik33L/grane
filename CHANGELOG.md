@@ -14,8 +14,20 @@
   temporal warning as a new finding. Docs and README warehouse claims must
   match `WAREHOUSE_CERTIFICATION` exactly (`certified` vs `self_certifiable`);
   no cloud warehouse is certified until a credentialed `certify-cloud` run
-  has actually passed. Cloud `certify-cloud` with real secrets is a pending
-  release step (needs Kieran's credentials).
+  has actually passed. Docs name three categories that match the map
+  (`runtime-certified` / `compile-supported` / `not yet certified`); no cloud
+  warehouse is runtime-certified. Before/after compile evidence vs pre-V2
+  `7a7ffc6` is committed (`docs/v2-compat-evidence.md`). Import/validate never
+  pin or overwrite originals. Unsupported YAML is rejected with a How-to-fix
+  error. Real-world dbt/Cube/LookML/Malloy/Ossie corpora are documented.
+  [docs/release-checklist.md](docs/release-checklist.md) lists credentialed
+  `certify-cloud` on the exact RC commit and QA's independent RC cert — do
+  not run those from this PR. npm publish stays on hold.
+  Committed `project.base_branch` wins over `origin/HEAD` (disagreement is
+  refused); working-tree YAML cannot redirect the base or silence audit.
+  `runGit` strips inherited `GIT_*`. Approve requires the proposal commit
+  reachable from base (forged `Grane-Proposal` trailers are refused).
+  fail_closed audit refuses a symlink or `/dev/null`.
 - **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
   CRITICAL gate. Unexpected errors inside a security scenario score
   `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection

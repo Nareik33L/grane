@@ -159,14 +159,21 @@ write.
 
 ## `project.base_branch`
 
-The configured base is, in order: `origin/HEAD`, else local `main` / `master`,
-else `project.base_branch`. It is **never** inferred from `HEAD`.
+`project.base_branch` is read from the **committed** config at the conventional
+base (`origin/HEAD`, else `main` / `master`, else `HEAD`'s committed tree).
+Working-tree edits to `grane.yml` do **not** redirect the base.
+
+When committed `project.base_branch` is set, it wins. If `origin/HEAD` names a
+different branch, Grane refuses rather than silently picking either.
+`origin/HEAD` (else local `main` / `master`) is the fallback **only** when no
+`base_branch` is committed. The base is **never** inferred from the current
+`HEAD` branch name.
 
 ```yaml
 project:
   name: shop
   timezone: UTC
-  base_branch: develop    # required when origin/HEAD, main, and master are absent
+  base_branch: develop    # committed value; required when origin/HEAD, main, and master are absent
 ```
 
 The first pin must be a commit on that base. Feature-branch HEADs are refused.
@@ -242,16 +249,60 @@ CI compares the postgres (example) and duckdb (demo) reports to
 `tests/fixtures/v2-compat/`. An existing-YAML compat cert loads those
 projects and allows only the temporal `group_by` warning as a new finding.
 
+Supported existing YAML keeps the same metrics, meaning, and compiled SQL.
+The before/after evidence report (pre-V2 `7a7ffc6` vs now) is
+[v2-compat-evidence.md](v2-compat-evidence.md) and
+`tests/fixtures/v2-compat/pre-v2-compile-evidence.json`.
+
+Unsupported or ambiguous YAML is rejected with an actionable error that
+tells the user how to fix it (see validate issue codes such as
+`ambiguous_relationship` and `unsupported_additive_none`).
+
+`grane setup --import` and `grane validate` never write `.grane/active.json`
+and never overwrite the user's original YAML.
+
+Representative real-world corpora (dbt/MetricFlow, Cube, LookML, Malloy,
+Ossie, and multi-entity Grane YAML) are listed under
+[Real-world corpora](#real-world-corpora).
+
+## Real-world corpora
+
+These trees are used for import/validate compat, not only hand-built
+single-metric fixtures. Sources:
+
+| Tree | Kind | Source |
+| --- | --- | --- |
+| `example/analytics`, `example/analytics-duckdb`, `demo/analytics` | Multi-entity Grane YAML | Shipped shop (orders, customers, products, payments, refunds). Byte-identical to pre-V2 `7a7ffc6`. |
+| `example/analytics-from-dbt`, `example/dbt-shop` | dbt / MetricFlow | Example dbt shop imported via `providers:`. |
+| `tests/fixtures/dbt-shop`, `tests/fixtures/dbt-saas` | dbt / MetricFlow | Realistic MetricFlow shop and SaaS shapes (`semantic-fidelity.test.ts`). |
+| `tests/fixtures/cube-shop`, `tests/fixtures/cube-js-shop` | Cube | YAML cubes and `cube.js` (parsed, never eval'd). |
+| `tests/fixtures/lookml-shop` | LookML | Looker-style view. |
+| `tests/fixtures/malloy-shop` | Malloy | `source` / `measure` / `dimension`. |
+| `tests/fixtures/ossie-shop` | Ossie | Semantic-model datasets. |
+
+## Warehouse categories
+
+Docs use three categories that match `WAREHOUSE_CERTIFICATION` 1:1. No cloud
+warehouse is runtime-certified.
+
+| Category | Map state | Engines |
+| --- | --- | --- |
+| runtime-certified | `certified` | PostgreSQL 16, MySQL 8, DuckDB 1.5, ClickHouse 24 |
+| compile-supported | `self_certifiable` | Snowflake, BigQuery, Redshift, Databricks |
+| not yet certified | `compile_only` | none today |
+
 ## Cloud certify (release step)
 
 `.github/workflows/certify-cloud.yml` is dormant. Snowflake, BigQuery,
-Databricks, and Redshift are `self_certifiable`, **not certified**. A
-pending or skipped dispatch does not change that. Do not write that a cloud
-warehouse is certified until a **credentialed `certify-cloud` run has
-actually passed** and `WAREHOUSE_CERTIFICATION` in
-`src/connectors/certification.ts` is updated to match. Docs and README must
-keep the map exactly (`certified` vs `self_certifiable`).
+Databricks, and Redshift are `self_certifiable`, **not certified**
+(compile-supported / not runtime-certified). A pending or skipped dispatch does
+not change that. Do not write that a cloud warehouse is certified until a
+**credentialed `certify-cloud` run has actually passed** and
+`WAREHOUSE_CERTIFICATION` in `src/connectors/certification.ts` is updated to
+match. Docs and README must keep the map exactly (`certified` vs
+`self_certifiable`).
 
 **Pending release step:** Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
-once before the V2 tag. See [certify.md](certify.md). Do not run that
-workflow with real secrets from a public PR.
+once before the V2 tag. See [certify.md](certify.md) and
+[release-checklist.md](release-checklist.md). Do not run that workflow with
+real secrets from a public PR. npm publish stays on hold.

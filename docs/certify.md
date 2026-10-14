@@ -106,7 +106,12 @@ paying cloud credentials.
 
 **Pending release step:** do not dispatch this workflow with real warehouse
 secrets from a public PR. Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
-once before the V2 tag.
+once before the V2 tag. Listed on [release-checklist.md](release-checklist.md)
+together with QA's independent RC cert. Do not run those steps from this PR.
+npm publish stays on hold.
+
+Cloud engines are compile-supported (`self_certifiable`), not
+runtime-certified. See [warehouses.md](warehouses.md#runtime-certified).
 
 ## V2 example / demo compat
 

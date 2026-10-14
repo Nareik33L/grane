@@ -109,7 +109,9 @@ function editDistance(a: string, b: string): number {
 export function unsupportedAdditiveNoneMessage(name: string): string {
   return (
     `Metric "${name}" is declared additive: none. Non-additive measures are unsupported; ` +
-    `Grane will not compile them as an ordinary SUM with trust:governed.`
+    `Grane will not compile them as an ordinary SUM with trust:governed. ` +
+    `How to fix: set additive: additive (or omit it) for SUM-safe measures, or additive: semi ` +
+    `with semi_additive for snapshot measures.`
   );
 }
 
