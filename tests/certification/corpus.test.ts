@@ -23,6 +23,7 @@ import { mcpTrustText } from "../../src/query/trust.js";
 import type { SemanticQueryInput } from "../../src/query/model.js";
 import { GOLD } from "./gold.js";
 import { writeCertificationReport, type CertScenarioResult } from "./report.js";
+import { assertPreV2CertifyCompat } from "./v2-compat.js";
 import {
   AUG,
   AUG_PARTIAL,
@@ -154,6 +155,16 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
         });
       } catch {
         // Report is best-effort; the suite result is the source of truth.
+      }
+      if (session.type === "postgres" || session.type === "duckdb") {
+        const drift = assertPreV2CertifyCompat({
+          engine: session.type,
+          scenarios,
+          connectorSafety: safety,
+        });
+        if (drift.length > 0) {
+          throw new Error(`V2 certify compat vs pre-V2 main: ${drift.join("; ")}`);
+        }
       }
       await session.teardown();
     }

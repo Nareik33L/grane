@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Docs + compat cert (V2-15).** [docs/v2-authoring.md](docs/v2-authoring.md)
+  is the operator guide: proposals-as-PRs, experimental vs governed,
+  `--authoring`, local vs shared, read-only discovery with sampling caps,
+  `grane proposals`, `.grane/active.json` (only `serve` honours it),
+  `project.base_branch`, the temporal `group_by` warning on existing YAML,
+  demo Postgres ready-made vs build-your-own, and importer status. README
+  quickstart links the guide. CI compares `example/` (postgres) and `demo/`
+  (duckdb) certify reports to the pre-V2 main baseline (`7a7ffc6`); an
+  existing-YAML compat cert loads those projects and allows only the
+  temporal warning as a new finding. Cloud `certify-cloud` with real
+  secrets is a pending release step (needs Kieran's credentials).
 - **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
   CRITICAL gate. Unexpected errors inside a security scenario score
   `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection

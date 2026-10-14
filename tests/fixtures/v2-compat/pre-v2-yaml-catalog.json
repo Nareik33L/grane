@@ -1,0 +1,96 @@
+{
+  "baseline": "7a7ffc6",
+  "note": "Catalog names from pre-V2 main. example/ and demo/ YAML were byte-identical at 7db67fc.",
+  "projects": {
+    "example/analytics": {
+      "metrics": [
+        "revenue",
+        "orders",
+        "average_order_value",
+        "payments_received",
+        "refunded_amount",
+        "customers"
+      ],
+      "dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at",
+        "product_category"
+      ],
+      "entities": ["customer", "order", "product"],
+      "relationships": [
+        "orders_to_customers",
+        "payments_to_orders",
+        "refunds_to_orders",
+        "order_items_to_orders",
+        "order_items_to_products",
+        "checkout_events_to_orders",
+        "tickets_to_customers",
+        "subscriptions_to_customers"
+      ]
+    },
+    "example/analytics-duckdb": {
+      "metrics": [
+        "revenue",
+        "orders",
+        "average_order_value",
+        "payments_received",
+        "refunded_amount",
+        "customers"
+      ],
+      "dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at",
+        "product_category"
+      ],
+      "entities": ["customer", "order", "product"],
+      "relationships": [
+        "orders_to_customers",
+        "payments_to_orders",
+        "refunds_to_orders",
+        "order_items_to_orders",
+        "order_items_to_products",
+        "checkout_events_to_orders",
+        "tickets_to_customers",
+        "subscriptions_to_customers"
+      ]
+    },
+    "demo/analytics": {
+      "metrics": [
+        "revenue",
+        "orders",
+        "average_order_value",
+        "payments_received",
+        "refunded_amount",
+        "customers"
+      ],
+      "dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at",
+        "product_category"
+      ],
+      "entities": ["customer", "order", "product"],
+      "relationships": [
+        "orders_to_customers",
+        "payments_to_orders",
+        "refunds_to_orders",
+        "order_items_to_orders",
+        "order_items_to_products",
+        "checkout_events_to_orders",
+        "tickets_to_customers",
+        "subscriptions_to_customers"
+      ]
+    }
+  }
+}

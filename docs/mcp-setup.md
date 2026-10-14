@@ -1,7 +1,9 @@
 # MCP tool reference
 
-Grane exposes four MCP tools. For the full agent connection guide (ChatGPT,
-Claude, Gemini, database setup, HTTPS vs stdio), see
+Grane exposes four MCP tools. `grane serve --authoring` (or
+`authoring.enabled` in `grane.yml`) adds the V2 draft tools; see
+[v2-authoring.md](v2-authoring.md). For the full agent connection guide
+(ChatGPT, Claude, Gemini, database setup, HTTPS vs stdio), see
 [connect-an-agent.md](connect-an-agent.md).
 
 ## Connect from the CLI

@@ -101,6 +101,18 @@ Jobs skip cleanly when the corresponding `GRANE_CERT_*` secrets are absent.
 when the secret is present. Public OSS CI therefore stays green without
 paying cloud credentials.
 
+**Pending release step:** do not dispatch this workflow with real warehouse
+secrets from a public PR. Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
+once before the V2 tag.
+
+## V2 example / demo compat
+
+`example/analytics` defaults to postgres and `demo/analytics` to duckdb.
+After `npm run test:unit`, CI runs `npx tsx tests/certification/compare-v2-compat.ts`
+and compares those two reports to the pre-V2 main baseline (`7a7ffc6`,
+`tests/fixtures/v2-compat/`). Scenario names must match; each must pass.
+See [v2-authoring.md](v2-authoring.md#compatibility).
+
 ## Cost controls
 
 Wired from `limits` (and connector defaults) so a certify run cannot run

@@ -37,6 +37,8 @@ That walks you through: demo shop **or** your own warehouse (any connector Grane
 
 ```bash
 npm run setup -- --yes --path demo --connect cursor
+npm run setup -- --yes --path demo --postgres
+npm run setup -- --yes --path demo --postgres --authoring
 npm run setup -- --yes --path own --url postgres://readonly@host:5432/db --offline --skip-connect
 ```
 
@@ -74,7 +76,7 @@ If Grane cannot safely resolve the meaning, it **refuses**. That is a feature.
 
 Connect Claude, ChatGPT, Gemini, Cursor, or any MCP agent. Grane does not need their API keys.
 
-Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)**
+Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)** · Authoring (V2): **[docs/v2-authoring.md](docs/v2-authoring.md)**
 
 ## Install (your warehouse)
 
@@ -88,7 +90,14 @@ grane validate --production
 grane proposals list
 grane certify --engine postgres
 grane mcp connect cursor
+# optional: draft new metrics as a GitHub PR (off by default)
+grane serve --stdio --authoring
 ```
+
+Authoring (V2) is a proposal-as-PR flow: discovery is read-only, drafts stay
+`experimental` until a teammate merges the PR, and only `grane serve` honours
+`.grane/active.json`. Existing `example/` and `demo/` YAML do not change.
+Guide: [docs/v2-authoring.md](docs/v2-authoring.md).
 
 Use a **read-only database user** — that role is the real control. Grane refuses write-headed SQL on every warehouse and honours `limits.timeout_ms`. Postgres and Redshift wrap each query in a `READ ONLY` transaction with `statement_timeout`. DuckDB file connections open with `access_mode: READ_ONLY`. MySQL sets `SESSION TRANSACTION READ ONLY`. ClickHouse sends `readonly=1`. Snowflake, BigQuery, and Databricks rely on the warehouse role plus the write-keyword guard.
 
@@ -106,7 +115,7 @@ Claude / ChatGPT / Cursor / internal agents
            Your warehouse
 ```
 
-Four MCP tools: `catalog`, `query`, `validate`, `explain`. Agents send analytical intent, not SQL.
+Four MCP tools by default: `catalog`, `query`, `validate`, `explain`. Agents send analytical intent, not SQL. `grane serve --authoring` adds the V2 draft tools (never approve / pin / merge).
 
 ```json
 {

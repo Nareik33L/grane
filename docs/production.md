@@ -95,7 +95,9 @@ these tokens — the agent is a local child process.
 
 When `.grane/active.json` is present, `grane serve` loads YAML from that
 git commit (`ref`, `commit`, `approved_by`, `approved_at`) instead of the
-working tree. Uncommitted edits do not change what agents query. `catalog`
+working tree. Only `serve` honours the pin — `validate`, `query`, and
+`certify` read the working tree. Operator guide:
+[v2-authoring.md](v2-authoring.md). Uncommitted edits do not change what agents query. `catalog`
 includes `active.commit`. Without a pin, serve is unchanged. The pin `ref`
 must be the configured base branch under `refs/heads/` (not `HEAD`, a tag,
 another branch, or a proposal ref) and `commit` must be a full 40-character

@@ -106,6 +106,8 @@ jobs:
             await c.close();
           "
       - run: npm run test:unit
+      - name: V2 example/demo certify compat
+        run: npx tsx tests/certification/compare-v2-compat.ts
       - name: Upload certification reports
         if: always()
         uses: actions/upload-artifact@v4
