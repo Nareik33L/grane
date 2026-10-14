@@ -9,8 +9,14 @@
   the `temporal_semi_additive_group_by` warning). The first pin is verified
   against the configured base branch (`origin/HEAD` / `main`), not HEAD. A
   merged proposal on a base that already had YAML still pins and validates.
-  MCP/authoring cannot write the pin (CLI/TTY only). Malformed, missing-commit,
-  or hand-edited (tampered commit/ref/approved_by) pins fail closed.
+  MCP/authoring cannot write the pin (CLI/TTY only). Serve requires the pin
+  ref to equal the configured base under `refs/heads/` (not HEAD, tags,
+  other branches, or proposal refs) and the commit to be a full 40-hex SHA.
+  The configured base never falls back to HEAD: without `origin/HEAD`,
+  `main`, or `master`, set `project.base_branch` to an existing local branch.
+  Pin load, refuse (with reason), and write are audited. The pin file is
+  written atomically. `approved_by` is a non-empty name (no substring ban).
+  Malformed, missing-commit, or hand-edited pins fail closed.
 - Setup offers **demo Postgres** (preloaded sample data) nested under the
   existing demo shop path. Inside it the user picks shipped demo YAML (today's
   `grane demo --postgres` behaviour) or builds YAML against demo Postgres via

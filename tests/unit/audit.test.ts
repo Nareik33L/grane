@@ -8,7 +8,7 @@ import { getDialect } from "../../src/connectors/dialect.js";
 import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneError } from "../../src/errors.js";
 import { loadConfig } from "../../src/config/load.js";
-import { appendAudit, authoringAuditEvent, recordAudit, recordDiscoveryAudit, recordAuthoringAudit } from "../../src/audit.js";
+import { appendAudit, authoringAuditEvent, pinAuditEvent, recordAudit, recordDiscoveryAudit, recordAuthoringAudit, recordPinAudit } from "../../src/audit.js";
 import { attributeCompiledSql } from "../../src/execute/executor.js";
 
 const secretRow = "SECRET_ROW_PAYLOAD";
@@ -584,5 +584,46 @@ audit:
       if (prevFail === undefined) delete process.env.GRANE_AUDIT_FAIL_CLOSED;
       else process.env.GRANE_AUDIT_FAIL_CLOSED = prevFail;
     }
+  });
+});
+
+describe("pin audit", () => {
+  it("records load, refuse (with reason), and write without YAML or tokens", () => {
+    const dir = tempProject();
+    const config = exampleConfig({ audit: { enabled: true, path: ".grane/audit.jsonl" } });
+    recordPinAudit(config, dir, {
+      operation: "write",
+      ref: "main",
+      commit: "a".repeat(40),
+      approved_by: "Reagent Smith",
+    });
+    recordPinAudit(config, dir, {
+      operation: "load",
+      ref: "main",
+      commit: "a".repeat(40),
+      approved_by: "Reagent Smith",
+    });
+    recordPinAudit(config, dir, {
+      operation: "refuse",
+      ref: "HEAD",
+      commit: "main",
+      reason: 'Pinned ref "HEAD" is not the configured base branch "main" under refs/heads/.',
+    });
+    const events = readJsonl(join(dir, ".grane", "audit.jsonl"));
+    expect(events.map((event) => event.operation)).toEqual(["write", "load", "refuse"]);
+    expect(events[2]).toMatchObject({
+      kind: "pin",
+      operation: "refuse",
+      ref: "HEAD",
+      reason: 'Pinned ref "HEAD" is not the configured base branch "main" under refs/heads/.',
+    });
+    expect(events[0]).not.toHaveProperty("query");
+    expect(JSON.stringify(events)).not.toContain("SECRET");
+    expect(
+      pinAuditEvent({
+        operation: "refuse",
+        reason: "tampered",
+      }),
+    ).toMatchObject({ kind: "pin", operation: "refuse", reason: "tampered" });
   });
 });

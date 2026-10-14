@@ -1,6 +1,6 @@
 /**
- * Gauntlet: a hand-edited `.grane/active.json` (tampered commit, ref, or
- * approved_by) must fail closed. Serve must not load the tampered tree.
+ * Gauntlet: a hand-edited `.grane/active.json` (tampered commit or ref)
+ * must fail closed. Serve must not load the tampered tree.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -40,7 +40,11 @@ function mustRefuse(dir: string, label: string): Verdict | null {
       return { code: "FAIL", detail: `${label}: threw non-error ${String(err)}` };
     }
     const message = err instanceof Error ? err.message : String(err);
-    if (!/refuse|tampered|Invalid \.grane\/active\.json|not in this repository|not on "/i.test(message)) {
+    if (
+      !/refuse|tampered|Invalid \.grane\/active\.json|not in this repository|not on "|full 40|hex SHA|refs\/heads|configured base/i.test(
+        message,
+      )
+    ) {
       return { code: "FAIL", detail: `${label}: unexpected error: ${message}` };
     }
     return null;
@@ -77,33 +81,46 @@ export async function runTamperedActivePinGauntlet(): Promise<Verdict> {
       },
     });
 
+    git(dir, ["checkout", "-b", "other"]);
+    git(dir, ["commit", "--allow-empty", "-m", "other branch"]);
+    git(dir, ["checkout", "main"]);
+    git(dir, ["tag", "v1.0"]);
+
     const valid: ActivePin = {
       ref: "main",
       commit: main,
-      approved_by: "octocat",
+      approved_by: "Reagent Smith",
       approved_at: "2026-10-14T12:00:00.000Z",
     };
     writeActivePin(dir, valid);
 
-    writePinFile(dir, { ...valid, commit: proposal.commit });
-    const commitTamper = mustRefuse(dir, "commit=unmerged proposal");
-    if (commitTamper) return commitTamper;
+    const cases: Array<{ label: string; pin: ActivePin }> = [
+      { label: "commit=unmerged proposal", pin: { ...valid, commit: proposal.commit } },
+      { label: "ref=proposal branch", pin: { ...valid, ref: proposal.branch } },
+      { label: "ref=HEAD", pin: { ...valid, ref: "HEAD" } },
+      { label: "ref=tag v1.0", pin: { ...valid, ref: "v1.0" } },
+      { label: "ref=refs/tags/v1.0", pin: { ...valid, ref: "refs/tags/v1.0" } },
+      { label: "ref=other branch", pin: { ...valid, ref: "other" } },
+      { label: "commit=abbreviated SHA", pin: { ...valid, commit: main.slice(0, 7) } },
+      { label: "commit=main", pin: { ...valid, commit: "main" } },
+      { label: "approved_by empty", pin: { ...valid, approved_by: "" } },
+    ];
+    for (const { label, pin } of cases) {
+      writePinFile(dir, pin);
+      const failed = mustRefuse(dir, label);
+      if (failed) return failed;
+    }
 
-    writePinFile(dir, { ...valid, ref: proposal.branch });
-    const refTamper = mustRefuse(dir, "ref=proposal branch");
-    if (refTamper) return refTamper;
-
-    writePinFile(dir, { ...valid, approved_by: "agent" });
-    const agentTamper = mustRefuse(dir, "approved_by=agent");
-    if (agentTamper) return agentTamper;
-
-    writePinFile(dir, { ...valid, approved_by: "" });
-    const emptyTamper = mustRefuse(dir, "approved_by empty");
-    if (emptyTamper) return emptyTamper;
+    writePinFile(dir, valid);
+    const loaded = loadServingConfig(dir);
+    if (loaded.pin?.approved_by !== "Reagent Smith") {
+      return { code: "FAIL", detail: `valid pin with approved_by "Reagent Smith" did not load` };
+    }
 
     return {
       code: "PASS — POLICY",
-      detail: "Hand-edited active.json (commit/ref/approved_by) failed closed; serve did not load the tampered tree",
+      detail:
+        "Hand-edited active.json (proposal commit/ref, HEAD, tag, other branch, abbreviated SHA, commit=main) failed closed; serve did not load the tampered tree",
     };
   } catch (err) {
     return { code: "FAIL", detail: err instanceof Error ? err.message : String(err) };

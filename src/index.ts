@@ -96,11 +96,14 @@ export {
   recordAudit,
   recordDiscoveryAudit,
   recordAuthoringAudit,
+  recordPinAudit,
   discoveryAuditEvent,
   authoringAuditEvent,
+  pinAuditEvent,
   type AuditEvent,
   type DiscoveryAuditEvent,
   type AuthoringAuditEvent,
+  type PinAuditEvent,
   type HttpAuditContext,
 } from "./audit.js";
 export {

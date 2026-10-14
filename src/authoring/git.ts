@@ -1,11 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { recordPinAudit } from "../audit.js";
 import { findProjectDir, isAdopterTestYaml, loadConfig, type LoadedConfig } from "../config/load.js";
+import { graneConfigSchema, type GraneConfig } from "../config/schema.js";
 import { configError } from "../errors.js";
 import { combineSemanticYaml } from "./yaml-merge.js";
+
+const FULL_SHA = /^[0-9a-fA-F]{40}$/;
 
 /**
  * Git proposal library (V2-03). Shells out to `git` only — no GitHub SDK.
@@ -219,19 +224,40 @@ export function assertCleanWorktree(projectDir: string): void {
   }
 }
 
-function currentBranch(root: string): string {
-  const name = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
-  if (!name || name === "HEAD") {
-    throw configError(
-      `HEAD is detached. Check out the active branch (usually main) before creating a proposal.`,
-    );
+function localHeadsBranch(root: string, name: string): boolean {
+  return runGit(root, ["rev-parse", "--verify", `refs/heads/${name}`], { allowFail: true }).status === 0;
+}
+
+/** `project.base_branch` from working-tree `grane.yml` / `grane.yaml` only. */
+function explicitBaseBranchFromYaml(projectDir: string): string | null {
+  for (const name of ["grane.yml", "grane.yaml"]) {
+    const path = join(projectDir, name);
+    if (!existsSync(path)) continue;
+    try {
+      const doc = parseYaml(readFileSync(path, "utf8"));
+      if (!doc || typeof doc !== "object") continue;
+      const value = (doc as { project?: { base_branch?: unknown } }).project?.base_branch;
+      if (typeof value === "string" && value.trim()) return value.trim();
+    } catch {
+      continue;
+    }
   }
-  return name;
+  return null;
+}
+
+function isUsableBaseName(name: string): boolean {
+  return Boolean(
+    name &&
+      name !== "HEAD" &&
+      !name.startsWith("refs/") &&
+      !name.startsWith(PROPOSAL_BRANCH_PREFIX),
+  );
 }
 
 /**
- * GitHub PR base: `origin/HEAD` when set, otherwise local `main` / `master`.
- * Never HEAD — a feature branch must not become the first pin's ref.
+ * GitHub PR / pin base: `origin/HEAD` when set, otherwise local `main` /
+ * `master`, otherwise `project.base_branch` when that `refs/heads/` ref exists.
+ * Never falls back to HEAD — a feature branch must not become the first pin's ref.
  */
 export function configuredBaseBranch(projectDir: string): string {
   const root = gitRoot(projectDir);
@@ -240,10 +266,37 @@ export function configuredBaseBranch(projectDir: string): string {
     return originHead.replace(/^origin\//, "");
   }
   for (const name of ["main", "master"]) {
-    const probe = runGit(root, ["rev-parse", "--verify", `refs/heads/${name}`], { allowFail: true });
-    if (probe.status === 0) return name;
+    if (localHeadsBranch(root, name)) return name;
   }
-  return currentBranch(root);
+  const explicit = explicitBaseBranchFromYaml(projectDir);
+  if (explicit && isUsableBaseName(explicit) && localHeadsBranch(root, explicit)) {
+    return explicit;
+  }
+  throw configError(
+    `Cannot determine the configured base branch (no origin/HEAD, refs/heads/main, or refs/heads/master` +
+      (explicit
+        ? `, and project.base_branch "${explicit}" is not an existing local refs/heads/ branch`
+        : "") +
+      `). Set project.base_branch in grane.yml to an existing local branch.`,
+  );
+}
+
+function pinAuditConfig(projectDir: string): { config: GraneConfig; dir: string } {
+  try {
+    const loaded = loadConfig(projectDir);
+    return { config: loaded.config, dir: loaded.projectDir };
+  } catch {
+    return { config: graneConfigSchema.parse({}), dir: projectDir };
+  }
+}
+
+function recordPinEvent(
+  projectDir: string,
+  input: { operation: "load" | "refuse" | "write"; ref?: string; commit?: string; approved_by?: string; reason?: string },
+  config?: GraneConfig,
+): void {
+  const resolved = config ? { config, dir: projectDir } : pinAuditConfig(projectDir);
+  recordPinAudit(resolved.config, resolved.dir, input);
 }
 
 function requireProposalBranch(branch: string): string {
@@ -347,26 +400,34 @@ export function yamlContentsAtCommit(projectDir: string, commit: string): Record
   return contents;
 }
 
-function assertServablePin(projectDir: string, pin: ActivePin): string {
+function assertServablePin(projectDir: string, pin: ActivePin): { commit: string; ref: string } {
   const approvedBy = pin.approved_by.trim();
   if (!approvedBy) {
     throw configError(
       `Invalid ${ACTIVE_PIN_PATH}: approved_by is empty. Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
     );
   }
-  if (/agent|mcp|authoring/i.test(approvedBy)) {
+  if (!FULL_SHA.test(pin.commit)) {
     throw configError(
-      `Pinned approved_by "${pin.approved_by}" cannot come from MCP or authoring. ` +
+      `Pinned commit "${pin.commit}" is not a full 40-character hex SHA. ` +
         `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
     );
   }
-  const ref = normalizeBranchRef(pin.ref);
-  if (ref.startsWith(PROPOSAL_BRANCH_PREFIX) || ref === PROPOSAL_BRANCH_PREFIX) {
+  const base = configuredBaseBranch(projectDir);
+  if (pin.ref !== base && pin.ref !== `refs/heads/${base}`) {
     throw configError(
-      `Pinned ref "${pin.ref}" is a proposal branch. Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+      `Pinned ref "${pin.ref}" is not the configured base branch "${base}" under refs/heads/. ` +
+        `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
     );
   }
   const root = gitRoot(projectDir);
+  const heads = `refs/heads/${base}`;
+  const refProbe = runGit(root, ["rev-parse", "--verify", `${heads}^{commit}`], { allowFail: true });
+  if (refProbe.status !== 0) {
+    throw configError(
+      `Pinned ref "${pin.ref}" is not a branch in this repository. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+    );
+  }
   const commitProbe = runGit(root, ["rev-parse", "--verify", `${pin.commit}^{commit}`], { allowFail: true });
   if (commitProbe.status !== 0) {
     throw configError(
@@ -375,18 +436,18 @@ function assertServablePin(projectDir: string, pin: ActivePin): string {
     );
   }
   const commit = commitProbe.stdout.trim();
-  const refProbe = runGit(root, ["rev-parse", "--verify", `${ref}^{commit}`], { allowFail: true });
-  if (refProbe.status !== 0) {
+  if (commit.toLowerCase() !== pin.commit.toLowerCase()) {
     throw configError(
-      `Pinned ref "${pin.ref}" is not a branch in this repository. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+      `Pinned commit "${pin.commit}" is not a full 40-character hex SHA. ` +
+        `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
     );
   }
-  if (!isAncestor(root, commit, ref)) {
+  if (!isAncestor(root, commit, heads)) {
     throw configError(
-      `Pinned commit ${commit} is not on "${ref}". Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+      `Pinned commit ${commit} is not on "${base}". Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
     );
   }
-  return commit;
+  return { commit, ref: base };
 }
 
 /**
@@ -396,18 +457,45 @@ function assertServablePin(projectDir: string, pin: ActivePin): string {
  */
 export function loadServingConfig(projectDir: string): LoadedConfig & { pin: ActivePin | null } {
   const dir = findProjectDir(projectDir);
-  const pin = readActivePin(dir);
+  let pin: ActivePin | null;
+  try {
+    pin = readActivePin(dir);
+  } catch (err) {
+    recordPinEvent(dir, {
+      operation: "refuse",
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
   if (!pin) {
     return { ...loadConfig(dir), pin: null };
   }
-  const commit = assertServablePin(dir, pin);
-  const yamlContents = yamlContentsAtCommit(dir, commit);
-  if (!yamlContents["grane.yml"] && !yamlContents["grane.yaml"]) {
-    throw configError(
-      `Pinned commit ${commit} has no grane.yml. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+  try {
+    const resolved = assertServablePin(dir, pin);
+    const yamlContents = yamlContentsAtCommit(dir, resolved.commit);
+    if (!yamlContents["grane.yml"] && !yamlContents["grane.yaml"]) {
+      throw configError(
+        `Pinned commit ${resolved.commit} has no grane.yml. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+      );
+    }
+    const loaded = loadConfig(dir, { yamlContents });
+    const next = { ...pin, ref: resolved.ref, commit: resolved.commit };
+    recordPinEvent(
+      dir,
+      { operation: "load", ref: next.ref, commit: next.commit, approved_by: next.approved_by },
+      loaded.config,
     );
+    return { ...loaded, pin: next };
+  } catch (err) {
+    recordPinEvent(dir, {
+      operation: "refuse",
+      ref: pin.ref,
+      commit: pin.commit,
+      approved_by: pin.approved_by,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
-  return { ...loadConfig(dir, { yamlContents }), pin: { ...pin, commit } };
 }
 
 function resolveCommit(root: string, rev: string): string {
@@ -483,7 +571,20 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   const next = { ...parsed, ref, commit, previous_commit };
   const path = join(projectDir, ACTIVE_PIN_PATH);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
+  const tmpPath = join(dirname(path), `.active-${process.pid}-${Date.now()}.json.tmp`);
+  try {
+    writeFileSync(tmpPath, `${JSON.stringify(next, null, 2)}\n`);
+    renameSync(tmpPath, path);
+  } catch (err) {
+    rmSync(tmpPath, { force: true });
+    throw err;
+  }
+  recordPinEvent(projectDir, {
+    operation: "write",
+    ref: next.ref,
+    commit: next.commit,
+    approved_by: next.approved_by,
+  });
   return next;
 }
 

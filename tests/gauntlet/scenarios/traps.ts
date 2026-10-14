@@ -846,7 +846,7 @@ function tamperedPinTraps(): Scenario[] {
       disposition: "REFUSE_POLICY",
       question: "Someone hand-edits .grane/active.json (commit, ref, or approved_by).",
       interpretation:
-        "A tampered pin must fail closed. Serve must not load an unmerged proposal commit, a proposal-branch ref, or an agent approved_by.",
+        "A tampered pin must fail closed. Serve must not load an unmerged proposal commit, a proposal-branch/tag/HEAD/other-branch ref, an abbreviated SHA, or commit=main.",
       expectedSqlBehaviour: "n/a — no warehouse SQL.",
       expectation: { kind: "refuse", reason: "tampered pin", statuses: ["config_error"] },
       custom: async () => runTamperedActivePinGauntlet(),

@@ -102,6 +102,8 @@ export type AuthoringAuditOperation =
   | "submit_proposal"
   | "proposal_created";
 
+export type PinAuditOperation = "load" | "refuse" | "write";
+
 /**
  * One authoring MCP tool call. The outer tool owns this line; nested
  * `createDiscovery` calls from those tools must not write their own.
@@ -130,11 +132,30 @@ export interface AuthoringAuditEvent {
 }
 
 /**
+ * Active-config pin (`.grane/active.json`). `refuse` always includes `reason`.
+ * Tokens and YAML contents are never fields.
+ */
+export interface PinAuditEvent {
+  ts: string;
+  kind: "pin";
+  operation: PinAuditOperation;
+  ref?: string;
+  commit?: string;
+  approved_by?: string;
+  reason?: string;
+}
+
+/**
  * One append-only audit record. Never include row payloads, sample values,
  * SQL bind params, or agent tokens. Discriminate on `kind`: query/refusal
- * events always have `query`; auth, discovery, and authoring events never do.
+ * events always have `query`; auth, discovery, authoring, and pin events never do.
  */
-export type AuditEvent = SemanticAuditEvent | AuthAuditEvent | DiscoveryAuditEvent | AuthoringAuditEvent;
+export type AuditEvent =
+  | SemanticAuditEvent
+  | AuthAuditEvent
+  | DiscoveryAuditEvent
+  | AuthoringAuditEvent
+  | PinAuditEvent;
 
 export interface DiscoveryAuditInput {
   ts?: string;
@@ -308,6 +329,41 @@ export function recordAuthoringAudit(
   input: AuthoringAuditInput,
 ): void {
   recordAudit(config, projectDir, authoringAuditEvent(input));
+}
+
+export interface PinAuditInput {
+  ts?: string;
+  operation: PinAuditOperation;
+  ref?: string;
+  commit?: string;
+  approved_by?: string;
+  reason?: string;
+}
+
+/**
+ * Build a pin line from known fields only, so YAML contents and tokens cannot
+ * leak into JSONL.
+ */
+export function pinAuditEvent(input: PinAuditInput): PinAuditEvent {
+  const event: PinAuditEvent = {
+    ts: input.ts ?? new Date().toISOString(),
+    kind: "pin",
+    operation: input.operation,
+  };
+  if (input.ref) event.ref = input.ref;
+  if (input.commit) event.commit = input.commit;
+  if (input.approved_by) event.approved_by = input.approved_by;
+  if (input.reason) event.reason = input.reason;
+  return event;
+}
+
+/** Record one pin load, refuse, or write. Fail-closed uses the same `recordAudit` path. */
+export function recordPinAudit(
+  config: GraneConfig,
+  projectDir: string | undefined,
+  input: PinAuditInput,
+): void {
+  recordAudit(config, projectDir, pinAuditEvent(input));
 }
 
 export function httpFields(http: HttpAuditContext | null | undefined): HttpAuditContext | Record<string, never> {

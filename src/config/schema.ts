@@ -257,6 +257,12 @@ export type WeekStarts = z.infer<typeof weekStartsSchema>;
 export const projectConfigSchema = z.object({
   name: z.string().default("grane-project"),
   timezone: z.string().default("UTC"),
+  /**
+   * GitHub PR / active-pin base when `origin/HEAD`, `main`, and `master` are
+   * all absent. Must name an existing `refs/heads/` branch. Never inferred
+   * from HEAD.
+   */
+  base_branch: z.string().min(1).optional(),
   week: z.object({ starts: weekStartsSchema.default("monday") }).default({ starts: "monday" }),
   fiscal_year: z
     .object({

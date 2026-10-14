@@ -16,6 +16,8 @@ import {
   writeActivePin,
 } from "../../src/authoring/git.js";
 import { loadConfig } from "../../src/config/load.js";
+import { getDialect } from "../../src/connectors/dialect.js";
+import type { WarehouseConnector } from "../../src/connectors/types.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { SemanticModel } from "../../src/model/model.js";
 import { buildMcpServer, AUTHORING_MCP_TOOLS, CORE_MCP_TOOLS } from "../../src/mcp/server.js";
@@ -89,6 +91,49 @@ function initRepo(metrics = METRICS_YML): string {
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-m", "initial config"]);
   return dir;
+}
+
+function stubConnector(): WarehouseConnector {
+  return {
+    type: "postgres",
+    dialect: getDialect("postgres"),
+    async query() {
+      return { columns: ["revenue"], rows: [{ revenue: 1 }] };
+    },
+    async introspect() {
+      return {
+        schemaName: "public",
+        tables: [
+          {
+            schema: "public",
+            name: "orders",
+            primaryKey: "id",
+            columns: [
+              { name: "id", dataType: "integer", nullable: false },
+              { name: "net_amount", dataType: "numeric", nullable: true },
+            ],
+          },
+        ],
+        foreignKeys: [],
+      };
+    },
+    async close() {},
+  };
+}
+
+function readAudit(dir: string): Record<string, unknown>[] {
+  const path = join(dir, ".grane", "audit.jsonl");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function parseToolPayload(result: { content: { type: string; text: string }[] }): Record<string, unknown> {
+  const text = result.content[0]!.text;
+  return JSON.parse(text.slice(text.indexOf("{"))) as Record<string, unknown>;
 }
 
 describe("loadServingConfig without a pin (compat)", () => {
@@ -247,6 +292,67 @@ describe("loadServingConfig with a pin", () => {
     expect(() => loadServingConfig(dir)).toThrow(/Serve refuses to start/);
   });
 
+  it("accepts approved_by names that contain the substring agent", () => {
+    const dir = initRepo();
+    const commit = git(dir, ["rev-parse", "HEAD"]);
+    const pin = writeActivePin(dir, {
+      ref: "main",
+      commit,
+      approved_by: "Reagent Smith",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    expect(pin.approved_by).toBe("Reagent Smith");
+    const serving = loadServingConfig(dir);
+    expect(serving.pin?.approved_by).toBe("Reagent Smith");
+    expect(serving.pin?.commit).toBe(commit);
+  });
+
+  it("fails closed when the pin ref is not refs/heads/<configured base> or the commit is not a full 40-hex SHA", () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    git(dir, ["tag", "v1.0"]);
+    const valid = {
+      ref: "main",
+      commit: main,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    };
+    writeFileSync(join(dir, ACTIVE_PIN_PATH), `${JSON.stringify({ ...valid, ref: "HEAD" }, null, 2)}\n`);
+    expect(() => loadServingConfig(dir)).toThrow(/configured base branch "main" under refs\/heads/);
+    writeFileSync(join(dir, ACTIVE_PIN_PATH), `${JSON.stringify({ ...valid, ref: "v1.0" }, null, 2)}\n`);
+    expect(() => loadServingConfig(dir)).toThrow(/refs\/heads/);
+    writeFileSync(join(dir, ACTIVE_PIN_PATH), `${JSON.stringify({ ...valid, commit: main.slice(0, 12) }, null, 2)}\n`);
+    expect(() => loadServingConfig(dir)).toThrow(/full 40-character hex SHA/);
+    writeFileSync(join(dir, ACTIVE_PIN_PATH), `${JSON.stringify({ ...valid, commit: "main" }, null, 2)}\n`);
+    expect(() => loadServingConfig(dir)).toThrow(/full 40-character hex SHA/);
+  });
+
+  it("audits pin write, load, and refuse with a reason", () => {
+    const dir = initRepo();
+    const commit = git(dir, ["rev-parse", "HEAD"]);
+    writeActivePin(dir, {
+      ref: "main",
+      commit,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    const written = readAudit(dir).find((event) => event.kind === "pin" && event.operation === "write");
+    expect(written).toMatchObject({ kind: "pin", operation: "write", ref: "main", commit, approved_by: "octocat" });
+
+    loadServingConfig(dir);
+    const loaded = readAudit(dir).find((event) => event.kind === "pin" && event.operation === "load");
+    expect(loaded).toMatchObject({ kind: "pin", operation: "load", ref: "main", commit, approved_by: "octocat" });
+
+    writeFileSync(
+      join(dir, ACTIVE_PIN_PATH),
+      `${JSON.stringify({ ref: "HEAD", commit, approved_by: "octocat", approved_at: "2026-10-14T12:00:00.000Z" }, null, 2)}\n`,
+    );
+    expect(() => loadServingConfig(dir)).toThrow(/refs\/heads/);
+    const refused = readAudit(dir).filter((event) => event.kind === "pin" && event.operation === "refuse");
+    expect(refused.length).toBeGreaterThan(0);
+    expect(String(refused[refused.length - 1]!.reason)).toMatch(/configured base branch "main" under refs\/heads/);
+  });
+
   it("fails closed when the pinned commit is not in the repository", () => {
     const dir = initRepo();
     writeFileSync(
@@ -352,6 +458,61 @@ describe("MCP and authoring cannot write the pin", () => {
     expect(readFileSync(join(srcRoot, "setup/run.ts"), "utf8")).toMatch(/Activation requires a TTY/);
     expect(readFileSync(join(srcRoot, "mcp/authoring.ts"), "utf8")).not.toMatch(/writeActivePin/);
     expect(readFileSync(join(srcRoot, "authoring/tools.ts"), "utf8")).not.toMatch(/writeActivePin/);
+    expect(readFileSync(join(srcRoot, "authoring/git.ts"), "utf8")).toMatch(/renameSync/);
+  });
+
+  it("MCP sweep calls every tool including authoring and leaves the pin bytes and main SHA unmoved", async () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "main"]);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: main,
+      approved_by: "Reagent Smith",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    const pinBytes = readFileSync(join(dir, ACTIVE_PIN_PATH));
+    const serving = loadServingConfig(dir);
+    const kernel = new GraneKernel(serving.config, {
+      projectDir: serving.projectDir,
+      activePin: serving.pin,
+      connector: stubConnector(),
+    });
+    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "grane-pin-sweep", version: "0.0.1" });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const listed = (await client.listTools()).tools.map((tool) => tool.name).sort();
+      expect(listed).toEqual([...CORE_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
+
+      const start = await client.callTool({ name: "authoring_start", arguments: {} });
+      const startPayload = parseToolPayload(start as { content: { type: string; text: string }[] });
+      const sessionId = (startPayload.session as { id: string }).id;
+      expect(sessionId).toBeTruthy();
+
+      const query = { metrics: ["revenue"] };
+      const argsFor = (name: string): Record<string, unknown> => {
+        if (name === "catalog" || name === "authoring_start") return {};
+        if (name === "validate" || name === "query" || name === "explain") return { query };
+        if (name === "profile_column") return { session_id: sessionId, table: "orders", column: "net_amount" };
+        if (name === "record_term") return { session_id: sessionId, term: "revenue", answer: "net_amount" };
+        if (name === "resolve_ambiguity") {
+          return { session_id: sessionId, id: "missing", chosen: "orders.net_amount" };
+        }
+        return { session_id: sessionId };
+      };
+
+      for (const name of listed) {
+        await client.callTool({ name, arguments: argsFor(name) });
+      }
+    } finally {
+      await client.close().catch(() => undefined);
+      await server.close().catch(() => undefined);
+    }
+
+    expect(readFileSync(join(dir, ACTIVE_PIN_PATH)).equals(pinBytes)).toBe(true);
+    expect(git(dir, ["rev-parse", "main"])).toBe(main);
+    expect(readActivePin(dir)?.commit).toBe(main);
   });
 });
 
@@ -398,6 +559,41 @@ describe("first pin is the configured base branch, not HEAD", () => {
     expect(pin.ref).toBe("main");
     expect(pin.commit).toBe(main);
     expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("feature");
+  });
+
+  it("refuses when there is no origin/HEAD, main, or master, unless project.base_branch names a local branch", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "develop"]);
+    git(dir, ["config", "user.email", "test@grane.dev"]);
+    git(dir, ["config", "user.name", "Grane Test"]);
+    writeFileSync(join(dir, ".gitignore"), ".grane/\n");
+    writeProject(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial on develop"]);
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("develop");
+    expect(() => configuredBaseBranch(dir)).toThrow(/Cannot determine the configured base branch/);
+    expect(() => configuredBaseBranch(dir)).toThrow(/project.base_branch/);
+
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC, base_branch: develop }
+connection: { type: postgres, schema: public }
+entities:
+  order: { table: orders, primary_key: id }
+`,
+    );
+    git(dir, ["add", "grane.yml"]);
+    git(dir, ["commit", "-m", "set project.base_branch"]);
+    expect(configuredBaseBranch(dir)).toBe("develop");
+    const commit = git(dir, ["rev-parse", "HEAD"]);
+    const pin = writeActivePin(dir, {
+      ref: "develop",
+      commit,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    expect(pin.ref).toBe("develop");
+    expect(loadServingConfig(dir).pin?.ref).toBe("develop");
   });
 });
 
@@ -450,7 +646,7 @@ describe("merged proposal on a base that already had YAML", () => {
 });
 
 describe("tampered active.json gauntlet", () => {
-  it("fails closed when commit, ref, or approved_by is hand-edited", async () => {
+  it("fails closed when commit, ref, HEAD, tag, other branch, or abbreviated SHA is hand-edited", async () => {
     const verdict = await runTamperedActivePinGauntlet();
     expect(verdict.code).toBe("PASS — POLICY");
   });
