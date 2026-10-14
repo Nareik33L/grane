@@ -1,4 +1,10 @@
-import { tablePrimaryKey, type DatabaseSchema } from "../connectors/types.js";
+import {
+  isCompositePrimaryKey,
+  tablePrimaryKey,
+  tablePrimaryKeyColumns,
+  type DatabaseSchema,
+  type TableInfo,
+} from "../connectors/types.js";
 import { isNumericType, isTemporalType } from "../connectors/dialect.js";
 import { RelationshipGraph, describeJoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
@@ -15,6 +21,7 @@ export const AMBIGUITY_KINDS = [
   "non_additive_measure",
   "semi_additive_group_by",
   "fanout_join",
+  "primary_key",
 ] as const;
 export type AmbiguityKind = (typeof AMBIGUITY_KINDS)[number];
 
@@ -65,6 +72,10 @@ export function semiAdditiveGroupById(table: string, column: string): string {
 
 export function fanoutAmbiguityId(fromTable: string, toTable: string): string {
   return `amb-fanout-${fromTable}-${toTable}`;
+}
+
+export function primaryKeyAmbiguityId(table: string): string {
+  return `amb-primary-key-${table}`;
 }
 
 export function looksRevenueLike(column: string, dataType: string): boolean {
@@ -209,6 +220,26 @@ export function resolvedTimeColumn(
 }
 
 /**
+ * Entity grain: a resolved `primary_key` choice, or an introspected
+ * single-column PRIMARY KEY. Never the first column of a composite key.
+ */
+export function resolvedEntityPrimaryKey(
+  session: { resolved_ambiguities: ReadonlyArray<Pick<ResolvedAmbiguity, "id" | "kind" | "chosen">> },
+  schema: DatabaseSchema,
+  table: string,
+): string | undefined {
+  const chosen = session.resolved_ambiguities.find(
+    (item) => item.kind === "primary_key" && item.id === primaryKeyAmbiguityId(table),
+  )?.chosen;
+  if (chosen) {
+    const parsed = parseColumnRef(chosen);
+    if (parsed?.table === table) return parsed.column;
+  }
+  const info = schema.tables.find((item) => item.name === table);
+  return tablePrimaryKey(info);
+}
+
+/**
  * Detect conflicting candidates from schema + inferred relationships.
  * Questions name tables/columns only — never sample values or tokens.
  */
@@ -218,6 +249,7 @@ export function detectAmbiguities(input: DetectAmbiguitiesInput): OpenAmbiguity[
     ...detectDateColumns(input.schema),
     ...detectNonAdditive(input.schema),
     ...detectFanoutJoins(input.relationships ?? {}),
+    ...detectPrimaryKeys(input.schema),
   ];
   return found;
 }
@@ -230,6 +262,44 @@ export function mergeAmbiguities(
 ): OpenAmbiguity[] {
   const skip = new Set([...existingOpen.map((item) => item.id), ...resolved.map((item) => item.id)]);
   return [...existingOpen, ...detected.filter((item) => !skip.has(item.id))];
+}
+
+function primaryKeyAmbiguity(table: TableInfo): OpenAmbiguity | null {
+  const pkCols = tablePrimaryKeyColumns(table);
+  if (pkCols.length === 1) return null;
+  if (isCompositePrimaryKey(table)) {
+    return {
+      id: primaryKeyAmbiguityId(table.name),
+      kind: "primary_key",
+      question:
+        `Table ${quoteIdent(table.name)} has a composite PRIMARY KEY ` +
+        `(${pkCols.map(quoteIdent).join(", ")}). Grane entities have a single-column grain — ` +
+        `using the first column would be a false grain. Choose one column as the grain. ` +
+        `Grane will not guess.`,
+      candidates: pkCols.map((column) => `${table.name}.${column}`),
+    };
+  }
+  const hasMeasure = table.columns.some((column) => isNumericType(column.dataType));
+  if (!hasMeasure) return null;
+  const candidates = table.columns.map((column) => `${table.name}.${column.name}`);
+  if (candidates.length === 0) return null;
+  return {
+    id: primaryKeyAmbiguityId(table.name),
+    kind: "primary_key",
+    question:
+      `No PRIMARY KEY was introspected on ${quoteIdent(table.name)}. ` +
+      `Which column is the entity grain? Grane will not guess id or the first column.`,
+    candidates,
+  };
+}
+
+function detectPrimaryKeys(schema: DatabaseSchema): OpenAmbiguity[] {
+  const out: OpenAmbiguity[] = [];
+  for (const table of schema.tables) {
+    const item = primaryKeyAmbiguity(table);
+    if (item) out.push(item);
+  }
+  return out;
 }
 
 function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {

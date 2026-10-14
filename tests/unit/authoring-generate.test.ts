@@ -7,6 +7,7 @@ import * as publicApi from "../../src/index.js";
 import { generateDraftYaml } from "../../src/authoring/generate.js";
 import { createSession } from "../../src/authoring/session.js";
 import { applyPrimaryKeys, type DatabaseSchema } from "../../src/connectors/types.js";
+import { primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
 import { loadConfig } from "../../src/config/load.js";
 import { validateModel } from "../../src/validate/validate.js";
 import { SemanticModel } from "../../src/model/model.js";
@@ -39,6 +40,7 @@ function productsSchema(): DatabaseSchema {
         schema: "public",
         name: "products",
         primaryKey: "product_id",
+        primaryKeyColumns: ["product_id"],
         columns: [
           { name: "sku", dataType: "text", nullable: false },
           { name: "product_id", dataType: "integer", nullable: false },
@@ -116,13 +118,94 @@ describe("generateDraftYaml", () => {
     expect(files["entities.yml"]).not.toMatch(/primary_key:\s*id\b/);
   });
 
-  it("refuses to guess a grain when PRIMARY KEY metadata is missing", () => {
+  it("refuses to guess a grain when PRIMARY KEY metadata is missing and lists the skipped table", () => {
     const dir = tempDir();
     const session = sessionWithRevenue(dir);
     const schema = productsSchema();
     delete schema.tables[0]!.primaryKey;
+    delete schema.tables[0]!.primaryKeyColumns;
     expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(GraneError);
     expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/Nothing to propose/);
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(
+      /Skipped tables without a usable primary key: products/,
+    );
+  });
+
+  it("does not truncate a composite PRIMARY KEY to the first column", () => {
+    const dir = tempDir();
+    const session = sessionWithRevenue(dir);
+    const schema = productsSchema();
+    schema.tables[0]!.primaryKey = undefined;
+    schema.tables[0]!.primaryKeyColumns = ["tenant_id", "product_id"];
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/products/);
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/primary_key/);
+
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      resolved_ambiguities: [
+        ...session.resolved_ambiguities,
+        {
+          id: primaryKeyAmbiguityId("products"),
+          kind: "primary_key",
+          question: "composite",
+          candidates: ["products.tenant_id", "products.product_id"],
+          chosen: "products.product_id",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: resolved, schema, inferred: {} });
+    expect(files["entities.yml"]).toMatch(/primary_key:\s*product_id/);
+    expect(files["entities.yml"]).not.toMatch(/primary_key:\s*tenant_id/);
+  });
+
+  it("includes the glossary answer as the metric description", () => {
+    const dir = tempDir();
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Net from completed orders." }],
+      resolved_ambiguities: [
+        {
+          id: "amb-revenue-like-products",
+          kind: "revenue_like_columns",
+          question: "Which column?",
+          candidates: ["products.net_amount", "products.gross_amount"],
+          chosen: "products.net_amount",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session, schema: productsSchema(), inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/description:\s*Net from completed orders\./);
+  });
+
+  it("merges new entities and metrics with existing file maps instead of replacing them", () => {
+    const dir = tempDir();
+    const session = sessionWithRevenue(dir);
+    const { files } = generateDraftYaml({
+      session,
+      schema: productsSchema(),
+      inferred: {},
+      fileEntities: { category: { table: "categories", primary_key: "id" } },
+      fileMetrics: {
+        orders: { entity: "order", type: "count", sql: "${orders.id}", status: "approved" },
+      },
+    });
+    expect(files["entities.yml"]).toMatch(/category:/);
+    expect(files["entities.yml"]).toMatch(/products:/);
+    expect(files["metrics.yml"]).toMatch(/orders:/);
+    expect(files["metrics.yml"]).toMatch(/revenue:/);
+  });
+
+  it("refuses when a generated entity conflicts with the file map", () => {
+    const dir = tempDir();
+    const session = sessionWithRevenue(dir);
+    expect(() =>
+      generateDraftYaml({
+        session,
+        schema: productsSchema(),
+        inferred: {},
+        fileEntities: { products: { table: "products", primary_key: "sku" } },
+      }),
+    ).toThrow(/overwrite existing entity "products"/);
   });
 
   it("never emits an exploration allow-list wildcard", () => {
@@ -183,19 +266,40 @@ describe("generateDraftYaml", () => {
     expect(renamed.files["relationships.yml"]).toMatch(/products_to_categories_2/);
     expect(renamed.files["relationships.yml"]).toMatch(/other\.a/);
     expect(renamed.files["relationships.yml"]).toMatch(/products\.category_id/);
+
+    const merged = generateDraftYaml({
+      session,
+      schema: productsSchema(),
+      inferred,
+      fileRelationships: {
+        orders_to_customers: { from: "orders.customer_id", to: "customers.id", type: "many_to_one" },
+      },
+    });
+    expect(merged.files["relationships.yml"]).toMatch(/orders_to_customers/);
+    expect(merged.files["relationships.yml"]).toMatch(/products_to_categories/);
   });
 });
 
 describe("applyPrimaryKeys / refusal messages", () => {
-  it("records the first introspected PRIMARY KEY column per table", () => {
+  it("records a single-column PRIMARY KEY", () => {
+    const tables = [
+      { schema: "public", name: "orders", columns: [] as { name: string; dataType: string; nullable: boolean }[] },
+    ];
+    applyPrimaryKeys(tables, [{ table: "orders", column: "order_id" }]);
+    expect(tables[0]!.primaryKey).toBe("order_id");
+    expect(tables[0]!.primaryKeyColumns).toEqual(["order_id"]);
+  });
+
+  it("does not truncate a composite PRIMARY KEY to the first column", () => {
     const tables = [
       { schema: "public", name: "orders", columns: [] as { name: string; dataType: string; nullable: boolean }[] },
     ];
     applyPrimaryKeys(tables, [
-      { table: "orders", column: "order_id" },
       { table: "orders", column: "tenant_id" },
+      { table: "orders", column: "order_id" },
     ]);
-    expect(tables[0]!.primaryKey).toBe("order_id");
+    expect(tables[0]!.primaryKey).toBeUndefined();
+    expect(tables[0]!.primaryKeyColumns).toEqual(["tenant_id", "order_id"]);
   });
 
   it("gives the primary-key refusal a message distinct from the temporal one", () => {

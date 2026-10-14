@@ -11,6 +11,7 @@ import { createConnector } from "../../src/connectors/create.js";
 import { isWriteSql } from "../../src/connectors/types.js";
 import { CI_REQUIRED_CERT_ENGINES, loadAvailableEngines, type CertSession } from "../helpers/cert-engine.js";
 import { assertEngineRejectsWrite } from "../helpers/discovery-readonly.js";
+import { PG_READONLY_USER } from "../helpers/postgres-live.js";
 
 const engines = await loadAvailableEngines();
 const sessions: CertSession[] = [];
@@ -180,5 +181,38 @@ for (const engine of engines.filter((item) =>
         await connector.close();
       }
     });
+
+    it.skipIf(engine.type !== "postgres")(
+      "SELECT-only role introspects simple and composite PRIMARY KEY via pg_constraint",
+      async () => {
+      const session = await engine.setup();
+      sessions.push(session);
+      await session.execWrite(
+        "CREATE TABLE pk_simple (product_id INTEGER PRIMARY KEY, sku TEXT, net_amount NUMERIC)",
+      );
+      await session.execWrite(
+        "CREATE TABLE pk_composite (tenant_id INTEGER, order_id INTEGER, amount NUMERIC, PRIMARY KEY (tenant_id, order_id))",
+      );
+      await session.execWrite(
+        `GRANT SELECT ON ALL TABLES IN SCHEMA ${session.schemaName} TO ${PG_READONLY_USER}`,
+      );
+
+      const who = await session.queryRead("SELECT current_user AS usr");
+      expect(who.rows[0]?.usr).toBe(PG_READONLY_USER);
+
+      const connector = createConnector(session.readConnection());
+      try {
+        const schema = await connector.introspect();
+        const simple = schema.tables.find((table) => table.name === "pk_simple");
+        const composite = schema.tables.find((table) => table.name === "pk_composite");
+        expect(simple?.primaryKey).toBe("product_id");
+        expect(simple?.primaryKeyColumns).toEqual(["product_id"]);
+        expect(composite?.primaryKey).toBeUndefined();
+        expect(composite?.primaryKeyColumns).toEqual(["tenant_id", "order_id"]);
+      } finally {
+        await connector.close();
+      }
+      },
+    );
   });
 }

@@ -12,30 +12,47 @@ export interface TableInfo {
   name: string;
   columns: ColumnInfo[];
   /**
-   * First column of the warehouse PRIMARY KEY, when introspected.
+   * Single-column warehouse PRIMARY KEY, when introspected.
+   * Composite keys leave this unset — using the first column would be a false grain.
    * Authoring never guesses `id` or the first column.
    */
   primaryKey?: string;
+  /** All PRIMARY KEY columns in ordinal order. Length > 1 is composite. */
+  primaryKeyColumns?: string[];
 }
 
-/** Apply introspected PRIMARY KEY columns (first ordinal wins per table). */
+/** Apply introspected PRIMARY KEY columns. Composite keys are recorded, not truncated. */
 export function applyPrimaryKeys(
   tables: Iterable<TableInfo>,
   keys: ReadonlyArray<{ table: string; column: string }>,
 ): void {
-  const first = new Map<string, string>();
+  const grouped = new Map<string, string[]>();
   for (const key of keys) {
-    if (!first.has(key.table)) first.set(key.table, key.column);
+    const list = grouped.get(key.table) ?? [];
+    if (!list.includes(key.column)) list.push(key.column);
+    grouped.set(key.table, list);
   }
   for (const table of tables) {
-    const pk = first.get(table.name);
-    if (pk) table.primaryKey = pk;
+    const cols = grouped.get(table.name);
+    if (!cols || cols.length === 0) continue;
+    table.primaryKeyColumns = cols;
+    table.primaryKey = cols.length === 1 ? cols[0] : undefined;
   }
 }
 
-/** Introspected grain key only — never `id` or columns[0] as a guess. */
+/** Introspected single-column grain only — never `id`, columns[0], or a composite first column. */
 export function tablePrimaryKey(table: TableInfo | undefined): string | undefined {
   return table?.primaryKey;
+}
+
+/** All introspected PRIMARY KEY columns in ordinal order. */
+export function tablePrimaryKeyColumns(table: TableInfo | undefined): string[] {
+  if (table?.primaryKeyColumns && table.primaryKeyColumns.length > 0) return table.primaryKeyColumns;
+  return table?.primaryKey ? [table.primaryKey] : [];
+}
+
+export function isCompositePrimaryKey(table: TableInfo | undefined): boolean {
+  return tablePrimaryKeyColumns(table).length > 1;
 }
 
 export interface ForeignKeyInfo {

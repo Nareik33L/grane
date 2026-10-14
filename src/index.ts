@@ -106,6 +106,7 @@ export {
   detectAmbiguities,
   mergeAmbiguities,
   resolvedTimeColumn,
+  resolvedEntityPrimaryKey,
   AMBIGUITY_KINDS,
   NON_ADDITIVE_CANDIDATES,
   FANOUT_CANDIDATES,

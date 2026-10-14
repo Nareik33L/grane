@@ -19,6 +19,8 @@ import {
   type OpenAmbiguity,
 } from "./session.js";
 import { createProposal, githubPrPlan, type GitHubPrPlan, type Proposal } from "./git.js";
+import { readRelationshipsFile, type InferredRelationship } from "../discover/relationships.js";
+import { readYamlMapFile } from "./yaml-merge.js";
 import {
   detectAmbiguities,
   forbiddenSemiGroupByPrimaryKeyMessage,
@@ -228,6 +230,14 @@ function parseColumn(ref: string): { table: string; column: string } | null {
   return { table: match[1]!, column: match[2]! };
 }
 
+function catalogRelationshipsOf(kernel: GraneKernel): Record<string, InferredRelationship> {
+  const out: Record<string, InferredRelationship> = {};
+  for (const [name, rel] of Object.entries(kernel.config.relationships)) {
+    out[name] = { from: rel.from, to: rel.to, type: rel.type };
+  }
+  return out;
+}
+
 export async function proposeDefinitions(
   kernel: GraneKernel,
   sessionId: string,
@@ -236,6 +246,7 @@ export async function proposeDefinitions(
     unresolved_ambiguities: OpenAmbiguity[];
     unresolved: boolean;
     warning?: string;
+    skipped_tables: string[];
   }
 > {
   const projectDir = requireProjectDir(kernel);
@@ -243,9 +254,36 @@ export async function proposeDefinitions(
   const discovery = discoveryFor(kernel, sessionId);
   const schema = await discovery.introspectSchema();
   const inferred = await discovery.inferRelationships(schema);
-  const { files: draft_yaml } = generateDraftYaml({ session, schema, inferred });
-  const updated = updateSession(projectDir, sessionId, { draft_yaml });
-  return { ...updated, ...unresolvedFlag(updated.open_ambiguities) };
+  const open_ambiguities = seedAmbiguities(schema, inferred, session);
+  const sessionForDraft =
+    open_ambiguities === session.open_ambiguities
+      ? session
+      : updateSession(projectDir, sessionId, { open_ambiguities });
+  const { files: draft_yaml, skipped_tables } = generateDraftYaml({
+    session: sessionForDraft,
+    schema,
+    inferred,
+    fileRelationships: readRelationshipsFile(projectDir).relationships,
+    catalogRelationships: catalogRelationshipsOf(kernel),
+    fileEntities: readYamlMapFile(projectDir, "entities") as Record<string, Record<string, unknown>>,
+    fileMetrics: readYamlMapFile(projectDir, "metrics") as Record<string, Record<string, unknown>>,
+  });
+  const updated = updateSession(projectDir, sessionId, {
+    draft_yaml,
+    open_ambiguities: sessionForDraft.open_ambiguities,
+  });
+  const flag = unresolvedFlag(updated.open_ambiguities);
+  const skipNote =
+    skipped_tables.length > 0
+      ? `Skipped tables without a usable primary key: ${skipped_tables.join(", ")}.`
+      : undefined;
+  const warning = [flag.warning, skipNote].filter(Boolean).join(" ");
+  return {
+    ...updated,
+    ...flag,
+    skipped_tables,
+    ...(warning ? { warning } : {}),
+  };
 }
 
 export function previewYaml(kernel: GraneKernel, sessionId: string): {

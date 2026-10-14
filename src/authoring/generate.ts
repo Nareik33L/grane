@@ -1,6 +1,5 @@
 import { stringify as stringifyYaml } from "yaml";
 import type { DatabaseSchema } from "../connectors/types.js";
-import { tablePrimaryKey } from "../connectors/types.js";
 import { planRelationshipWrite, type InferredRelationship } from "../discover/relationships.js";
 import { configError } from "../errors.js";
 import { parseColumnRef } from "../model/refs.js";
@@ -10,10 +9,12 @@ import {
   looksNonAdditive,
   parseGroupByChoice,
   parseNonAdditiveAmbiguityId,
+  resolvedEntityPrimaryKey,
   resolvedTimeColumn,
   semiAdditiveGroupById,
 } from "./ambiguity.js";
 import type { AuthoringSession } from "./session.js";
+import { compareOrdinal, mergeNamedDefs } from "./yaml-merge.js";
 
 export interface GenerateDraftInput {
   session: AuthoringSession;
@@ -22,6 +23,13 @@ export interface GenerateDraftInput {
   /** Existing catalog relationships — skipped by planRelationshipWrite. */
   catalogRelationships?: Record<string, InferredRelationship>;
   fileRelationships?: Record<string, InferredRelationship>;
+  fileEntities?: Record<string, Record<string, unknown>>;
+  fileMetrics?: Record<string, Record<string, unknown>>;
+}
+
+export interface GenerateDraftResult {
+  files: Record<string, string>;
+  skipped_tables: string[];
 }
 
 function parseColumn(ref: string): { table: string; column: string } | null {
@@ -29,7 +37,7 @@ function parseColumn(ref: string): { table: string; column: string } | null {
 }
 
 function sortRecord<T>(obj: Record<string, T>): Record<string, T> {
-  return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
+  return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => compareOrdinal(a, b)));
 }
 
 function relationshipOnChosenPath(rel: { from: string; to: string }, chosen: string): boolean {
@@ -73,16 +81,19 @@ export function includeInferredRelationship(
  * session + schema + inferred map yields the same bytes. Never emits an
  * exploration allow-list wildcard.
  */
-export function generateDraftYaml(input: GenerateDraftInput): { files: Record<string, string> } {
+export function generateDraftYaml(input: GenerateDraftInput): GenerateDraftResult {
   const { session, schema, inferred } = input;
   const metrics: Record<string, Record<string, unknown>> = {};
   const entities: Record<string, Record<string, unknown>> = {};
+  const skipped = new Set<string>();
 
   const addEntity = (table: string): boolean => {
     if (entities[table]) return true;
-    const info = schema.tables.find((item) => item.name === table);
-    const pk = tablePrimaryKey(info);
-    if (!pk) return false;
+    const pk = resolvedEntityPrimaryKey(session, schema, table);
+    if (!pk) {
+      skipped.add(table);
+      return false;
+    }
     entities[table] = { table, primary_key: pk };
     return true;
   };
@@ -114,6 +125,7 @@ export function generateDraftYaml(input: GenerateDraftInput): { files: Record<st
     if (resolved.kind === "fanout_join") continue;
     if (resolved.kind === "date_columns") continue;
     if (resolved.kind === "semi_additive_group_by") continue;
+    if (resolved.kind === "primary_key") continue;
     if (resolved.kind === "non_additive_measure") {
       const parsed = parseNonAdditiveAmbiguityId(resolved.id) ?? parseColumn(resolved.candidates[0] ?? "");
       if (!parsed) continue;
@@ -149,21 +161,34 @@ export function generateDraftYaml(input: GenerateDraftInput): { files: Record<st
 
   for (const entry of session.glossary_answers) {
     const slug = entry.term.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-    if (!slug || metrics[slug]) continue;
+    if (!slug) continue;
+    if (metrics[slug]) {
+      if (entry.answer && !metrics[slug]!.description) {
+        metrics[slug] = { ...metrics[slug], description: entry.answer };
+      }
+      continue;
+    }
     const fromResolved = session.resolved_ambiguities.find(
       (item) => item.kind === "revenue_like_columns" && parseColumn(item.chosen),
     );
     const parsed = fromResolved ? parseColumn(fromResolved.chosen) : null;
     if (!parsed) continue;
     if (slug === "revenue" && metrics.revenue) {
-      metrics.revenue = { ...metrics.revenue, description: entry.answer };
+      if (entry.answer && !metrics.revenue.description) {
+        metrics.revenue = { ...metrics.revenue, description: entry.answer };
+      }
       continue;
     }
-    if (!metrics[slug]) addMetric(slug, parsed.table, parsed.column, entry.answer);
+    addMetric(slug, parsed.table, parsed.column, entry.answer);
   }
 
+  const skipped_tables = [...skipped].sort(compareOrdinal);
   if (Object.keys(metrics).length === 0) {
-    throw configError("Nothing to propose. Record glossary terms or resolve ambiguities first.");
+    const skipNote =
+      skipped_tables.length > 0
+        ? ` Skipped tables without a usable primary key: ${skipped_tables.join(", ")}. Resolve the primary_key ambiguity first.`
+        : "";
+    throw configError(`Nothing to propose. Record glossary terms or resolve ambiguities first.${skipNote}`);
   }
 
   const allowed: Record<string, InferredRelationship> = {};
@@ -177,17 +202,25 @@ export function generateDraftYaml(input: GenerateDraftInput): { files: Record<st
     inferred: allowed,
   });
 
+  const mergedEntities = mergeNamedDefs(
+    input.fileEntities ?? {},
+    entities,
+    "entity",
+    "entities.yml",
+  );
+  const mergedMetrics = mergeNamedDefs(input.fileMetrics ?? {}, metrics, "metric", "metrics.yml");
+
   const files: Record<string, string> = {
-    "entities.yml": stringifyYaml({ entities: sortRecord(entities) }),
-    "metrics.yml": stringifyYaml({ metrics: sortRecord(metrics) }),
+    "entities.yml": stringifyYaml({ entities: sortRecord(mergedEntities) }),
+    "metrics.yml": stringifyYaml({ metrics: sortRecord(mergedMetrics) }),
   };
   if (Object.keys(plan.nextFile).length > 0) {
     const preaggNotes = session.resolved_ambiguities
       .filter((item) => item.kind === "fanout_join" && item.chosen === "preaggregate")
       .map((item) => `# authoring fan-out ${item.id}: preaggregate`)
-      .sort();
+      .sort(compareOrdinal);
     const body = stringifyYaml({ relationships: sortRecord(plan.nextFile) });
     files["relationships.yml"] = preaggNotes.length > 0 ? `${preaggNotes.join("\n")}\n${body}` : body;
   }
-  return { files };
+  return { files, skipped_tables };
 }

@@ -171,15 +171,22 @@ export async function introspectPostgres(pool: pg.Pool, schemaName: string): Pro
   }
 
   try {
+    // pg_constraint is visible to SELECT-only roles; information_schema.table_constraints is not
+    // (it requires INSERT/UPDATE/REFERENCES, so grane_readonly would silently get no PKs).
     const pkResult = await pool.query<{ table_name: string; column_name: string }>(
-      `SELECT kcu.table_name, kcu.column_name
-       FROM information_schema.table_constraints tc
-       JOIN information_schema.key_column_usage kcu
-         ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-        AND tc.table_name = kcu.table_name
-       WHERE tc.table_schema = $1 AND tc.constraint_type = 'PRIMARY KEY'
-       ORDER BY kcu.table_name, kcu.ordinal_position`,
+      `SELECT
+         src.relname AS table_name,
+         src_col.attname AS column_name
+       FROM pg_constraint con
+       JOIN pg_class src ON src.oid = con.conrelid
+       JOIN pg_namespace ns ON ns.oid = src.relnamespace
+       JOIN unnest(con.conkey) WITH ORDINALITY AS sk(attnum, ord) ON true
+       JOIN pg_attribute src_col ON src_col.attrelid = src.oid AND src_col.attnum = sk.attnum
+       WHERE con.contype = 'p'
+         AND ns.nspname = $1
+         AND src.relkind = 'r'
+         AND NOT src_col.attisdropped
+       ORDER BY src.relname, sk.ord`,
       [schemaName],
     );
     applyPrimaryKeys(
