@@ -1,11 +1,20 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { writeInitProject } from "../cli/init-project.js";
-import { loadConfig } from "../config/load.js";
+import {
+  ACTIVE_PIN_PATH,
+  assertCleanWorktree,
+  assertProjectYamlMatchesCommit,
+  readActivePin,
+  resolveActiveRef,
+  writeActivePin,
+} from "../authoring/git.js";
+import { findProjectDir, loadConfig } from "../config/load.js";
 import type { WarehouseType } from "../connectors/dialect.js";
 import { WAREHOUSE_TYPES } from "../connectors/dialect.js";
 import { DEMO_QUESTION, runDemo, type DemoIo, type DemoResult } from "../demo/run.js";
-import { GraneKernel } from "../kernel.js";
+import { GraneKernel, type Catalog } from "../kernel.js";
+import { formatValidateReport } from "../validate/format.js";
 import {
   connectMcp,
   findWorkspaceDir,
@@ -23,10 +32,10 @@ import {
   type ConnectionDraft,
 } from "./connection.js";
 import {
-  IMPORT_HANDOFF,
   OWN_QUESTION,
   SETUP_BANNER,
   demoReadyLines,
+  importReadyLines,
   ownReadyLines,
   skipConnectHint,
 } from "./copy.js";
@@ -48,6 +57,8 @@ export interface RunSetupOptions {
   connect?: string;
   skipConnect?: boolean;
   offline?: boolean;
+  /** Import path only: allow pinning after `--offline` (no live schema checks). */
+  activateOffline?: boolean;
   json?: boolean;
   cwd?: string;
   homeDir?: string;
@@ -57,6 +68,7 @@ export interface RunSetupOptions {
   io?: SetupIo;
   prompt?: Prompter;
   stdinIsTty?: boolean;
+  stdoutIsTty?: boolean;
   runDemoFn?: (options: Parameters<typeof runDemo>[0]) => Promise<DemoResult>;
   connectMcpFn?: typeof connectMcp;
 }
@@ -72,6 +84,38 @@ export interface SetupResult {
   connect: ConnectResult | null;
 }
 
+/** Human label for `SetupResult.warehouse`. Null (import before an engine is known) is "none". */
+export function formatSetupWarehouse(warehouse: WarehouseType | null): string {
+  if (warehouse === null) return "none";
+  return warehouse;
+}
+
+/** JSON payload for `grane setup --json`. Null warehouse/client stay JSON `null`, never omitted. */
+export function serializeSetupResult(result: SetupResult): {
+  path: SetupPath;
+  projectDir: string;
+  warehouse: WarehouseType | null;
+  client: string | null;
+  question: string;
+  validated: boolean;
+  live: boolean;
+  mcpPath: string | null;
+} {
+  const warehouse: WarehouseType | null = result.warehouse === null ? null : result.warehouse;
+  const client: string | null = result.client === null ? null : result.client;
+  const mcpPath: string | null = result.connect === null || result.connect === undefined ? null : result.connect.path;
+  return {
+    path: result.path,
+    projectDir: result.projectDir,
+    warehouse,
+    client,
+    question: result.question,
+    validated: result.validated,
+    live: result.live,
+    mcpPath,
+  };
+}
+
 const defaultIo: SetupIo = {
   log: (line) => console.log(line),
   error: (line) => console.error(line),
@@ -82,6 +126,7 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
   const cwd = resolve(options.cwd ?? process.cwd());
   const env = options.env ?? process.env;
   const tty = options.stdinIsTty ?? Boolean(process.stdin.isTTY);
+  const stdoutTty = options.stdoutIsTty ?? Boolean(process.stdout.isTTY);
   const yes = Boolean(options.yes);
   const skipConnect = Boolean(options.skipConnect);
 
@@ -115,7 +160,19 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
       return runDemoPath({ ...options, io, cwd, env, client: answers.client, skipConnect });
     }
     if (answers.path === "import") {
-      return runImportStub({ io, cwd, dir: options.dir, json: options.json });
+      return runImportPath({
+        ...options,
+        io,
+        cwd,
+        json: options.json,
+        skipConnect,
+        client: answers.client,
+        prompt,
+        stdinTty: tty,
+        stdoutTty,
+        offline: options.offline,
+        activateOffline: options.activateOffline,
+      });
     }
     return runOwnPath({
       ...options,
@@ -318,25 +375,140 @@ function defaultOwnProjectDir(cwd: string): string {
   return cwd;
 }
 
-/** V2-04 stub: yes-I-have-YAML never writes files or enters authoring. V2-05 replaces this. */
-function runImportStub(opts: {
+/**
+ * Existing YAML: loadConfig → validateModel (same messages as `grane validate`)
+ * → kernel catalog → pin HEAD via writeActivePin. Never edits the user's YAML.
+ */
+async function runImportPath(opts: {
   io: SetupIo;
   cwd: string;
   dir?: string;
   json?: boolean;
-}): SetupResult {
-  const projectDir = resolve(opts.dir ?? opts.cwd);
-  printReady(opts.io, opts.json, ["────────────────────────────────────────", IMPORT_HANDOFF, "", `Project  ${projectDir}`]);
-  return {
-    path: "import",
+  offline?: boolean;
+  activateOffline?: boolean;
+  skipConnect: boolean;
+  client: string | null;
+  prompt: Prompter;
+  stdinTty: boolean;
+  stdoutTty: boolean;
+  homeDir?: string;
+  workspaceDir?: string;
+  platform?: NodeJS.Platform;
+  connectMcpFn?: RunSetupOptions["connectMcpFn"];
+}): Promise<SetupResult> {
+  const startDir = resolve(opts.dir ?? opts.cwd);
+  const projectDir = findProjectDir(startDir);
+  try {
+    const preview = resolveActiveRef(projectDir);
+    assertCleanWorktree(projectDir);
+    assertProjectYamlMatchesCommit(projectDir, preview.commit);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("No git repository")) throw err;
+  }
+  const loaded = loadConfig(projectDir);
+  const kernel = new GraneKernel(loaded.config, {
     projectDir,
-    warehouse: null,
-    client: null,
-    question: IMPORT_HANDOFF,
-    validated: false,
-    live: false,
-    connect: null,
-  };
+    providerWarnings: loaded.warnings,
+  });
+  const live = !opts.offline;
+  try {
+    const schema = live ? await kernel.introspectSchema() : undefined;
+    const report = kernel.validate(schema);
+    for (const line of formatValidateReport(report, {
+      providers: kernel.serverInfo().semantic_providers,
+      providerWarnings: kernel.providerWarnings,
+      schemaLive: live,
+    })) {
+      opts.io.log(line);
+    }
+    if (!report.ok) {
+      throw new Error("Validate failed.");
+    }
+
+    const catalog: Catalog = live
+      ? await kernel.catalog()
+      : {
+          ...kernel.governedCatalog(),
+          exploration: {
+            enabled: false,
+            mode: kernel.config.exploration.mode,
+            schemas: [],
+            included: kernel.config.exploration.include,
+            excluded: kernel.config.exploration.exclude,
+            columns: [],
+          },
+        };
+    opts.io.log("");
+    opts.io.log("Catalog");
+    opts.io.log(`  Metrics     ${catalog.metrics.length}`);
+    opts.io.log(`  Dimensions  ${catalog.dimensions.length}`);
+    opts.io.log(`  Entities    ${catalog.entities.length}`);
+    if (catalog.exploration.enabled) {
+      opts.io.log(`  Explorable  ${catalog.exploration.columns.length} columns`);
+    }
+    for (const metric of catalog.metrics) {
+      opts.io.log(`  - ${metric.name} (${metric.status})`);
+    }
+
+    assertCleanWorktree(projectDir);
+    const active = resolveActiveRef(projectDir);
+    assertProjectYamlMatchesCommit(projectDir, active.commit);
+    if (opts.offline && !opts.activateOffline) {
+      throw new Error(
+        `Refusing to activate: --offline skipped live schema checks. Re-run without --offline, or pass --activate-offline to pin ${active.branch}@${active.commit} anyway.`,
+      );
+    }
+    if (!opts.stdinTty || !opts.stdoutTty) {
+      throw new Error(
+        `Activation requires a TTY. Refusing to write ${ACTIVE_PIN_PATH} for ${active.branch}@${active.commit}.`,
+      );
+    }
+    const activate = await opts.prompt.confirm(`Activate pin ${active.branch}@${active.commit}?`, {
+      defaultYes: false,
+      allowBack: false,
+    });
+    if (activate !== true) {
+      throw new Error("Activation declined. Pin was not written.");
+    }
+    const existing = readActivePin(projectDir);
+    const previous =
+      existing && existing.commit !== active.commit ? existing.commit : (existing?.previous_commit ?? null);
+    const pin = writeActivePin(projectDir, {
+      ref: active.branch,
+      commit: active.commit,
+      approved_by: "setup-import",
+      approved_at: new Date().toISOString(),
+      previous_commit: previous,
+    });
+    opts.io.log(`activate    ${ACTIVE_PIN_PATH}  ${pin.ref} @ ${pin.commit.slice(0, 7)}`);
+
+    const connected = connectIfRequested(opts, projectDir);
+    const warehouse: WarehouseType | null = loaded.config.connection.type;
+    printReady(
+      opts.io,
+      opts.json,
+      importReadyLines({
+        projectDir,
+        pinRef: pin.ref,
+        pinCommit: pin.commit,
+        warehouseLabel: formatSetupWarehouse(warehouse),
+      }),
+    );
+
+    return {
+      path: "import",
+      projectDir,
+      warehouse,
+      client: opts.client,
+      question: OWN_QUESTION,
+      validated: true,
+      live,
+      connect: connected.result,
+    };
+  } finally {
+    await kernel.close();
+  }
 }
 
 async function validateOwnProject(

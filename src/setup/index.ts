@@ -1,4 +1,11 @@
-export { runSetup, type RunSetupOptions, type SetupResult, type SetupPath } from "./run.js";
+export {
+  runSetup,
+  serializeSetupResult,
+  formatSetupWarehouse,
+  type RunSetupOptions,
+  type SetupResult,
+  type SetupPath,
+} from "./run.js";
 export {
   parseOwnDatabaseUrl,
   persistOwnConnection,
@@ -8,7 +15,7 @@ export {
   isGraneSourceTree,
 } from "./connection.js";
 export { createReadlinePrompter, scriptedPrompter, BACK } from "./prompts.js";
-export { DEMO_QUESTION, OWN_QUESTION, IMPORT_HANDOFF, SETUP_BANNER } from "./copy.js";
+export { DEMO_QUESTION, OWN_QUESTION, SETUP_BANNER, importReadyLines } from "./copy.js";
 export {
   promptSetupAnswers,
   PATH_QUESTION,

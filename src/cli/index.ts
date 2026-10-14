@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { Command } from "commander";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig } from "../config/load.js";
+import { formatValidateReport } from "../validate/format.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
 import { serveHttp, serveStdio, installHttpProcessShutdown, type HttpMcpHandle } from "../mcp/transport.js";
@@ -18,7 +19,7 @@ import { usageRanked } from "../explore/usage.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
 import { WAREHOUSE_TYPES, type WarehouseType } from "../connectors/dialect.js";
-import { runSetup } from "../setup/run.js";
+import { runSetup, serializeSetupResult } from "../setup/run.js";
 import { parseFilterSpec } from "./args.js";
 import { writeInitProject } from "./init-project.js";
 import { formatProductionLint, lintProduction } from "./production-lint.js";
@@ -82,6 +83,10 @@ program
   .option("--connect <client>", "register an MCP client (cursor, claude, …)")
   .option("--skip-connect", "do not register an MCP client")
   .option("--offline", "skip live database checks (own path)")
+  .option(
+    "--activate-offline",
+    "import path: allow pinning after --offline (no live schema checks)",
+  )
   .option("--json", "print a JSON summary")
   .action(
     async (options: {
@@ -96,6 +101,7 @@ program
       connect?: string;
       skipConnect?: boolean;
       offline?: boolean;
+      activateOffline?: boolean;
       json?: boolean;
     }) => {
       try {
@@ -119,28 +125,14 @@ program
           connect: options.connect,
           skipConnect: options.skipConnect,
           offline: options.offline,
+          activateOffline: options.activateOffline,
           json,
           io: json
             ? { log: (line) => console.error(line), error: (line) => console.error(line) }
             : undefined,
         });
         if (options.json) {
-          console.log(
-            JSON.stringify(
-              {
-                path: result.path,
-                projectDir: result.projectDir,
-                warehouse: result.warehouse,
-                client: result.client,
-                question: result.question,
-                validated: result.validated,
-                live: result.live,
-                mcpPath: result.connect?.path ?? null,
-              },
-              null,
-              2,
-            ),
-          );
+          console.log(JSON.stringify(serializeSetupResult(result), null, 2));
         }
       } catch (err) {
         fail(err);
@@ -285,37 +277,13 @@ program
     try {
       const schema = options.offline ? undefined : await kernel.introspectSchema();
       const report = kernel.validate(schema);
-      for (const metric of report.metrics) {
-        if (metric.ok) {
-          console.log(`OK ${metric.metric}`);
-        } else {
-          console.log(`ERROR ${metric.metric}`);
-          for (const issue of metric.issues) {
-            console.log(`  ${issue.message}`);
-          }
-        }
+      for (const line of formatValidateReport(report, {
+        providers: kernel.serverInfo().semantic_providers,
+        providerWarnings: kernel.providerWarnings,
+        schemaLive: !options.offline,
+      })) {
+        console.log(line);
       }
-      const nonMetricIssues = report.issues.filter((i) => !i.subject.startsWith("metric:"));
-      if (nonMetricIssues.length > 0) {
-        console.log("");
-        for (const issue of nonMetricIssues) {
-          console.log(`${issue.severity.toUpperCase()} ${issue.subject}: ${issue.message}`);
-        }
-      }
-      const validMetrics = report.metrics.filter((m) => m.ok).length;
-      console.log("");
-      console.log(`${validMetrics}/${report.metrics.length} metrics valid`);
-      console.log(`${report.dimensionCount} dimensions defined`);
-      console.log(`${report.relationshipCount} relationships defined`);
-      const providers = kernel.serverInfo().semantic_providers;
-      console.log(`providers     ${providers.join(", ")}`);
-      if (kernel.providerWarnings.length > 0) {
-        console.log("");
-        for (const warning of kernel.providerWarnings) {
-          console.log(`WARNING ${warning}`);
-        }
-      }
-      if (!options.offline) console.log(`schema checks: live`);
       let productionOk = true;
       if (options.production) {
         const lint = lintProduction(kernel.config, kernel.projectDir);
