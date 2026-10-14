@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../src/mcp/connect/jsonc.js";
 import { resolveClient, claudeDesktopConfigPath, vscodeUserMcpPath, listClients } from "../../src/mcp/connect/clients.js";
+import { SETUP_GRANE_PROMPT_TITLE } from "../../src/mcp/server.js";
 import { buildServerEntry, resolveTransport, defaultHttpUrl } from "../../src/mcp/connect/entry.js";
 import { resolveGraneLaunch, stdioArgs, connectionEnv, looksLikeSecret } from "../../src/mcp/connect/launch.js";
 import { mergeServerEntry, removeServerEntry, readJsoncFile, writeJsonFile } from "../../src/mcp/connect/config-file.js";
@@ -47,6 +48,24 @@ describe("resolveClient", () => {
       "claude-code",
       "generic",
     ]);
+  });
+
+  it("lists the Set up Grane prompt for Claude Desktop and Cursor", () => {
+    const steps = (id: "claude" | "cursor", transport: "stdio" | "http") =>
+      resolveClient(id)
+        .nextSteps({
+          transport,
+          url: "https://grane.example/mcp",
+          configPath: "/tmp/mcp.json",
+          written: true,
+        })
+        .join("\n");
+    expect(steps("claude", "stdio")).toContain(SETUP_GRANE_PROMPT_TITLE);
+    expect(steps("claude", "http")).toContain(SETUP_GRANE_PROMPT_TITLE);
+    expect(steps("cursor", "stdio")).toContain(SETUP_GRANE_PROMPT_TITLE);
+    expect(steps("cursor", "http")).toContain(SETUP_GRANE_PROMPT_TITLE);
+    expect(resolveClient("claude").label).toBe("Claude Desktop");
+    expect(resolveClient("cursor").label).toBe("Cursor");
   });
 });
 

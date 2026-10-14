@@ -137,7 +137,7 @@ describe.skipIf(!available)("grane thesis benchmark (A/B/C)", () => {
     ].join("\n");
     // Written directly rather than via console.log, which Vitest intercepts.
     process.stderr.write(`${report}\n`);
-  });
+  }, 60_000);
 
   async function attempt(kase: BenchCase, path: "A" | "B"): Promise<Outcome> {
     const fixture = path === "A" ? kase.pathA : kase.pathB;

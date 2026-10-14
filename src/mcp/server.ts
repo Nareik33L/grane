@@ -9,11 +9,15 @@ import {
   registerAuthoringTools,
   type BuildMcpServerOptions,
 } from "./authoring.js";
+import { registerAuthoringPrompts } from "./prompts/setup-grane.js";
 
 export type { BuildMcpServerOptions, McpTransport, AuthoringMcpTool } from "./authoring.js";
 export {
+  AUTHORING_MCP_PROMPTS,
   AUTHORING_MCP_TOOLS,
   CORE_MCP_TOOLS,
+  SETUP_GRANE_PROMPT_NAME,
+  SETUP_GRANE_PROMPT_TITLE,
   advertiseAuthoringTools,
   assertHttpAuthoringAgents,
   authoringToolsEnabled,
@@ -79,7 +83,7 @@ export function buildMcpServer(kernel: GraneKernel, options: BuildMcpServerOptio
         "When you present query results, the first sentence of your reply must be the trust headline. " +
         "Put that same headline in any chart title. Never present mixed or exploratory numbers as approved business truth." +
         (authoringOn
-          ? " Authoring tools are enabled: use authoring_start, then discover_schema / profile_column (never write SQL), then propose_definitions and submit_proposal. Draft definitions are experimental and cannot be queried until a GitHub PR is merged."
+          ? " Authoring tools are enabled: use the Set up Grane prompt, or authoring_start, then discover_schema / profile_column (never write SQL), then propose_definitions, preview_yaml, and submit_proposal. Draft definitions are experimental and cannot be queried until a GitHub PR is merged. Never write production YAML or pins."
           : ""),
     },
   );
@@ -190,6 +194,7 @@ export function buildMcpServer(kernel: GraneKernel, options: BuildMcpServerOptio
 
   if (authoringOn) {
     registerAuthoringTools(server, kernel, options);
+    registerAuthoringPrompts(server);
   }
 
   return server;
