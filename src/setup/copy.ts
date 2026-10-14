@@ -4,6 +4,10 @@ export { DEMO_QUESTION };
 
 export const OWN_QUESTION = "What can you see in the catalog?";
 
+/** V2-04 stub copy. V2-05 replaces this with load → validate → inspect → activate. */
+export const IMPORT_HANDOFF =
+  "Existing YAML — load, validate, inspect, and activate land in V2-05. No files were written; this path does not use AI authoring.";
+
 export const SETUP_BANNER = [
   "Grane setup",
   "",

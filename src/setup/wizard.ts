@@ -8,7 +8,7 @@ import {
   type ConnectionDraft,
 } from "./connection.js";
 import type { SetupIo, SetupPath } from "./types.js";
-import { BACK, type Prompter } from "./prompts.js";
+import { BACK, type Choice, type Prompter } from "./prompts.js";
 
 export interface WizardAnswers {
   path: SetupPath;
@@ -27,9 +27,47 @@ export interface WizardOptions {
   listClients: () => Array<{ id: string; label: string }>;
 }
 
+export const EXISTING_YAML_QUESTION = "Do you already have a Grane YAML?";
+
+export const EXISTING_YAML_CHOICES: Choice<"yes" | "no">[] = [
+  {
+    value: "no",
+    label: "No — set one up",
+    hint: "Demo shop or connect your own warehouse.",
+  },
+  {
+    value: "yes",
+    label: "Yes — use the YAML I already have",
+    hint: "Load, validate, inspect, then activate. No AI authoring.",
+  },
+];
+
+export const PATH_QUESTION = "How do you want to start?";
+
+/** Demo/own copy frozen by the V2-04 snapshot in setup.test.ts. */
+export const PATH_CHOICES: Choice<"demo" | "own">[] = [
+  {
+    value: "demo",
+    label: "Try Grane's demo shop",
+    hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
+  },
+  {
+    value: "own",
+    label: "Connect my own data",
+    hint: "Any warehouse Grane already supports. We write grane.yml, validate, then connect an agent.",
+  },
+];
+
+export function pathReviewLine(path: SetupPath): string {
+  if (path === "demo") return "demo shop (DuckDB)";
+  if (path === "import") return "existing YAML";
+  return "own data";
+}
+
 /**
- * Interactive path → (engine + fields) → MCP client → confirm.
+ * Interactive existing-YAML? → path → (engine + fields) → MCP client → confirm.
  * Every step after the first accepts `b` / `back`.
+ * Answering yes on the first step skips path/engine/fields/client (V2-05).
  */
 export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAnswers> {
   let path: SetupPath | undefined;
@@ -38,30 +76,42 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
   let client: string | null | undefined;
   let fieldIndex = 0;
 
-  type Step = "path" | "engine" | "fields" | "client" | "confirm";
-  let step: Step = "path";
+  type Step = "existing" | "path" | "engine" | "fields" | "client" | "confirm";
+  let step: Step = "existing";
 
   while (true) {
     switch (step) {
-      case "path": {
-        const chosen = await opts.prompt.select<SetupPath>(
-          "How do you want to start?",
-          [
-            {
-              value: "demo",
-              label: "Try Grane's demo shop",
-              hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
-            },
-            {
-              value: "own",
-              label: "Connect my own data",
-              hint: "Any warehouse Grane already supports. We write grane.yml, validate, then connect an agent.",
-            },
-          ],
-          { defaultValue: "demo", allowBack: false },
+      case "existing": {
+        const chosen = await opts.prompt.select<"yes" | "no">(
+          EXISTING_YAML_QUESTION,
+          EXISTING_YAML_CHOICES,
+          { defaultValue: "no", allowBack: false },
         );
         if (chosen === BACK) {
           throw new Error("This is the first step. Choose a number, or Ctrl-C to exit.");
+        }
+        engine = undefined;
+        connection = undefined;
+        client = undefined;
+        fieldIndex = 0;
+        if (chosen === "yes") {
+          path = "import";
+          step = "confirm";
+        } else {
+          path = undefined;
+          step = "path";
+        }
+        break;
+      }
+      case "path": {
+        const chosen = await opts.prompt.select<"demo" | "own">(
+          PATH_QUESTION,
+          PATH_CHOICES,
+          { defaultValue: "demo", allowBack: true },
+        );
+        if (chosen === BACK) {
+          step = "existing";
+          break;
         }
         path = chosen;
         step = path === "own" ? "engine" : "client";
@@ -177,16 +227,18 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
       case "confirm": {
         opts.io.log("");
         opts.io.log("Review");
-        opts.io.log(`  Path    ${path === "demo" ? "demo shop (DuckDB)" : "own data"}`);
+        opts.io.log(`  Path    ${pathReviewLine(path ?? "own")}`);
         if (path === "own" && engine && connection) {
           const cert = WAREHOUSE_CERTIFICATION[engine];
           opts.io.log(`  Engine  ${cert.label} (${engine}) — ${engineHint(engine)}`);
           opts.io.log(`  Connect ${describeConnection(connection)}`);
         }
-        opts.io.log(`  MCP     ${client ?? "skip"}`);
+        if (path !== "import") {
+          opts.io.log(`  MCP     ${client ?? "skip"}`);
+        }
         const ok = await opts.prompt.confirm("Proceed?", { defaultYes: true, allowBack: true });
         if (ok === BACK) {
-          step = "client";
+          step = path === "import" ? "existing" : "client";
           break;
         }
         if (ok === false) {
@@ -219,4 +271,3 @@ function defaultFromEnv(key: string, env: NodeJS.ProcessEnv): string | undefined
   }
   return undefined;
 }
-
