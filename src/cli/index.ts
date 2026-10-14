@@ -11,6 +11,7 @@ import { serveHttp, serveStdio, installHttpProcessShutdown, type HttpMcpHandle }
 import { authoringToolsEnabled } from "../mcp/server.js";
 import { isLoopbackHost } from "../mcp/http-bind.js";
 import { registerMcpCommands } from "./mcp.js";
+import { registerProposalsCommands } from "./proposals.js";
 import { GraneError } from "../errors.js";
 import type { SemanticQueryInput } from "../query/model.js";
 import { trustHeadline } from "../query/trust.js";
@@ -706,5 +707,6 @@ function printTable(columns: string[], rows: Record<string, unknown>[]): void {
 }
 
 registerMcpCommands(program, { projectDir, fail });
+registerProposalsCommands(program, { projectDir, fail });
 
 program.parseAsync(process.argv).catch(fail);

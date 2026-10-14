@@ -105,6 +105,18 @@ is not in the repository, or a tampered ref refuses to start. Pin load,
 refuse (with reason), and write are appended to the audit log. MCP and
 authoring tools cannot write the pin.
 
+## Proposal review CLI
+
+`grane proposals list|diff|approve|reject|rollback` reviews local
+`grane/proposal/*` branches. **Approve** pins the merge commit of a GitHub
+PR: it requires a human TTY or a PR that is already merged, and it is not
+an MCP tool. **Rollback** re-pins `previous_commit` (or `--to`) when that
+SHA is reachable from the configured base branch. **Reject** deletes the
+proposal ref only. None of these commands merge, reset, or move `main`.
+Each action writes one audit line. With `audit.fail_closed`, Grane proves
+the audit path is writable before creating a proposal branch or writing
+the pin.
+
 There is no SSO, OIDC, or SAML in this release. Rotate tokens in the
 environment and in `grane.yml`.
 

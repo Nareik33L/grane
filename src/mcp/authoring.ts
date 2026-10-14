@@ -4,8 +4,8 @@ import type { GraneKernel } from "../kernel.js";
 import type { GraneConfig } from "../config/schema.js";
 import { GraneError, configError } from "../errors.js";
 import { httpAgentAuthenticated } from "../auth/agents.js";
-import { recordAuthoringAudit, refusalFromError, type AuthoringAuditOperation } from "../audit.js";
-import type { GitHubPrPlan, Proposal } from "../authoring/git.js";
+import { preflightAuditWrite, recordAuthoringAudit, refusalFromError, type AuthoringAuditOperation } from "../audit.js";
+import { deleteProposalBranch, type GitHubPrPlan, type Proposal } from "../authoring/git.js";
 import {
   authoringStart,
   discoverSchema,
@@ -147,6 +147,9 @@ function wrap<A>(
     let err: unknown;
     try {
       requireHttpAgent(kernel, transport);
+      if (kernel.config.audit.fail_closed) {
+        preflightAuditWrite(kernel.config, kernel.projectDir);
+      }
       payload = await work(args);
     } catch (caught) {
       err = caught;
@@ -166,6 +169,13 @@ function wrap<A>(
         http: kernel.http,
       });
     } catch (auditErr) {
+      if (proposal?.branch && kernel.projectDir) {
+        try {
+          deleteProposalBranch(kernel.projectDir, proposal.branch);
+        } catch {
+          // still refuse the audit failure
+        }
+      }
       return refuse(auditErr);
     }
     if (err !== undefined) return refuse(err);

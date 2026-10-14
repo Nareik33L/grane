@@ -505,6 +505,14 @@ describe("MCP and authoring cannot write the pin", () => {
       for (const name of listed) {
         await client.callTool({ name, arguments: argsFor(name) });
       }
+      for (const banned of ["approve", "rollback", "reject", "proposals_approve", "proposals_rollback"]) {
+        try {
+          const result = await client.callTool({ name: banned, arguments: { id: "x" } });
+          expect(result.isError, `MCP exposed ${banned}`).toBe(true);
+        } catch {
+          // unknown tool — expected
+        }
+      }
     } finally {
       await client.close().catch(() => undefined);
       await server.close().catch(() => undefined);
