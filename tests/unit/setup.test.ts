@@ -43,6 +43,20 @@ function tempDir(): string {
   return dir;
 }
 
+function runGraneCli(args: string[]): { status: number; stdout: string; stderr: string } {
+  const result = spawnSync("npx", ["tsx", "src/cli/index.ts", ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 30_000,
+    env: process.env,
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
 function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
   if ((result.status ?? 1) !== 0) {
@@ -243,10 +257,112 @@ describe("runSetup", () => {
     await expect(runSetup({ yes: true, stdinIsTty: false, io: quiet })).rejects.toThrow(/--path/);
   });
 
-  it("--yes still only accepts demo or own (import is interactive until V2-06)", async () => {
+  it("--yes --path still only accepts demo or own; --import is a separate flag", async () => {
     await expect(
       runSetup({ yes: true, path: "import", stdinIsTty: false, io: quiet }),
     ).rejects.toThrow(/demo or own/);
+  });
+
+  it("non-interactive --import validates and inspects without pinning", async () => {
+    const dir = tempDir();
+    writeInitProject(dir);
+    const before = snapshotYaml(dir);
+    const logs: string[] = [];
+    const result = await runSetup({
+      importDir: dir,
+      offline: true,
+      stdinIsTty: false,
+      stdoutIsTty: false,
+      io: { log: (line) => logs.push(line), error: () => undefined },
+    });
+    expect(result.path).toBe("import");
+    expect(result.validated).toBe(true);
+    expect(result.warehouse).toBe("postgres");
+    expect(result.connect).toBeNull();
+    expect(readActivePin(dir)).toBeNull();
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(snapshotYaml(dir)).toEqual(before);
+    expect(logs.join("\n")).toContain("0/0 metrics valid");
+    expect(logs.join("\n")).toContain("Catalog");
+    expect(logs.join("\n")).toContain("Import inspect only");
+    expect(logs.join("\n")).not.toMatch(/activate\s+.grane\/active.json/);
+  });
+
+  it("non-interactive --import never pins even when stdin is a TTY", async () => {
+    const dir = initImportRepo();
+    const result = await runSetup({
+      importDir: dir,
+      offline: true,
+      activateOffline: true,
+      stdinIsTty: true,
+      stdoutIsTty: true,
+      io: quiet,
+    });
+    expect(result.validated).toBe(true);
+    expect(readActivePin(dir)).toBeNull();
+  });
+
+  it("non-interactive --import invalid YAML does not pin and is not validated", async () => {
+    const dir = tempDir();
+    writeInitProject(dir);
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+`,
+    );
+    const result = await runSetup({
+      importDir: dir,
+      offline: true,
+      stdinIsTty: false,
+      io: quiet,
+    });
+    expect(result.validated).toBe(false);
+    expect(result.path).toBe("import");
+    expect(readActivePin(dir)).toBeNull();
+  });
+
+  it("non-interactive --import exit code matches grane validate", () => {
+    const okDir = tempDir();
+    writeInitProject(okDir);
+    const loadBadDir = tempDir();
+    writeInitProject(loadBadDir);
+    writeFileSync(join(loadBadDir, "extra.yml"), "bogus: true\n");
+    const validateBadDir = tempDir();
+    writeInitProject(validateBadDir);
+    writeFileSync(
+      join(validateBadDir, "metrics.yml"),
+      `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+`,
+    );
+
+    const validateOk = runGraneCli(["-p", okDir, "validate", "--offline"]);
+    const importOk = runGraneCli(["setup", "--import", okDir, "--offline"]);
+    expect(importOk.status).toBe(validateOk.status);
+    expect(importOk.status).toBe(0);
+    expect(importOk.stdout).toContain("0/0 metrics valid");
+    expect(existsSync(join(okDir, ACTIVE_PIN_PATH))).toBe(false);
+
+    const validateLoadBad = runGraneCli(["-p", loadBadDir, "validate", "--offline"]);
+    const importLoadBad = runGraneCli(["setup", "--import", loadBadDir, "--offline"]);
+    expect(importLoadBad.status).toBe(validateLoadBad.status);
+    expect(importLoadBad.status).toBe(1);
+    expect(existsSync(join(loadBadDir, ACTIVE_PIN_PATH))).toBe(false);
+
+    const validateSemanticBad = runGraneCli(["-p", validateBadDir, "validate", "--offline"]);
+    const importSemanticBad = runGraneCli(["setup", "--import", validateBadDir, "--offline"]);
+    expect(importSemanticBad.status).toBe(validateSemanticBad.status);
+    expect(importSemanticBad.status).toBe(1);
+    expect(importSemanticBad.stdout).toContain("ERROR revenue");
+    expect(importSemanticBad.stderr).not.toMatch(/Validate failed/);
+    expect(existsSync(join(validateBadDir, ACTIVE_PIN_PATH))).toBe(false);
   });
 
   it("demo path builds via runDemo, registers MCP, and prints the revenue-drop question", async () => {

@@ -35,6 +35,7 @@ import {
   OWN_QUESTION,
   SETUP_BANNER,
   demoReadyLines,
+  importInspectOnlyLines,
   importReadyLines,
   ownReadyLines,
   skipConnectHint,
@@ -57,6 +58,8 @@ export interface RunSetupOptions {
   connect?: string;
   skipConnect?: boolean;
   offline?: boolean;
+  /** Non-interactive `grane setup --import <dir>`: validate/inspect, never pin. */
+  importDir?: string;
   /** Import path only: allow pinning after `--offline` (no live schema checks). */
   activateOffline?: boolean;
   json?: boolean;
@@ -130,13 +133,34 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
   const yes = Boolean(options.yes);
   const skipConnect = Boolean(options.skipConnect);
 
+  if (options.importDir) {
+    if (!options.json) {
+      io.log(SETUP_BANNER);
+    } else {
+      io.error(SETUP_BANNER);
+    }
+    return runImportPath({
+      ...options,
+      io,
+      cwd,
+      dir: options.importDir,
+      json: options.json,
+      skipConnect: true,
+      client: null,
+      inspectOnly: true,
+      stdinTty: false,
+      stdoutTty: false,
+      offline: options.offline,
+    });
+  }
+
   if (!yes && !tty && !options.prompt) {
     throw new Error(
       'Not a terminal. Re-run with prompts, or use the escape hatch: grane setup --yes --path demo|own [--url …] [--engine …] [--connect cursor|--skip-connect]',
     );
   }
   if (yes && !options.path) {
-    throw new Error('Non-interactive setup requires --path demo or --path own.');
+    throw new Error("Non-interactive setup requires --path demo or --path own, or --import <dir>.");
   }
 
   const prompt = options.prompt ?? createReadlinePrompter(io);
@@ -386,11 +410,12 @@ async function runImportPath(opts: {
   json?: boolean;
   offline?: boolean;
   activateOffline?: boolean;
+  inspectOnly?: boolean;
   skipConnect: boolean;
   client: string | null;
-  prompt: Prompter;
-  stdinTty: boolean;
-  stdoutTty: boolean;
+  prompt?: Prompter;
+  stdinTty?: boolean;
+  stdoutTty?: boolean;
   homeDir?: string;
   workspaceDir?: string;
   platform?: NodeJS.Platform;
@@ -398,13 +423,15 @@ async function runImportPath(opts: {
 }): Promise<SetupResult> {
   const startDir = resolve(opts.dir ?? opts.cwd);
   const projectDir = findProjectDir(startDir);
-  try {
-    const preview = resolveActiveRef(projectDir);
-    assertCleanWorktree(projectDir);
-    assertProjectYamlMatchesCommit(projectDir, preview.commit);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes("No git repository")) throw err;
+  if (!opts.inspectOnly) {
+    try {
+      const preview = resolveActiveRef(projectDir);
+      assertCleanWorktree(projectDir);
+      assertProjectYamlMatchesCommit(projectDir, preview.commit);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes("No git repository")) throw err;
+    }
   }
   const loaded = loadConfig(projectDir);
   const kernel = new GraneKernel(loaded.config, {
@@ -422,7 +449,20 @@ async function runImportPath(opts: {
     })) {
       opts.io.log(line);
     }
+    const warehouse: WarehouseType | null = loaded.config.connection.type;
     if (!report.ok) {
+      if (opts.inspectOnly) {
+        return {
+          path: "import",
+          projectDir,
+          warehouse,
+          client: null,
+          question: OWN_QUESTION,
+          validated: false,
+          live: false,
+          connect: null,
+        };
+      }
       throw new Error("Validate failed.");
     }
 
@@ -451,6 +491,27 @@ async function runImportPath(opts: {
       opts.io.log(`  - ${metric.name} (${metric.status})`);
     }
 
+    if (opts.inspectOnly) {
+      printReady(
+        opts.io,
+        opts.json,
+        importInspectOnlyLines({
+          projectDir,
+          warehouseLabel: formatSetupWarehouse(warehouse),
+        }),
+      );
+      return {
+        path: "import",
+        projectDir,
+        warehouse,
+        client: null,
+        question: OWN_QUESTION,
+        validated: true,
+        live,
+        connect: null,
+      };
+    }
+
     assertCleanWorktree(projectDir);
     const active = resolveActiveRef(projectDir);
     assertProjectYamlMatchesCommit(projectDir, active.commit);
@@ -463,6 +524,9 @@ async function runImportPath(opts: {
       throw new Error(
         `Activation requires a TTY. Refusing to write ${ACTIVE_PIN_PATH} for ${active.branch}@${active.commit}.`,
       );
+    }
+    if (!opts.prompt) {
+      throw new Error(`Activation requires a TTY. Refusing to write ${ACTIVE_PIN_PATH} for ${active.branch}@${active.commit}.`);
     }
     const activate = await opts.prompt.confirm(`Activate pin ${active.branch}@${active.commit}?`, {
       defaultYes: false,
@@ -484,7 +548,6 @@ async function runImportPath(opts: {
     opts.io.log(`activate    ${ACTIVE_PIN_PATH}  ${pin.ref} @ ${pin.commit.slice(0, 7)}`);
 
     const connected = connectIfRequested(opts, projectDir);
-    const warehouse: WarehouseType | null = loaded.config.connection.type;
     printReady(
       opts.io,
       opts.json,

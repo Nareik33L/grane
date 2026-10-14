@@ -20,7 +20,7 @@ import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
 import { WAREHOUSE_TYPES, type WarehouseType } from "../connectors/dialect.js";
 import { runSetup, serializeSetupResult } from "../setup/run.js";
-import { parseFilterSpec } from "./args.js";
+import { parseFilterSpec, resolveSetupInvocation } from "./args.js";
 import { writeInitProject } from "./init-project.js";
 import { formatProductionLint, lintProduction } from "./production-lint.js";
 import { uncertifiedWarehouseWarning } from "../connectors/certification.js";
@@ -69,9 +69,13 @@ program
   .command("setup")
   .alias("onboard")
   .description("Guided setup: demo shop or your warehouse, then connect an MCP client")
-  .option("--yes", "non-interactive; requires --path")
+  .option("--yes", "non-interactive; requires --path demo|own, or use --import")
   .option("--non-interactive", "alias for --yes")
   .option("--path <kind>", "demo | own")
+  .option(
+    "--import <dir>",
+    "non-interactive: load, validate, and inspect existing Grane YAML (never pins)",
+  )
   .option("--dir <dir>", "project directory (demo destination, or where to write grane.yml)")
   .option("--engine <type>", "own-path warehouse: postgres, mysql, duckdb, clickhouse, snowflake, bigquery, databricks, redshift")
   .option("--url <url>", "own-path URL (postgres://, mysql://, clickhouse://, redshift://, …)")
@@ -93,6 +97,7 @@ program
       yes?: boolean;
       nonInteractive?: boolean;
       path?: string;
+      import?: string;
       dir?: string;
       engine?: string;
       url?: string;
@@ -105,18 +110,31 @@ program
       json?: boolean;
     }) => {
       try {
-        const path = options.path;
-        if (path && path !== "demo" && path !== "own") {
-          throw new Error(`Unknown --path "${path}". Use demo or own.`);
-        }
+        const invocation = resolveSetupInvocation(options);
         const json = Boolean(options.json);
         const engine = options.engine as WarehouseType | undefined;
         if (engine && !WAREHOUSE_TYPES.includes(engine)) {
           throw new Error(`Unknown --engine "${options.engine}". Supported: ${WAREHOUSE_TYPES.join(", ")}.`);
         }
+        const jsonIo = json
+          ? { log: (line: string) => console.error(line), error: (line: string) => console.error(line) }
+          : undefined;
+        if (invocation.kind === "import") {
+          const result = await runSetup({
+            importDir: invocation.dir,
+            dir: invocation.dir,
+            skipConnect: true,
+            offline: options.offline,
+            json,
+            io: jsonIo,
+          });
+          if (json) console.log(JSON.stringify(serializeSetupResult(result), null, 2));
+          if (!result.validated) process.exit(1);
+          return;
+        }
         const result = await runSetup({
-          path: path === "demo" || path === "own" ? path : undefined,
-          yes: Boolean(options.yes || options.nonInteractive),
+          path: invocation.path,
+          yes: invocation.kind === "yes",
           dir: options.dir,
           engine,
           url: options.url,
@@ -127,9 +145,7 @@ program
           offline: options.offline,
           activateOffline: options.activateOffline,
           json,
-          io: json
-            ? { log: (line) => console.error(line), error: (line) => console.error(line) }
-            : undefined,
+          io: jsonIo,
         });
         if (options.json) {
           console.log(JSON.stringify(serializeSetupResult(result), null, 2));
