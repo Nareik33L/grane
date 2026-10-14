@@ -148,6 +148,7 @@ describe.skipIf(!pgAvailable)("demo Postgres authoring (path b)", () => {
       expect(proposed.skipped_tables).toContain("inventory_levels");
       expect(proposed.skipped_tables).toContain("event_stream");
       expect(proposed.draft_yaml["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
+      expect(proposed.draft_yaml["entities.yml"]).not.toMatch(/inventory_levels|event_stream/);
       expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
 
       const submitted = submitProposal(kernel, started.session.id, "demo-pg-authoring");

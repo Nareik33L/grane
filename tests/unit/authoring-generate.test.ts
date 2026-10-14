@@ -266,6 +266,55 @@ describe("generateDraftYaml", () => {
     );
   });
 
+  it("lists composite-PK and keyless tables instead of silently dropping them", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "inventory_levels",
+          primaryKeyColumns: ["warehouse_id", "sku"],
+          uniqueColumns: ["loc_code"],
+          columns: [
+            { name: "warehouse_id", dataType: "integer", nullable: false },
+            { name: "sku", dataType: "text", nullable: false },
+            { name: "loc_code", dataType: "text", nullable: true },
+            { name: "on_hand", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "event_stream",
+          columns: [
+            { name: "payload", dataType: "text", nullable: true },
+            { name: "ts", dataType: "bigint", nullable: true },
+            { name: "amount", dataType: "numeric", nullable: true },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+    });
+    const { files, skipped_tables } = generateDraftYaml({ session, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
+    expect(skipped_tables).toEqual(["event_stream", "inventory_levels"]);
+    expect(files["entities.yml"]).not.toMatch(/inventory_levels|event_stream/);
+  });
+
   it("binds a glossary term to the unique revenue-like column (no revenue_like ambiguity)", () => {
     const dir = tempDir();
     const schema: DatabaseSchema = {

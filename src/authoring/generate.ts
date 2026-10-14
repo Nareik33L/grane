@@ -218,6 +218,11 @@ export function generateDraftYaml(input: GenerateDraftInput): GenerateDraftResul
     addMetric(slug, parsed.table, parsed.column, entry.answer);
   }
 
+  for (const table of schema.tables) {
+    if (entities[table.name]) continue;
+    if (!resolvedEntityPrimaryKey(session, schema, table.name)) skipped.add(table.name);
+  }
+
   const skipped_tables = [...skipped].sort(compareOrdinal);
   if (Object.keys(metrics).length === 0) {
     const skipNote =
