@@ -9,7 +9,7 @@ import { loadConfig } from "../config/load.js";
 import { validateModel } from "../validate/validate.js";
 import { SemanticModel } from "../model/model.js";
 import type { DatabaseSchema } from "../connectors/types.js";
-import { isNumericType } from "../connectors/dialect.js";
+import { parseColumnRef } from "../model/refs.js";
 import {
   createSession,
   loadSession,
@@ -19,8 +19,21 @@ import {
   type OpenAmbiguity,
 } from "./session.js";
 import { createProposal, githubPrPlan, type GitHubPrPlan, type Proposal } from "./git.js";
-
-const AMOUNT_NAME = /(amount|revenue|total|price|sales|net|gross)/i;
+import {
+  detectAmbiguities,
+  fanoutAmbiguityId,
+  forbiddenSemiGroupByMessage,
+  GLOBAL_SNAPSHOT_GROUP_BY,
+  isForbiddenSemiGroupByColumn,
+  looksNonAdditive,
+  mergeAmbiguities,
+  parseGroupByChoice,
+  parseNonAdditiveAmbiguityId,
+  parseSemiAdditiveGroupById,
+  resolvedTimeColumn,
+  semiAdditiveGroupByAmbiguity,
+  semiAdditiveGroupById,
+} from "./ambiguity.js";
 
 export function requireProjectDir(kernel: GraneKernel): string {
   if (!kernel.projectDir) {
@@ -57,23 +70,16 @@ function publicSchema(schema: DatabaseSchema) {
   };
 }
 
-function seedRevenueAmbiguities(schema: DatabaseSchema, existing: OpenAmbiguity[]): OpenAmbiguity[] {
-  if (existing.some((item) => item.kind === "revenue_like_columns")) return existing;
-  const candidates = schema.tables.flatMap((table) =>
-    table.columns
-      .filter((column) => isNumericType(column.dataType) && AMOUNT_NAME.test(column.name))
-      .map((column) => `${table.name}.${column.name}`),
+function seedAmbiguities(
+  schema: DatabaseSchema,
+  relationships: Record<string, { from: string; to: string; type: string }>,
+  session: AuthoringSession,
+): OpenAmbiguity[] {
+  return mergeAmbiguities(
+    session.open_ambiguities,
+    session.resolved_ambiguities,
+    detectAmbiguities({ schema, relationships }),
   );
-  if (candidates.length < 2) return existing;
-  return [
-    ...existing,
-    {
-      id: "amb-revenue-like",
-      kind: "revenue_like_columns",
-      question: "Which column is governed revenue?",
-      candidates,
-    },
-  ];
 }
 
 export function authoringStart(kernel: GraneKernel): { session: AuthoringSession } {
@@ -103,7 +109,7 @@ export async function discoverSchema(
   const schema = await discovery.introspectSchema();
   const relationships = await discovery.inferRelationships(schema);
   const session = loadSession(projectDir, sessionId);
-  const open_ambiguities = seedRevenueAmbiguities(schema, session.open_ambiguities);
+  const open_ambiguities = seedAmbiguities(schema, relationships, session);
   const snapshot_hash = hashDiscoverySnapshot({ schema: publicSchema(schema), relationships });
   updateSession(projectDir, sessionId, {
     discovered_snapshot_hash: snapshot_hash,
@@ -146,20 +152,111 @@ export function listAmbiguities(kernel: GraneKernel, sessionId: string): OpenAmb
   return loadSession(requireProjectDir(kernel), sessionId).open_ambiguities;
 }
 
-export function resolveAmbiguity(kernel: GraneKernel, sessionId: string, id: string, chosen: string): AuthoringSession {
+export async function resolveAmbiguity(
+  kernel: GraneKernel,
+  sessionId: string,
+  id: string,
+  chosen: string,
+): Promise<AuthoringSession> {
   const projectDir = requireProjectDir(kernel);
   const session = loadSession(projectDir, sessionId);
   const open = session.open_ambiguities.find((item) => item.id === id);
   if (!open) {
     throw configError(`No open ambiguity "${id}".`);
   }
-  if (open.candidates.length > 0 && !open.candidates.includes(chosen)) {
+  if (open.candidates.length === 0) {
+    throw configError(`Ambiguity "${id}" has no candidates to choose from.`);
+  }
+
+  if (open.kind === "semi_additive_group_by" && chosen.trim() !== GLOBAL_SNAPSHOT_GROUP_BY) {
+    const parsed = parseSemiAdditiveGroupById(open.id);
+    const col = parseColumn(chosen);
+    if (parsed && col) {
+      const schema = await discoveryFor(kernel, sessionId).introspectSchema();
+      const time = resolvedTimeColumn(session, schema, parsed.table);
+      if (isForbiddenSemiGroupByColumn(schema, parsed.table, parsed.column, col.column, time)) {
+        throw configError(forbiddenSemiGroupByMessage(chosen));
+      }
+    }
+  }
+
+  if (!open.candidates.includes(chosen)) {
     throw configError(`"${chosen}" is not a candidate for ambiguity "${id}".`);
   }
+
+  let remaining = session.open_ambiguities.filter((item) => item.id !== id);
+  const resolved = [...session.resolved_ambiguities, { ...open, chosen }];
+
+  if (open.kind === "non_additive_measure" && chosen === "semi") {
+    const parsed = parseNonAdditiveAmbiguityId(open.id);
+    if (parsed) {
+      const schema = await discoveryFor(kernel, sessionId).introspectSchema();
+      const time = resolvedTimeColumn(session, schema, parsed.table);
+      const followUp = semiAdditiveGroupByAmbiguity(schema, parsed.table, parsed.column, time);
+      const already =
+        remaining.some((item) => item.id === followUp.id) || resolved.some((item) => item.id === followUp.id);
+      if (!already) remaining = [...remaining, followUp];
+    }
+  }
+
   return updateSession(projectDir, sessionId, {
-    open_ambiguities: session.open_ambiguities.filter((item) => item.id !== id),
-    resolved_ambiguities: [...session.resolved_ambiguities, { ...open, chosen }],
+    open_ambiguities: remaining,
+    resolved_ambiguities: resolved,
   });
+}
+
+function unresolvedFlag(open: OpenAmbiguity[]): {
+  unresolved_ambiguities: OpenAmbiguity[];
+  unresolved: boolean;
+  warning?: string;
+} {
+  if (open.length === 0) {
+    return { unresolved_ambiguities: [], unresolved: false };
+  }
+  const ids = open.map((item) => item.id).join(", ");
+  return {
+    unresolved_ambiguities: open,
+    unresolved: true,
+    warning: `submit_proposal will refuse until ${open.length} open ambiguities are resolved (${ids}).`,
+  };
+}
+
+function relationshipOnChosenPath(
+  rel: { from: string; to: string },
+  chosen: string,
+): boolean {
+  if (chosen === "preaggregate") return true;
+  if (chosen === "do_not_join") return false;
+  const from = parseColumnRef(rel.from);
+  const to = parseColumnRef(rel.to);
+  if (!from || !to) return false;
+  const forward = `${from.table}.${from.column} → ${to.table}.${to.column}`;
+  const reverse = `${to.table}.${to.column} → ${from.table}.${from.column}`;
+  return chosen.includes(forward) || chosen.includes(reverse);
+}
+
+/** Keep a relationship only when fan-out is resolved as preaggregate (or a chosen path). */
+function includeInferredRelationship(
+  rel: { from: string; to: string },
+  session: AuthoringSession,
+): boolean {
+  const from = parseColumnRef(rel.from);
+  const to = parseColumnRef(rel.to);
+  if (!from || !to) return false;
+  const fanningId = fanoutAmbiguityId(to.table, from.table);
+  const pathId = fanoutAmbiguityId(from.table, to.table);
+  const resolvedFanout = session.resolved_ambiguities.filter((item) => item.kind === "fanout_join");
+  const openFanout = session.open_ambiguities.filter((item) => item.kind === "fanout_join");
+  const fanning = resolvedFanout.find((item) => item.id === fanningId);
+  const path = resolvedFanout.find((item) => item.id === pathId);
+
+  if (fanning?.chosen === "do_not_join" || path?.chosen === "do_not_join") return false;
+  if (openFanout.some((item) => item.id === fanningId || item.id === pathId)) return false;
+  if (fanning?.chosen === "preaggregate") {
+    return path ? relationshipOnChosenPath(rel, path.chosen) : true;
+  }
+  if (path) return relationshipOnChosenPath(rel, path.chosen);
+  return true;
 }
 
 function parseColumn(ref: string): { table: string; column: string } | null {
@@ -168,7 +265,16 @@ function parseColumn(ref: string): { table: string; column: string } | null {
   return { table: match[1]!, column: match[2]! };
 }
 
-export async function proposeDefinitions(kernel: GraneKernel, sessionId: string): Promise<AuthoringSession> {
+export async function proposeDefinitions(
+  kernel: GraneKernel,
+  sessionId: string,
+): Promise<
+  AuthoringSession & {
+    unresolved_ambiguities: OpenAmbiguity[];
+    unresolved: boolean;
+    warning?: string;
+  }
+> {
   const projectDir = requireProjectDir(kernel);
   const session = loadSession(projectDir, sessionId);
   const discovery = discoveryFor(kernel, sessionId);
@@ -186,33 +292,72 @@ export async function proposeDefinitions(kernel: GraneKernel, sessionId: string)
     entities[table] = { table, primary_key: pk };
   };
 
-  const addMetric = (name: string, table: string, column: string, description?: string) => {
+  const addMetric = (
+    name: string,
+    table: string,
+    column: string,
+    description?: string,
+    additive?: "semi",
+    groupBy?: string[],
+  ) => {
     addEntity(table);
-    const time =
-      schema.tables
-        .find((item) => item.name === table)
-        ?.columns.find((item) => /(_at|date|time)$/i.test(item.name))?.name ?? null;
+    const time = resolvedTimeColumn(session, schema, table);
     metrics[name] = {
       entity: table,
       type: "sum",
       sql: `\${${table}.${column}}`,
       status: "experimental",
+      ...(additive === "semi"
+        ? { additive: "semi", semi_additive: { window: "last", group_by: groupBy ?? [] } }
+        : {}),
       ...(description ? { description } : {}),
       ...(time ? { time_dimension: `\${${table}.${time}}` } : {}),
     };
   };
 
   for (const resolved of session.resolved_ambiguities) {
+    if (resolved.kind === "fanout_join") continue;
+    if (resolved.kind === "date_columns") continue;
+    if (resolved.kind === "semi_additive_group_by") continue;
+    if (resolved.kind === "non_additive_measure") {
+      const parsed = parseNonAdditiveAmbiguityId(resolved.id) ?? parseColumn(resolved.candidates[0] ?? "");
+      if (!parsed) continue;
+      if (resolved.chosen === "unsupported") continue;
+      if (resolved.chosen === "semi") {
+        const group = session.resolved_ambiguities.find(
+          (item) =>
+            item.kind === "semi_additive_group_by" &&
+            item.id === semiAdditiveGroupById(parsed.table, parsed.column),
+        );
+        if (!group) continue;
+        const groupCol = parseColumn(group.chosen);
+        const time = resolvedTimeColumn(session, schema, parsed.table);
+        if (
+          groupCol &&
+          isForbiddenSemiGroupByColumn(schema, parsed.table, parsed.column, groupCol.column, time)
+        ) {
+          continue;
+        }
+        addMetric(parsed.column, parsed.table, parsed.column, undefined, "semi", parseGroupByChoice(group.chosen));
+      }
+      continue;
+    }
     const parsed = parseColumn(resolved.chosen);
     if (!parsed) continue;
+    const info = schema.tables
+      .find((item) => item.name === parsed.table)
+      ?.columns.find((column) => column.name === parsed.column);
+    if (info && looksNonAdditive(parsed.column, info.dataType)) continue;
     const name = resolved.kind === "revenue_like_columns" ? "revenue" : parsed.column;
-    addMetric(name, parsed.table, parsed.column, resolved.question);
+    addMetric(name, parsed.table, parsed.column);
   }
 
   for (const entry of session.glossary_answers) {
     const slug = entry.term.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
     if (!slug || metrics[slug]) continue;
-    const fromResolved = session.resolved_ambiguities.find((item) => parseColumn(item.chosen));
+    const fromResolved = session.resolved_ambiguities.find(
+      (item) => item.kind === "revenue_like_columns" && parseColumn(item.chosen),
+    );
     const parsed = fromResolved ? parseColumn(fromResolved.chosen) : null;
     if (!parsed) continue;
     if (slug === "revenue" && metrics.revenue) {
@@ -228,6 +373,7 @@ export async function proposeDefinitions(kernel: GraneKernel, sessionId: string)
 
   const relationships: Record<string, { from: string; to: string; type: string }> = {};
   for (const [name, rel] of Object.entries(inferred)) {
+    if (!includeInferredRelationship(rel, session)) continue;
     relationships[name] = { from: rel.from, to: rel.to, type: rel.type };
   }
 
@@ -236,21 +382,30 @@ export async function proposeDefinitions(kernel: GraneKernel, sessionId: string)
     "metrics.yml": stringifyYaml({ metrics }),
   };
   if (Object.keys(relationships).length > 0) {
-    draft_yaml["relationships.yml"] = stringifyYaml({ relationships });
+    const preaggNotes = session.resolved_ambiguities
+      .filter((item) => item.kind === "fanout_join" && item.chosen === "preaggregate")
+      .map((item) => `# authoring fan-out ${item.id}: preaggregate`);
+    const body = stringifyYaml({ relationships });
+    draft_yaml["relationships.yml"] = preaggNotes.length > 0 ? `${preaggNotes.join("\n")}\n${body}` : body;
   }
 
-  return updateSession(projectDir, sessionId, { draft_yaml });
+  const updated = updateSession(projectDir, sessionId, { draft_yaml });
+  return { ...updated, ...unresolvedFlag(updated.open_ambiguities) };
 }
 
 export function previewYaml(kernel: GraneKernel, sessionId: string): {
   files: Record<string, string>;
   validation: { ok: boolean; issues: { severity: string; code: string; subject: string; message: string }[] };
+  unresolved_ambiguities: OpenAmbiguity[];
+  unresolved: boolean;
+  warning?: string;
 } {
   const projectDir = requireProjectDir(kernel);
   const session = loadSession(projectDir, sessionId);
   if (Object.keys(session.draft_yaml).length === 0) {
     throw configError("No draft YAML. Call propose_definitions first.");
   }
+  const flag = unresolvedFlag(session.open_ambiguities);
   const tmp = mkdtempSync(join(tmpdir(), "grane-authoring-preview-"));
   try {
     writeFileSync(
@@ -278,6 +433,7 @@ export function previewYaml(kernel: GraneKernel, sessionId: string): {
           message: issue.message,
         })),
       },
+      ...flag,
     };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -293,6 +449,26 @@ export function submitProposal(
   const session = loadSession(projectDir, sessionId);
   if (Object.keys(session.draft_yaml).length === 0) {
     throw configError("No draft YAML. Call propose_definitions first.");
+  }
+  if (session.open_ambiguities.length > 0) {
+    const listed = session.open_ambiguities
+      .map((item) => `${item.id}: ${item.question}`)
+      .join("; ");
+    throw configError(`Unresolved ambiguities must be resolved before submit_proposal. ${listed}`, {
+      unresolved_ambiguities: session.open_ambiguities,
+    });
+  }
+  let preview: ReturnType<typeof previewYaml>;
+  try {
+    preview = previewYaml(kernel, sessionId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw configError(`Draft YAML does not validate. ${message}`);
+  }
+  if (!preview.validation.ok) {
+    throw configError("Draft YAML does not validate. Fix the draft before submit_proposal.", {
+      issues: preview.validation.issues,
+    });
   }
   const proposal = createProposal(projectDir, {
     slug: slug?.trim() || `session-${sessionId.slice(0, 8)}`,
