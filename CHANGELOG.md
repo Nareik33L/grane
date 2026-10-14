@@ -10,10 +10,14 @@
   and own-data paths stay byte-identical (compared to a fixture captured from
   main). Back-nav on every new step. A glossary term binds to a unique
   revenue-like column when there is only one; several unique sources ask
-  rather than preferring a table named `orders`. Composite-PK and keyless
-  tables are listed in `skipped_tables`, not dropped. Demo Postgres uses
-  `GRANE_DEMO_DATABASE_URL` only (ignores `DATABASE_URL`). `--dir` that is
-  already a git repository is refused.
+  rather than preferring a table named `orders`. Detection and glossary
+  binding share one grain rule, so a keyless table the user later resolves
+  is asked about instead of silently dropping the metric. Composite-PK and
+  keyless tables are listed in `skipped_tables`, not dropped. Demo Postgres
+  uses `GRANE_DEMO_DATABASE_URL` only (ignores `DATABASE_URL`). `--dir` that
+  is already a git repository is refused. The activate gauntlet records
+  `git rev-parse main` before the MCP walk and asserts it is unchanged after,
+  with the proposal branch parented at that original SHA.
 - Validator warns (does not fail) existing YAML whose semi-additive
   `group_by` tracks the `time_dimension` or time-like columns stored as
   number/text (`ts` bigint, `period` varchar, `as_of` text). Authoring

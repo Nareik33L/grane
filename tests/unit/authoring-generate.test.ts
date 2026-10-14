@@ -7,7 +7,11 @@ import * as publicApi from "../../src/index.js";
 import { generateDraftYaml } from "../../src/authoring/generate.js";
 import { createSession } from "../../src/authoring/session.js";
 import { applyPrimaryKeys, applySingleColumnUniques, type DatabaseSchema } from "../../src/connectors/types.js";
-import { PRIMARY_KEY_SKIP, primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
+import {
+  CROSS_TABLE_REVENUE_LIKE_ID,
+  PRIMARY_KEY_SKIP,
+  primaryKeyAmbiguityId,
+} from "../../src/authoring/ambiguity.js";
 import { loadConfig } from "../../src/config/load.js";
 import { validateModel } from "../../src/validate/validate.js";
 import { SemanticModel } from "../../src/model/model.js";
@@ -343,6 +347,113 @@ describe("generateDraftYaml", () => {
     expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
     expect(files["metrics.yml"]).toMatch(/description:\s*Completed order revenue on the demo shop\./);
     expect(files["entities.yml"]).toMatch(/primary_key:\s*id/);
+  });
+
+  it("binds a glossary term on a keyless table after the user resolves the grain", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "event_stream",
+          columns: [
+            { name: "event_id", dataType: "integer", nullable: false },
+            { name: "amount", dataType: "numeric", nullable: false },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const unresolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Event amount." }],
+    });
+    expect(() => generateDraftYaml({ session: unresolved, schema, inferred: {} })).toThrow(/Nothing to propose/);
+
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Event amount." }],
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key",
+          question: "Which column is the entity grain?",
+          candidates: ["event_stream.event_id", "skip"],
+          chosen: "event_stream.event_id",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: resolved, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/revenue:/);
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{event_stream\.amount\}/);
+    expect(files["entities.yml"]).toMatch(/primary_key:\s*event_id/);
+  });
+
+  it("asks instead of dropping the glossary metric when a later-resolved keyless table joins unique sources", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "event_stream",
+          columns: [
+            { name: "event_id", dataType: "integer", nullable: false },
+            { name: "amount", dataType: "numeric", nullable: false },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const afterGrain = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key",
+          question: "Which column is the entity grain?",
+          candidates: ["event_stream.event_id", "skip"],
+          chosen: "event_stream.event_id",
+        },
+      ],
+    });
+    expect(() => generateDraftYaml({ session: afterGrain, schema, inferred: {} })).toThrow(/Nothing to propose/);
+
+    const chosen = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Event amount." }],
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key",
+          question: "Which column is the entity grain?",
+          candidates: ["event_stream.event_id", "skip"],
+          chosen: "event_stream.event_id",
+        },
+        {
+          id: CROSS_TABLE_REVENUE_LIKE_ID,
+          kind: "revenue_like_columns",
+          question: "Which column is governed revenue?",
+          candidates: ["orders.net_amount", "event_stream.amount"],
+          chosen: "event_stream.amount",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: chosen, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{event_stream\.amount\}/);
+    expect(files["metrics.yml"]).not.toMatch(/orders\.net_amount/);
   });
 
   it("does not prefer a table named orders when several unique revenue-like columns exist", () => {

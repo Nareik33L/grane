@@ -7,12 +7,12 @@ import {
   fanoutAmbiguityId,
   isForbiddenSemiGroupByColumn,
   looksNonAdditive,
-  looksRevenueLike,
   parseGroupByChoice,
   parseNonAdditiveAmbiguityId,
   resolvedEntityPrimaryKey,
   resolvedTimeColumn,
   semiAdditiveGroupById,
+  uniqueRevenueLikeSources,
 } from "./ambiguity.js";
 import type { AuthoringSession } from "./session.js";
 import { compareOrdinal, mergeNamedDefs } from "./yaml-merge.js";
@@ -48,15 +48,7 @@ function uniqueRevenueLikeSource(
   schema: DatabaseSchema,
   slug: string,
 ): { table: string; column: string } | null {
-  const sources: { table: string; column: string }[] = [];
-  for (const table of schema.tables) {
-    if (!resolvedEntityPrimaryKey(session, schema, table.name)) continue;
-    const cols = table.columns.filter(
-      (column) => looksRevenueLike(column.name, column.dataType) && !looksNonAdditive(column.name, column.dataType),
-    );
-    if (cols.length !== 1) continue;
-    sources.push({ table: table.name, column: cols[0]!.name });
-  }
+  const sources = uniqueRevenueLikeSources(schema, session);
   if (sources.length === 0) return null;
   const compact = slug.replace(/_/g, "");
   const named = sources.filter(

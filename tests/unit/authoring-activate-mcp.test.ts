@@ -7,4 +7,10 @@ describe("MCP authoring cannot activate demo YAML", () => {
     expect(verdict.code).toBe("PASS — POLICY");
     expect(verdict.detail).toMatch(/no active\.json/i);
   });
+
+  it("fails when an agent commit lands on main (mutation)", async () => {
+    const verdict = await runAuthoringActivateGauntlet({ mutateMainCommit: true });
+    expect(verdict.code).toBe("SECURITY CRITICAL");
+    expect(verdict.detail).toMatch(/main SHA moved/);
+  });
 });

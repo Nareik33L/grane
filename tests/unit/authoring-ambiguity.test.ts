@@ -24,6 +24,7 @@ import {
   CROSS_TABLE_REVENUE_LIKE_ID,
   semiAdditiveGroupByAmbiguity,
   semiAdditiveGroupById,
+  uniqueRevenueLikeSources,
 } from "../../src/authoring/ambiguity.js";
 import { createSession, updateSession } from "../../src/authoring/session.js";
 import {
@@ -250,6 +251,44 @@ describe("revenue-like columns", () => {
       ]),
     });
     expect(found.some((item) => item.kind === "revenue_like_columns")).toBe(false);
+  });
+
+  it("uses the same grain rule as glossary binding after a keyless table is resolved", () => {
+    const schema = schemaOf([
+      table("orders", [
+        { name: "id", dataType: "integer", nullable: false },
+        { name: "net_amount", dataType: "numeric" },
+      ]),
+      table(
+        "event_stream",
+        [
+          { name: "event_id", dataType: "integer", nullable: false },
+          { name: "amount", dataType: "numeric" },
+        ],
+        [],
+      ),
+    ]);
+    expect(uniqueRevenueLikeSources(schema)).toEqual([{ table: "orders", column: "net_amount" }]);
+    expect(detectAmbiguities({ schema }).find((item) => item.id === CROSS_TABLE_REVENUE_LIKE_ID)).toBeUndefined();
+
+    const session = {
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key" as const,
+          chosen: "event_stream.event_id",
+        },
+      ],
+    };
+    expect(uniqueRevenueLikeSources(schema, session)).toEqual([
+      { table: "event_stream", column: "amount" },
+      { table: "orders", column: "net_amount" },
+    ]);
+    expect(detectAmbiguities({ schema, session }).find((item) => item.id === CROSS_TABLE_REVENUE_LIKE_ID)).toMatchObject({
+      id: CROSS_TABLE_REVENUE_LIKE_ID,
+      kind: "revenue_like_columns",
+      candidates: ["event_stream.amount", "orders.net_amount"],
+    });
   });
 
   it("propose_definitions uses the resolved column, not the other candidate", async () => {

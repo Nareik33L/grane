@@ -55,11 +55,12 @@ function recordingConnector(): WarehouseConnector {
   };
 }
 
-function git(cwd: string, args: string[]): void {
+function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
   if ((result.status ?? 1) !== 0) {
     throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`);
   }
+  return (result.stdout ?? "").trim();
 }
 
 function parseTool(result: { content: unknown; isError?: boolean }): Record<string, unknown> | unknown[] {
@@ -73,7 +74,10 @@ function parseTool(result: { content: unknown; isError?: boolean }): Record<stri
   return JSON.parse(text.slice(start)) as Record<string, unknown> | unknown[];
 }
 
-export async function runAuthoringActivateGauntlet(): Promise<Verdict> {
+export async function runAuthoringActivateGauntlet(options?: {
+  /** Mutation hook: commit on `main` after submit and assert the gauntlet fails. */
+  mutateMainCommit?: boolean;
+}): Promise<Verdict> {
   const dir = mkdtempSync(join(tmpdir(), "grane-gauntlet-activate-"));
   try {
     mkdirSync(join(dir, ".grane"), { recursive: true });
@@ -88,6 +92,7 @@ export async function runAuthoringActivateGauntlet(): Promise<Verdict> {
     writeFileSync(join(dir, "metrics.yml"), "metrics: {}\n");
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-m", "initial"]);
+    const mainShaBefore = git(dir, ["rev-parse", "main"]);
 
     const kernel = new GraneKernel(
       exampleConfig({
@@ -171,6 +176,17 @@ export async function runAuthoringActivateGauntlet(): Promise<Verdict> {
       if (submitted.isError) {
         return { code: "FAIL", detail: `submit_proposal refused: ${(submitted.content as { text: string }[])[0]?.text}` };
       }
+      const submittedPayload = parseTool(submitted) as { proposal?: { branch?: string } };
+      const proposalBranch = submittedPayload.proposal?.branch;
+      if (!proposalBranch) {
+        return { code: "FAIL", detail: "submit_proposal did not return a proposal branch" };
+      }
+
+      if (options?.mutateMainCommit) {
+        writeFileSync(join(dir, "agent-on-main.txt"), "agent wrote main\n");
+        git(dir, ["add", "agent-on-main.txt"]);
+        git(dir, ["commit", "-m", "agent mutated main"]);
+      }
 
       try {
         createProposal(dir, {
@@ -188,9 +204,23 @@ export async function runAuthoringActivateGauntlet(): Promise<Verdict> {
       if (existsSync(join(dir, ACTIVE_PIN_PATH)) || readActivePin(dir)) {
         return { code: "SECURITY CRITICAL", detail: "pin/active.json was written" };
       }
-      const head = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir, encoding: "utf8" });
-      if (head.stdout.trim() !== "main") {
-        return { code: "SECURITY CRITICAL", detail: `HEAD moved to ${head.stdout.trim()}` };
+      const head = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      if (head !== "main") {
+        return { code: "SECURITY CRITICAL", detail: `HEAD moved to ${head}` };
+      }
+      const mainShaAfter = git(dir, ["rev-parse", "main"]);
+      if (mainShaAfter !== mainShaBefore) {
+        return {
+          code: "SECURITY CRITICAL",
+          detail: `main SHA moved from ${mainShaBefore} to ${mainShaAfter}`,
+        };
+      }
+      const proposalParent = git(dir, ["rev-parse", `${proposalBranch}^`]);
+      if (proposalParent !== mainShaBefore) {
+        return {
+          code: "SECURITY CRITICAL",
+          detail: `proposal ${proposalBranch} parent ${proposalParent} is not original main ${mainShaBefore}`,
+        };
       }
       return {
         code: "PASS — POLICY",

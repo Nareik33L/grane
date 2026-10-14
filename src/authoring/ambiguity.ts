@@ -56,6 +56,31 @@ export function quoteTableColumn(table: string, column: string): string {
 export interface DetectAmbiguitiesInput {
   schema: DatabaseSchema;
   relationships?: Record<string, { from: string; to: string; type: string }>;
+  /** Resolved grain (and later answers) so detection and glossary binding share one rule. */
+  session?: { resolved_ambiguities?: ReadonlyArray<Pick<ResolvedAmbiguity, "id" | "kind" | "chosen">> };
+}
+
+/**
+ * Unique revenue-like columns on tables with a usable grain. One shared rule
+ * for detection and glossary binding: introspected single-column PRIMARY KEY,
+ * single-column UNIQUE grain, or a later-resolved `primary_key` choice.
+ */
+export function uniqueRevenueLikeSources(
+  schema: DatabaseSchema,
+  session: DetectAmbiguitiesInput["session"] = {},
+): { table: string; column: string }[] {
+  const resolved = { resolved_ambiguities: session?.resolved_ambiguities ?? [] };
+  const sources: { table: string; column: string }[] = [];
+  for (const table of schema.tables) {
+    if (!resolvedEntityPrimaryKey(resolved, schema, table.name)) continue;
+    const cols = table.columns.filter(
+      (column) => looksRevenueLike(column.name, column.dataType) && !looksNonAdditive(column.name, column.dataType),
+    );
+    if (cols.length !== 1) continue;
+    sources.push({ table: table.name, column: cols[0]!.name });
+  }
+  sources.sort((a, b) => compareOrdinal(`${a.table}.${a.column}`, `${b.table}.${b.column}`));
+  return sources;
 }
 
 export function revenueLikeAmbiguityId(table: string): string {
@@ -261,7 +286,7 @@ export function resolvedEntityPrimaryKey(
  */
 export function detectAmbiguities(input: DetectAmbiguitiesInput): OpenAmbiguity[] {
   const found: OpenAmbiguity[] = [
-    ...detectRevenueLike(input.schema),
+    ...detectRevenueLike(input.schema, input.session),
     ...detectDateColumns(input.schema),
     ...detectNonAdditive(input.schema),
     ...detectFanoutJoins(input.relationships ?? {}),
@@ -321,9 +346,11 @@ function detectPrimaryKeys(schema: DatabaseSchema): OpenAmbiguity[] {
   return out;
 }
 
-function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {
+function detectRevenueLike(
+  schema: DatabaseSchema,
+  session?: DetectAmbiguitiesInput["session"],
+): OpenAmbiguity[] {
   const out: OpenAmbiguity[] = [];
-  const uniqueSources: string[] = [];
   for (const table of schema.tables) {
     const revenueCols = table.columns.filter((column) => looksRevenueLike(column.name, column.dataType));
     const candidates = revenueCols.map((column) => `${table.name}.${column.name}`);
@@ -336,13 +363,11 @@ function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {
           `Grane will not guess. Candidates are column names only.`,
         candidates,
       });
-      continue;
-    }
-    const unique = revenueCols.filter((column) => !looksNonAdditive(column.name, column.dataType));
-    if (unique.length === 1 && tablePrimaryKey(table)) {
-      uniqueSources.push(`${table.name}.${unique[0]!.name}`);
     }
   }
+  const uniqueSources = uniqueRevenueLikeSources(schema, session).map(
+    (item) => `${item.table}.${item.column}`,
+  );
   if (uniqueSources.length >= 2) {
     out.push({
       id: CROSS_TABLE_REVENUE_LIKE_ID,
@@ -350,7 +375,7 @@ function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {
       question:
         "Which column is governed revenue? Several tables have a single revenue-like column. " +
         "Grane will not guess.",
-      candidates: [...uniqueSources].sort(compareOrdinal),
+      candidates: uniqueSources,
     });
   }
   return out;

@@ -77,7 +77,7 @@ function seedAmbiguities(
   return mergeAmbiguities(
     session.open_ambiguities,
     session.resolved_ambiguities,
-    detectAmbiguities({ schema, relationships }),
+    detectAmbiguities({ schema, relationships, session }),
   );
 }
 
