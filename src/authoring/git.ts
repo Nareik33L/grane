@@ -233,12 +233,49 @@ export function readActivePin(projectDir: string): ActivePin | null {
   }
 }
 
+function resolveCommit(root: string, rev: string): string {
+  const probe = runGit(root, ["rev-parse", "--verify", `${rev}^{commit}`], { allowFail: true });
+  if (probe.status !== 0) {
+    throw configError(`"${rev}" is not a commit in this repository.`);
+  }
+  return probe.stdout.trim();
+}
+
+function previouslyApprovedCommits(root: string, pin: ActivePin | null): Set<string> {
+  const out = new Set<string>();
+  if (!pin) return out;
+  for (const rev of [pin.commit, pin.previous_commit]) {
+    if (!rev) continue;
+    const probe = runGit(root, ["rev-parse", "--verify", `${rev}^{commit}`], { allowFail: true });
+    if (probe.status === 0) out.add(probe.stdout.trim());
+  }
+  return out;
+}
+
+/** A pin may only record commits on `ref`'s history, or a SHA this pin already approved. */
+function assertPinnableCommit(root: string, rev: string, ref: string, approved: Set<string>, label: string): string {
+  const commit = resolveCommit(root, rev);
+  resolveCommit(root, ref);
+  if (approved.has(commit) || isAncestor(root, commit, ref)) return commit;
+  throw configError(
+    `Refusing to pin ${label} ${commit}: it is not reachable from "${ref}" and is not a previously approved commit. ` +
+      `Only merged commits on the active line can be pinned. Merge the GitHub PR before pinning a proposal.`,
+  );
+}
+
 export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   const parsed = activePinSchema.parse(pin);
+  const root = gitRoot(projectDir);
+  const approved = previouslyApprovedCommits(root, readActivePin(projectDir));
+  const commit = assertPinnableCommit(root, parsed.commit, parsed.ref, approved, "commit");
+  const previous_commit = parsed.previous_commit
+    ? assertPinnableCommit(root, parsed.previous_commit, parsed.ref, approved, "previous_commit")
+    : parsed.previous_commit;
+  const next = { ...parsed, commit, previous_commit };
   const path = join(projectDir, ACTIVE_PIN_PATH);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`);
-  return parsed;
+  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
+  return next;
 }
 
 export interface ActiveRef {
@@ -435,7 +472,7 @@ export function diffProposal(projectDir: string, idOrBranch: string): ProposalDi
 function readProposal(root: string, branch: string): Proposal {
   const commit = git(root, ["rev-parse", branch]).trim();
   const message = git(root, ["log", "-1", "--format=%B", commit]);
-  const id = parseTrailer(message, "Grane-Proposal") ?? proposalIdFromBranch(branch);
+  const id = proposalIdFromBranch(branch);
   const base_branch = parseTrailer(message, "Grane-Base") ?? "";
   const base_commit = parseTrailer(message, "Grane-Base-Commit") ?? "";
   const subject = message.split("\n")[0] ?? branch;
@@ -510,29 +547,41 @@ function isAncestor(root: string, ancestor: string, descendant: string): boolean
   return runGit(root, ["merge-base", "--is-ancestor", ancestor, descendant], { allowFail: true }).status === 0;
 }
 
+function escapeExtendedRegexp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Exact line `Grane-Proposal: <id>` — not a prefix/substring match. */
+function findExactProposalTrailer(root: string, baseCommit: string, proposalId: string): string {
+  const pattern = `^Grane-Proposal: ${escapeExtendedRegexp(proposalId)}$`;
+  return git(
+    root,
+    ["log", baseCommit, "--format=%H", "--extended-regexp", "--grep", pattern, "-n", "1"],
+    { allowFail: true },
+  ).trim();
+}
+
 /**
  * Read whether a proposal has been merged into the active branch.
  * Does not merge, fast-forward, or otherwise write to the active branch.
+ * The proposal id always comes from the branch name, never from the commit trailer.
  */
 export function readMergedApproval(projectDir: string, idOrBranch: string): MergedApproval {
   const root = gitRoot(projectDir);
-  const proposal = readProposal(root, resolveProposalBranch(root, idOrBranch));
+  const branch = resolveProposalBranch(root, idOrBranch);
+  const proposal_id = proposalIdFromBranch(branch);
+  const proposal_commit = git(root, ["rev-parse", branch]).trim();
   const active = resolveActiveRef(projectDir);
-  const ancestor = isAncestor(root, proposal.commit, active.commit);
-  const grepped = git(
-    root,
-    ["log", active.commit, "--format=%H", "--grep", `Grane-Proposal: ${proposal.id}`, "-n", "1"],
-    { allowFail: true },
-  ).trim();
-  const merged = ancestor || Boolean(grepped);
-  const merge_commit = ancestor ? active.commit : grepped || null;
+  const ancestor = isAncestor(root, proposal_commit, active.commit);
+  const trailer_commit = findExactProposalTrailer(root, active.commit, proposal_id);
+  const merged = ancestor || Boolean(trailer_commit);
   return {
     merged,
-    proposal_id: proposal.id,
-    proposal_branch: proposal.branch,
-    proposal_commit: proposal.commit,
+    proposal_id,
+    proposal_branch: branch,
+    proposal_commit,
     base_branch: active.branch,
-    merge_commit: merged ? merge_commit : null,
+    merge_commit: merged ? (ancestor ? active.commit : trailer_commit) : null,
     metric_trust: merged ? "governed" : "experimental",
   };
 }

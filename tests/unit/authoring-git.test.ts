@@ -165,6 +165,86 @@ describe("git proposal library", () => {
     expect(after.merge_commit).toBe(git(dir, ["rev-parse", "HEAD"]));
   });
 
+  it("refuses to pin an unmerged proposal commit", () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    const proposal = createProposal(dir, {
+      slug: "unmerged",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT_METRICS },
+    });
+    writeActivePin(dir, {
+      ref: "main",
+      commit: main,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    try {
+      writeActivePin(dir, {
+        ref: "main",
+        commit: proposal.commit,
+        approved_by: "octocat",
+        approved_at: "2026-10-14T12:01:00.000Z",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/not reachable from "main"/);
+      expect((err as GraneError).message).toMatch(/Merge the GitHub PR/);
+    }
+    try {
+      rollbackPin(dir, { to: proposal.commit });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/not reachable from "main"/);
+    }
+    expect(readActivePin(dir)?.commit).toBe(main);
+    expect(git(dir, ["rev-parse", "main"])).toBe(main);
+  });
+
+  it("does not treat x-add as merged when only x-add-revenue is merged", () => {
+    const dir = initRepo();
+    const at = new Date("2026-10-14T00:00:00.000Z");
+    const add = createProposal(dir, {
+      slug: "x-add",
+      at,
+      files: {
+        "metrics.yml": `metrics:
+  added:
+    entity: order
+    type: count
+    status: experimental
+`,
+      },
+    });
+    const revenue = createProposal(dir, {
+      slug: "x-add-revenue",
+      at,
+      files: { "metrics.yml": DRAFT_METRICS },
+    });
+    expect(add.id).toBe("20261014-x-add");
+    expect(revenue.id).toBe("20261014-x-add-revenue");
+    expect(revenue.id.startsWith(`${add.id}-`)).toBe(true);
+
+    git(dir, [
+      "merge",
+      "--no-ff",
+      "-m",
+      `Merge pull request #2 from ${revenue.branch}\n\nGrane-Proposal: ${revenue.id}`,
+      revenue.branch,
+    ]);
+
+    const addState = readMergedApproval(dir, add.id);
+    const revenueState = readMergedApproval(dir, revenue.id);
+    expect(addState.proposal_id).toBe(add.id);
+    expect(revenueState.proposal_id).toBe(revenue.id);
+    expect(addState.merged).toBe(false);
+    expect(addState.metric_trust).toBe("experimental");
+    expect(revenueState.merged).toBe(true);
+    expect(revenueState.metric_trust).toBe("governed");
+  });
+
   it("rolls back by re-pinning a previous commit without moving the active branch", () => {
     const dir = initRepo();
     const first = git(dir, ["rev-parse", "HEAD"]);
