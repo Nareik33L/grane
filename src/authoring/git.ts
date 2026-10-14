@@ -1111,7 +1111,7 @@ export function approveProposal(
   const pin = writeActivePin(projectDir, {
     ref: configuredBaseBranch(projectDir),
     commit: approval.merge_commit,
-    approved_by: options.approved_by ?? "approve",
+    approved_by: options.approved_by ?? identity(root).name,
     approved_at: new Date().toISOString(),
     proposal: approval.proposal_id,
     previous_commit: previous,
@@ -1127,13 +1127,23 @@ export function approveProposal(
 export function rejectProposal(
   projectDir: string,
   idOrBranch: string,
-  options: { tty?: boolean; yes?: boolean } = {},
+  options: { tty?: boolean; yes?: boolean; confirm?: () => boolean } = {},
 ): { id: string; branch: string; commit: string } {
   assertNotDemoAuthoring(projectDir, "reject");
-  if (!options.tty && !options.yes) {
-    const reason = `reject requires a human TTY or --yes.`;
-    recordProposalLine(projectDir, { operation: "reject", reason });
-    throw configError(reason);
+  if (!options.yes) {
+    if (!options.tty) {
+      const reason = `reject requires a human TTY or --yes.`;
+      recordProposalLine(projectDir, { operation: "reject", reason });
+      throw configError(reason);
+    }
+    const confirmed = options.confirm ? options.confirm() : false;
+    if (!confirmed) {
+      const reason = options.confirm
+        ? `reject cancelled.`
+        : `reject requires confirmation (y/N) or --yes.`;
+      recordProposalLine(projectDir, { operation: "reject", reason });
+      throw configError(reason);
+    }
   }
   const root = gitRoot(projectDir);
   const branch = resolveProposalBranch(root, idOrBranch);
@@ -1143,12 +1153,23 @@ export function rejectProposal(
   preflightAuditWrite(audit.config, audit.dir);
   const mainBefore = baseHeadsSha(root, projectDir);
   deleteProposalBranch(projectDir, branch);
+  try {
+    recordProposalLine(projectDir, { operation: "reject", proposal_id: id, branch, commit });
+  } catch (err) {
+    restoreProposalRef(root, branch, commit);
+    throw err;
+  }
   const mainAfter = baseHeadsSha(root, projectDir);
   if (mainAfter !== mainBefore) {
+    restoreProposalRef(root, branch, commit);
     throw configError("Internal error: reject moved the configured base branch. Refusing.");
   }
-  recordProposalLine(projectDir, { operation: "reject", proposal_id: id, branch, commit });
   return { id, branch, commit };
+}
+
+function restoreProposalRef(root: string, branch: string, sha: string): void {
+  requireProposalBranch(branch);
+  runGit(root, ["update-ref", `refs/heads/${branch}`, sha], { allowFail: true });
 }
 
 /** Re-pin a previously approved commit. Never resets or commits on the active branch. */
@@ -1174,9 +1195,17 @@ export function rollbackPin(
     throw configError(reason);
   }
   const root = gitRoot(projectDir);
-  const resolved = git(root, ["rev-parse", "--verify", `${target}^{commit}`]).trim();
+  const resolved = resolveCommit(root, target);
   if (resolved === pin.commit) {
     const reason = `Already pinned at ${resolved}.`;
+    recordProposalLine(projectDir, { operation: "rollback", reason, commit: resolved });
+    throw configError(reason);
+  }
+  const approved = previouslyApprovedCommits(root, pin);
+  if (!approved.has(resolved)) {
+    const reason =
+      `Refusing to roll back to ${resolved}: it is not a previously approved pin. ` +
+      `Pass --to of a commit recorded on the current pin (commit or previous_commit).`;
     recordProposalLine(projectDir, { operation: "rollback", reason, commit: resolved });
     throw configError(reason);
   }

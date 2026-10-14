@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { accessSync, appendFileSync, constants, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { GraneConfig } from "./config/schema.js";
 import { GraneError, configError } from "./errors.js";
@@ -299,8 +299,9 @@ export function preflightAuditWrite(config: GraneConfig, projectDir: string | un
   try {
     const path = resolveAuditPath(projectDir, config.audit.path);
     if (path) {
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, "");
+      const parent = dirname(path);
+      mkdirSync(parent, { recursive: true });
+      accessSync(parent, constants.W_OK);
     }
   } catch (err) {
     throw auditWriteFailed(err);

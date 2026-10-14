@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import {
   approveProposal,
@@ -14,6 +15,19 @@ interface ProposalsCliContext {
 
 function isTty(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+/** TTY reject confirmation. Default is no (`y/N`) unless `--yes`. */
+export async function confirmReject(id: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const raw = (await rl.question(`Reject proposal ${id} and delete its local branch? [y/N]: `))
+      .trim()
+      .toLowerCase();
+    return raw === "y" || raw === "yes";
+  } finally {
+    rl.close();
+  }
 }
 
 export function registerProposalsCommands(program: Command, ctx: ProposalsCliContext): void {
@@ -104,10 +118,18 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
     .argument("<id>", "proposal id or grane/proposal/* branch")
     .description("Delete a local proposal branch (does not write the pin or main)")
     .option("--json", "print JSON")
-    .option("--yes", "allow reject without a TTY")
-    .action((id: string, options: { json?: boolean; yes?: boolean }) => {
+    .option("--yes", "skip the TTY y/N prompt")
+    .action(async (id: string, options: { json?: boolean; yes?: boolean }) => {
       try {
-        const result = rejectProposal(ctx.projectDir(), id, { tty: isTty(), yes: options.yes });
+        let yes = Boolean(options.yes);
+        if (!yes && isTty()) {
+          yes = await confirmReject(id);
+          if (!yes) {
+            console.log("Aborted.");
+            return;
+          }
+        }
+        const result = rejectProposal(ctx.projectDir(), id, { tty: isTty(), yes });
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
           return;
@@ -120,7 +142,7 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
 
   proposals
     .command("rollback")
-    .description("Re-pin the previous approved commit (reachable on the configured base)")
+    .description("Re-pin a previously approved pin (default: pin.previous_commit)")
     .option("--to <commit>", "previously approved commit (default: pin.previous_commit)")
     .option("--json", "print JSON")
     .option("--approved-by <name>", "recorded approved_by on the pin")

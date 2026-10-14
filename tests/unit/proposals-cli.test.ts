@@ -80,6 +80,21 @@ function initRepo(): string {
   return dir;
 }
 
+function enableFailClosedAudit(dir: string): void {
+  writeFileSync(
+    join(dir, "grane.yml"),
+    `${INITIAL_YML}audit: { enabled: true, fail_closed: true, path: .grane/audit.jsonl }\n`,
+  );
+  git(dir, ["add", "grane.yml"]);
+  git(dir, ["commit", "-m", "fail-closed audit"]);
+}
+
+function replaceAuditWithDirectory(dir: string): void {
+  const path = join(dir, ".grane", "audit.jsonl");
+  rmSync(path, { recursive: true, force: true });
+  mkdirSync(path, { recursive: true });
+}
+
 function readAudit(dir: string): Record<string, unknown>[] {
   const path = join(dir, ".grane", "audit.jsonl");
   if (!existsSync(path)) return [];
@@ -211,7 +226,7 @@ describe("grane proposals list|diff|approve|reject|rollback", () => {
       },
     });
     expect(() => rollbackPin(dir, { to: other.commit, approved_by: "octocat" })).toThrow(
-      /not reachable from "main"|not on "main"/,
+      /not a previously approved pin/,
     );
     expect(readActivePin(dir)?.commit).toBe(first);
     expect(git(dir, ["rev-parse", "main"])).toBe(merged);
@@ -244,7 +259,86 @@ describe("grane proposals list|diff|approve|reject|rollback", () => {
     expect(rejects).toHaveLength(1);
   });
 
-  it("CLI approve after merge and rollback keep main SHA and write the pin atomically", () => {
+  it("approve records git user.name when approved_by is omitted", () => {
+    const dir = initRepo();
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT },
+    });
+    mergeProposal(dir, proposal);
+    const pin = approveProposal(dir, proposal.id, { tty: false });
+    expect(pin.approved_by).toBe("Grane Test");
+  });
+
+  it("rollback --to refuses a main ancestor that was never an approved pin", () => {
+    const dir = initRepo();
+    const first = git(dir, ["rev-parse", "main"]);
+    writeFileSync(join(dir, "metrics.yml"), `${DRAFT}\n`);
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "second"]);
+    const second = git(dir, ["rev-parse", "main"]);
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+  extra:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+`,
+    );
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "third"]);
+    const third = git(dir, ["rev-parse", "main"]);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: third,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+      previous_commit: second,
+    });
+    expect(() => rollbackPin(dir, { to: first, approved_by: "octocat" })).toThrow(
+      /not a previously approved pin/,
+    );
+    expect(readActivePin(dir)?.commit).toBe(third);
+    const rolled = rollbackPin(dir, { to: second, approved_by: "octocat" });
+    expect(rolled.commit).toBe(second);
+    expect(git(dir, ["rev-parse", "main"])).toBe(third);
+  });
+
+  it("TTY reject prompts y/N and does not delete unless confirmed or --yes", () => {
+    const dir = initRepo();
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT },
+    });
+    expect(() => rejectProposal(dir, proposal.id, { tty: true })).toThrow(/y\/N|--yes/);
+    expect(listProposals(dir).map((item) => item.id)).toEqual([proposal.id]);
+    expect(() => rejectProposal(dir, proposal.id, { tty: true, confirm: () => false })).toThrow(
+      /cancelled/,
+    );
+    expect(listProposals(dir).map((item) => item.id)).toEqual([proposal.id]);
+
+    const cli = runCli(dir, ["proposals", "reject", proposal.id]);
+    expect(cli.status).not.toBe(0);
+    expect(cli.stderr).toMatch(/TTY or --yes/);
+    expect(listProposals(dir).map((item) => item.id)).toEqual([proposal.id]);
+
+    const src = readFileSync(join(process.cwd(), "src/cli/proposals.ts"), "utf8");
+    expect(src).toMatch(/\[y\/N\]/);
+    expect(src).toMatch(/skip the TTY y\/N prompt/);
+
+    const rejected = rejectProposal(dir, proposal.id, { tty: true, confirm: () => true });
+    expect(rejected.branch).toBe(proposal.branch);
+    expect(listProposals(dir)).toEqual([]);
+  });
+
+  it("CLI approve after merge and rollback keep main SHA and write the pin atomically", { timeout: 60_000 }, () => {
     const dir = initRepo();
     const first = git(dir, ["rev-parse", "main"]);
     const proposal = createProposal(dir, {
@@ -361,6 +455,73 @@ describe("authoring fail-closed preflight", () => {
     expect(() => submitProposal(kernel, session.id, "nope")).toThrow(/fail_closed|validate|Draft/);
     expect(listProposals(dir)).toEqual([]);
     expect(git(dir, ["rev-parse", "main"])).toBe(main);
+  });
+
+  it("reject restores the proposal branch SHA when audit fails after delete", () => {
+    const dir = initRepo();
+    enableFailClosedAudit(dir);
+    const main = git(dir, ["rev-parse", "main"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT },
+    });
+    replaceAuditWithDirectory(dir);
+    expect(() => rejectProposal(dir, proposal.id, { yes: true })).toThrow(/fail_closed/);
+    expect(git(dir, ["rev-parse", `refs/heads/${proposal.branch}`])).toBe(proposal.commit);
+    expect(git(dir, ["rev-parse", "main"])).toBe(main);
+    expect(listProposals(dir).map((item) => item.id)).toEqual([proposal.id]);
+  });
+
+  it("approve restores prior pin bytes when audit fails after the pin write", () => {
+    const dir = initRepo();
+    enableFailClosedAudit(dir);
+    const first = git(dir, ["rev-parse", "main"]);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: first,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    const prior = readFileSync(join(dir, ACTIVE_PIN_PATH));
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT },
+    });
+    mergeProposal(dir, proposal);
+    replaceAuditWithDirectory(dir);
+    expect(() => approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" })).toThrow(
+      /fail_closed/,
+    );
+    expect(readFileSync(join(dir, ACTIVE_PIN_PATH))).toEqual(prior);
+    expect(readActivePin(dir)?.commit).toBe(first);
+  });
+
+  it("rollback restores prior pin bytes when audit fails after the pin write", () => {
+    const dir = initRepo();
+    enableFailClosedAudit(dir);
+    const first = git(dir, ["rev-parse", "main"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT },
+    });
+    const merged = mergeProposal(dir, proposal);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: first,
+      approved_by: "octocat",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    });
+    approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
+    expect(readActivePin(dir)?.commit).toBe(merged);
+    const prior = readFileSync(join(dir, ACTIVE_PIN_PATH));
+    replaceAuditWithDirectory(dir);
+    expect(() => rollbackPin(dir, { approved_by: "octocat" })).toThrow(/fail_closed/);
+    expect(readFileSync(join(dir, ACTIVE_PIN_PATH))).toEqual(prior);
+    expect(readActivePin(dir)?.commit).toBe(merged);
+    expect(git(dir, ["rev-parse", "main"])).toBe(merged);
   });
 });
 

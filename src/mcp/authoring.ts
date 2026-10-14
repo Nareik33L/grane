@@ -5,7 +5,7 @@ import type { GraneConfig } from "../config/schema.js";
 import { GraneError, configError } from "../errors.js";
 import { httpAgentAuthenticated } from "../auth/agents.js";
 import { preflightAuditWrite, recordAuthoringAudit, refusalFromError, type AuthoringAuditOperation } from "../audit.js";
-import { deleteProposalBranch, type GitHubPrPlan, type Proposal } from "../authoring/git.js";
+import type { GitHubPrPlan, Proposal } from "../authoring/git.js";
 import {
   authoringStart,
   discoverSchema,
@@ -15,6 +15,7 @@ import {
   proposeDefinitions,
   recordTerm,
   resolveAmbiguity,
+  revertFailedProposal,
   submitProposal,
 } from "../authoring/tools.js";
 export type McpTransport = "stdio" | "http";
@@ -171,7 +172,7 @@ function wrap<A>(
     } catch (auditErr) {
       if (proposal?.branch && kernel.projectDir) {
         try {
-          deleteProposalBranch(kernel.projectDir, proposal.branch);
+          revertFailedProposal(kernel.projectDir, proposal.branch);
         } catch {
           // still refuse the audit failure
         }

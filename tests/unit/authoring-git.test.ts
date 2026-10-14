@@ -200,7 +200,7 @@ describe("git proposal library", () => {
       expect.unreachable();
     } catch (err) {
       expect(err).toBeInstanceOf(GraneError);
-      expect((err as GraneError).message).toMatch(/not reachable from "main"/);
+      expect((err as GraneError).message).toMatch(/not a previously approved pin|not reachable from "main"/);
     }
     expect(readActivePin(dir)?.commit).toBe(main);
     expect(git(dir, ["rev-parse", "main"])).toBe(main);

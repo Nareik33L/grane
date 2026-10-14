@@ -4,15 +4,19 @@
 
 - **Review/approve/rollback CLI (V2-13).** `grane proposals list|diff|approve|reject|rollback`.
   Approve requires a human TTY or a merged GitHub PR and cannot be invoked
-  from MCP. Rollback re-pins the previous approved commit when it is
-  reachable on the configured base (`refs/heads/` + full 40-hex SHA, atomic
-  write, pin audit). One audit line per action. Fail-closed audit preflights
-  the log write before any write tool/CLI action; if a proposal branch was
-  created and the audit then fails, the branch is deleted. Approve and
-  rollback do not move `main` and keep the proposal parent at the original
-  SHA. `proposals diff` reports removed metrics and entities, keys restored
-  by the YAML merge, and files that lost comments. Approve, rollback, and
-  reject refuse a nested demo authoring repo created by setup `--dir`.
+  from MCP (`src/mcp/**` must not import or call approve, rollback, reject,
+  or proposal-branch delete). `approved_by` defaults to `git user.name`.
+  Rollback re-pins a previously approved pin only (`previous_commit` or
+  `--to` of that set; `refs/heads/` + full 40-hex SHA, atomic write, pin
+  audit). One audit line per action. Fail-closed audit preflights the log
+  parent before any write tool/CLI action; if a pin write then fails to
+  audit, prior pin bytes are restored. Reject audits before deleting the
+  proposal branch (or restores the SHA if the audit write fails). A TTY
+  reject prompts `y/N` unless `--yes`. Approve and rollback do not move
+  `main` and keep the proposal parent at the original SHA. `proposals
+  diff` reports removed metrics and entities, keys restored by the YAML
+  merge, and files that lost comments. Approve, rollback, and reject
+  refuse a nested demo authoring repo created by setup `--dir`.
 - **Active-config pin (V2-12).** `.grane/active.json` is `{ref, commit,
   approved_by, approved_at}`. `grane serve` loads that commit's YAML tree
   when the pin exists; uncommitted edits do not affect serving. Projects
