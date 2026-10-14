@@ -22,10 +22,14 @@ import { createProposal, githubPrPlan, type GitHubPrPlan, type Proposal } from "
 import {
   detectAmbiguities,
   fanoutAmbiguityId,
+  forbiddenSemiGroupByMessage,
+  GLOBAL_SNAPSHOT_GROUP_BY,
+  isForbiddenSemiGroupByColumn,
   looksNonAdditive,
   mergeAmbiguities,
   parseGroupByChoice,
   parseNonAdditiveAmbiguityId,
+  parseSemiAdditiveGroupById,
   resolvedTimeColumn,
   semiAdditiveGroupByAmbiguity,
   semiAdditiveGroupById,
@@ -163,6 +167,19 @@ export async function resolveAmbiguity(
   if (open.candidates.length === 0) {
     throw configError(`Ambiguity "${id}" has no candidates to choose from.`);
   }
+
+  if (open.kind === "semi_additive_group_by" && chosen.trim() !== GLOBAL_SNAPSHOT_GROUP_BY) {
+    const parsed = parseSemiAdditiveGroupById(open.id);
+    const col = parseColumn(chosen);
+    if (parsed && col) {
+      const schema = await discoveryFor(kernel, sessionId).introspectSchema();
+      const time = resolvedTimeColumn(session, schema, parsed.table);
+      if (isForbiddenSemiGroupByColumn(schema, parsed.table, parsed.column, col.column, time)) {
+        throw configError(forbiddenSemiGroupByMessage(chosen));
+      }
+    }
+  }
+
   if (!open.candidates.includes(chosen)) {
     throw configError(`"${chosen}" is not a candidate for ambiguity "${id}".`);
   }
@@ -174,7 +191,8 @@ export async function resolveAmbiguity(
     const parsed = parseNonAdditiveAmbiguityId(open.id);
     if (parsed) {
       const schema = await discoveryFor(kernel, sessionId).introspectSchema();
-      const followUp = semiAdditiveGroupByAmbiguity(schema, parsed.table, parsed.column);
+      const time = resolvedTimeColumn(session, schema, parsed.table);
+      const followUp = semiAdditiveGroupByAmbiguity(schema, parsed.table, parsed.column, time);
       const already =
         remaining.some((item) => item.id === followUp.id) || resolved.some((item) => item.id === followUp.id);
       if (!already) remaining = [...remaining, followUp];
@@ -312,6 +330,14 @@ export async function proposeDefinitions(
             item.id === semiAdditiveGroupById(parsed.table, parsed.column),
         );
         if (!group) continue;
+        const groupCol = parseColumn(group.chosen);
+        const time = resolvedTimeColumn(session, schema, parsed.table);
+        if (
+          groupCol &&
+          isForbiddenSemiGroupByColumn(schema, parsed.table, parsed.column, groupCol.column, time)
+        ) {
+          continue;
+        }
         addMetric(parsed.column, parsed.table, parsed.column, undefined, "semi", parseGroupByChoice(group.chosen));
       }
       continue;

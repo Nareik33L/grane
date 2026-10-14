@@ -14,10 +14,12 @@ import {
   mergeAmbiguities,
   nonAdditiveAmbiguityId,
   parseNonAdditiveAmbiguityId,
+  isForbiddenSemiGroupByColumn,
   quoteIdent,
   quoteTableColumn,
   resolvedTimeColumn,
   revenueLikeAmbiguityId,
+  semiAdditiveGroupByAmbiguity,
   semiAdditiveGroupById,
 } from "../../src/authoring/ambiguity.js";
 import { createSession, updateSession } from "../../src/authoring/session.js";
@@ -141,6 +143,7 @@ const nonAdditiveSchema = schemaOf([
   ]),
   table("inventory", [
     { name: "id", dataType: "integer", nullable: false },
+    { name: "warehouse_id", dataType: "integer", nullable: false },
     { name: "balance", dataType: "numeric" },
     { name: "snapshot_at", dataType: "timestamp" },
   ]),
@@ -326,6 +329,8 @@ describe("non-additive measures", () => {
     });
     expect(follow?.candidates).not.toContain("entity");
     expect(follow?.candidates).not.toContain("inventory.id");
+    expect(follow?.candidates).not.toContain("inventory.snapshot_at");
+    expect(follow?.candidates).toContain("inventory.warehouse_id");
     expect(follow?.question).toContain(quoteTableColumn("inventory", "balance"));
     expect(follow?.question).toMatch(/vacuous_semi_additive_group_by/);
     assertQuestionHasNoSamples(follow!.question);
@@ -347,6 +352,30 @@ describe("non-additive measures", () => {
     expect(preview.validation.issues.some((issue) => issue.code === "vacuous_semi_additive_group_by")).toBe(
       false,
     );
+  });
+
+  it("does not offer or accept snapshot_at as group_by", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, nonAdditiveSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const snapshot = listed.find((item) => item.kind === "non_additive_measure")!;
+    await resolveAmbiguity(k, sessionId, snapshot.id, "semi");
+    const follow = listAmbiguities(k, sessionId).find((item) => item.kind === "semi_additive_group_by")!;
+    expect(follow.candidates).not.toContain("inventory.snapshot_at");
+    expect(follow.candidates.some((item) => item.includes("snapshot_at"))).toBe(false);
+    expect(
+      isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "snapshot_at", "snapshot_at"),
+    ).toBe(true);
+    expect(
+      semiAdditiveGroupByAmbiguity(nonAdditiveSchema, "inventory", "balance", "snapshot_at").candidates,
+    ).not.toContain("inventory.snapshot_at");
+
+    await expect(resolveAmbiguity(k, sessionId, follow.id, "inventory.snapshot_at")).rejects.toThrow(
+      /time dimension|temporal|every snapshot|double count/i,
+    );
+    expect(listAmbiguities(k, sessionId).some((item) => item.id === follow.id)).toBe(true);
   });
 });
 

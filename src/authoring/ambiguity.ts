@@ -94,18 +94,19 @@ export function parseSemiAdditiveGroupById(id: string): { table: string; column:
 /**
  * Follow-up after resolving a snapshot as semi. Always includes `[]`
  * (global snapshot). Never offers the entity primary key (`group_by: entity`
- * is vacuous_semi_additive_group_by).
+ * is vacuous_semi_additive_group_by) or a temporal / time_dimension column
+ * (that keeps one row per timestamp and sums every snapshot).
  */
 export function semiAdditiveGroupByAmbiguity(
   schema: DatabaseSchema,
   table: string,
   column: string,
+  timeColumn?: string,
 ): OpenAmbiguity {
   const info = schema.tables.find((item) => item.name === table);
-  const pk = info?.columns.find((item) => item.name === "id")?.name ?? info?.columns[0]?.name;
   const candidates = [GLOBAL_SNAPSHOT_GROUP_BY];
   for (const item of info?.columns ?? []) {
-    if (item.name === pk || item.name === column) continue;
+    if (isForbiddenSemiGroupByColumn(schema, table, column, item.name, timeColumn)) continue;
     candidates.push(`${table}.${item.name}`);
   }
   return {
@@ -113,11 +114,45 @@ export function semiAdditiveGroupByAmbiguity(
     kind: "semi_additive_group_by",
     question:
       `Which series key should ${quoteTableColumn(table, column)} use for additive: semi? ` +
-      `Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" for one snapshot for the whole result, or a column ` +
-      `that is not the entity primary key. "entity" / the primary key is refused ` +
-      `(vacuous_semi_additive_group_by). Grane will not guess.`,
+      `Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" for one snapshot for the whole result, or a ` +
+      `non-temporal column that is not the entity primary key. "entity" / the primary key ` +
+      `is refused (vacuous_semi_additive_group_by). The time dimension is refused — grouping ` +
+      `by it would sum every snapshot. Grane will not guess.`,
     candidates,
   };
+}
+
+/**
+ * True when `groupColumn` must not be a semi-additive series key: the measure
+ * itself, the entity primary key, any temporal column, or the metric's
+ * time_dimension. Grouping by the snapshot date keeps one row per timestamp
+ * and sums every snapshot — the double count `additive: semi` exists to prevent.
+ */
+export function isForbiddenSemiGroupByColumn(
+  schema: DatabaseSchema,
+  table: string,
+  measureColumn: string,
+  groupColumn: string,
+  timeColumn?: string,
+): boolean {
+  if (groupColumn === measureColumn) return true;
+  if (timeColumn && groupColumn === timeColumn) return true;
+  const info = schema.tables.find((item) => item.name === table);
+  const pk = info?.columns.find((item) => item.name === "id")?.name ?? info?.columns[0]?.name;
+  if (groupColumn === pk) return true;
+  const col = info?.columns.find((item) => item.name === groupColumn);
+  if (col && looksTemporal(col.name, col.dataType)) return true;
+  if (!col && looksTemporal(groupColumn, "")) return true;
+  return false;
+}
+
+export function forbiddenSemiGroupByMessage(chosen: string): string {
+  return (
+    `"${chosen}" is a temporal column or the metric time dimension. ` +
+    `Grouping by it keeps one row per timestamp and sums every snapshot — ` +
+    `the double count additive: semi exists to prevent. ` +
+    `Choose "${GLOBAL_SNAPSHOT_GROUP_BY}" or a non-temporal series key.`
+  );
 }
 
 /** Parse a resolved group_by choice into the YAML list (`[]` or `${table.column}`). */

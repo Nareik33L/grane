@@ -28,8 +28,9 @@
   never emitted as a governed SUM. Open ambiguities block `submit_proposal`
   and are flagged on `propose_definitions` / `preview_yaml`. Resolving a
   snapshot as `semi` also asks for `group_by` so drafts pass
-  `vacuous_semi_additive_group_by`. `submit_proposal` refuses invalid preview
-  YAML.
+  `vacuous_semi_additive_group_by`. The metric time dimension and other
+  temporal columns are not group_by candidates (grouping by `snapshot_at`
+  would sum every snapshot). `submit_proposal` refuses invalid preview YAML.
 
 ## 0.7.0
 
