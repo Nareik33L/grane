@@ -3,6 +3,9 @@ import { z } from "zod";
 import type { GraneKernel } from "../kernel.js";
 import type { GraneConfig } from "../config/schema.js";
 import { GraneError, configError } from "../errors.js";
+import { httpAgentAuthenticated } from "../auth/agents.js";
+import { recordAuthoringAudit, refusalFromError, type AuthoringAuditOperation } from "../audit.js";
+import type { GitHubPrPlan, Proposal } from "../authoring/git.js";
 import {
   authoringStart,
   discoverSchema,
@@ -36,8 +39,10 @@ export const AUTHORING_MCP_TOOLS = [
   "submit_proposal",
 ] as const;
 
+export type AuthoringMcpTool = (typeof AUTHORING_MCP_TOOLS)[number];
+
 /**
- * Whether to advertise authoring tools.
+ * Whether authoring tools are enabled for this process/transport.
  * `--authoring` enables them on this process/transport.
  * `authoring.enabled` still honours `authoring.mode`: local = stdio only,
  * shared = stdio and HTTP.
@@ -48,6 +53,29 @@ export function authoringToolsEnabled(config: GraneConfig, options?: BuildMcpSer
   if (!config.authoring.enabled) return false;
   if (transport === "stdio") return true;
   return config.authoring.mode === "shared";
+}
+
+/**
+ * Whether to put authoring tools on `tools/list` for this caller.
+ * HTTP filters per bound grant: anonymous callers never see them.
+ */
+export function advertiseAuthoringTools(kernel: GraneKernel, options?: BuildMcpServerOptions): boolean {
+  if (!authoringToolsEnabled(kernel.config, options)) return false;
+  const transport = options?.transport ?? "stdio";
+  if (transport !== "http") return true;
+  return httpAgentAuthenticated(kernel.agent);
+}
+
+/**
+ * HTTP authoring requires configured `auth.agents`. Call before serving.
+ */
+export function assertHttpAuthoringAgents(config: GraneConfig, options?: BuildMcpServerOptions): void {
+  if (!authoringToolsEnabled(config, { ...options, transport: "http" })) return;
+  if (config.auth.agents.length > 0) return;
+  throw configError(
+    "HTTP authoring MCP requires auth.agents (at least one agent token). " +
+      "Configure auth.agents, or serve authoring locally with grane serve --stdio --authoring.",
+  );
 }
 
 type ToolResult = {
@@ -75,22 +103,67 @@ function refuse(err: unknown): ToolResult {
 
 function requireHttpAgent(kernel: GraneKernel, transport: McpTransport): void {
   if (transport !== "http") return;
-  if (kernel.agent && kernel.agent.id !== "anonymous") return;
+  if (httpAgentAuthenticated(kernel.agent)) return;
   throw configError("Authoring MCP tools on HTTP require an authenticated agent.");
 }
 
-function wrap(
+function sessionIdOf(args: unknown, payload: unknown): string | null {
+  if (args && typeof args === "object") {
+    const id = (args as { session_id?: unknown }).session_id;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  if (payload && typeof payload === "object") {
+    const rec = payload as { session_id?: unknown; session?: { id?: unknown } };
+    if (typeof rec.session_id === "string") return rec.session_id;
+    if (typeof rec.session?.id === "string") return rec.session.id;
+  }
+  return null;
+}
+
+function proposalAuditFields(payload: unknown): { commit: string; branch: string; pr: string } | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const proposal = (payload as { proposal?: Proposal }).proposal;
+  const github = (payload as { github?: GitHubPrPlan }).github;
+  if (!proposal?.commit || !proposal.branch) return undefined;
+  const pr = github?.repo ? `${github.repo}#${github.head}` : (github?.head ?? proposal.branch);
+  return { commit: proposal.commit, branch: proposal.branch, pr };
+}
+
+function wrap<A>(
   kernel: GraneKernel,
   transport: McpTransport,
-  work: () => unknown | Promise<unknown>,
-): () => Promise<ToolResult> {
-  return async () => {
+  tool: AuthoringMcpTool,
+  work: (args: A) => unknown | Promise<unknown>,
+): (args: A) => Promise<ToolResult> {
+  return async (args: A) => {
+    const started = Date.now();
+    let payload: unknown;
+    let err: unknown;
     try {
       requireHttpAgent(kernel, transport);
-      return ok(await work());
-    } catch (err) {
-      return refuse(err);
+      payload = await work(args);
+    } catch (caught) {
+      err = caught;
     }
+    const success = err === undefined;
+    const proposal = success && tool === "submit_proposal" ? proposalAuditFields(payload) : undefined;
+    const operation: AuthoringAuditOperation =
+      success && tool === "submit_proposal" && proposal ? "proposal_created" : tool;
+    try {
+      recordAuthoringAudit(kernel.config, kernel.projectDir, {
+        operation,
+        session_id: sessionIdOf(args, payload),
+        agent: kernel.agent?.id ?? null,
+        duration_ms: Date.now() - started,
+        ...(success ? {} : { refusal: refusalFromError(err) }),
+        ...(proposal ?? {}),
+        http: kernel.http,
+      });
+    } catch (auditErr) {
+      return refuse(auditErr);
+    }
+    if (err !== undefined) return refuse(err);
+    return ok(payload);
   };
 }
 
@@ -114,7 +187,7 @@ export function registerAuthoringTools(
         "Does not write production YAML or pins. Returns a session id.",
       inputSchema: {},
     },
-    wrap(kernel, transport, () => authoringStart(kernel)),
+    wrap(kernel, transport, "authoring_start", () => authoringStart(kernel)),
   );
 
   server.registerTool(
@@ -128,7 +201,7 @@ export function registerAuthoringTools(
         session_id: z.string().describe("Authoring session id from authoring_start"),
       },
     },
-    async ({ session_id }) => wrap(kernel, transport, () => discoverSchema(kernel, session_id))(),
+    wrap(kernel, transport, "discover_schema", ({ session_id }) => discoverSchema(kernel, session_id)),
   );
 
   server.registerTool(
@@ -144,11 +217,10 @@ export function registerAuthoringTools(
         column: z.string().describe("Column name"),
       },
     },
-    async ({ session_id, table, column }) =>
-      wrap(kernel, transport, async () => {
-        const { profile } = await profileColumn(kernel, session_id, table, column);
-        return profile;
-      })(),
+    wrap(kernel, transport, "profile_column", async ({ session_id, table, column }) => {
+      const { profile } = await profileColumn(kernel, session_id, table, column);
+      return profile;
+    }),
   );
 
   server.registerTool(
@@ -162,8 +234,9 @@ export function registerAuthoringTools(
         answer: z.string(),
       },
     },
-    async ({ session_id, term, answer }) =>
-      wrap(kernel, transport, () => recordTerm(kernel, session_id, term, answer))(),
+    wrap(kernel, transport, "record_term", ({ session_id, term, answer }) =>
+      recordTerm(kernel, session_id, term, answer),
+    ),
   );
 
   server.registerTool(
@@ -173,7 +246,7 @@ export function registerAuthoringTools(
       description: "Return unresolved questions for this authoring session.",
       inputSchema: { session_id: z.string() },
     },
-    async ({ session_id }) => wrap(kernel, transport, () => listAmbiguities(kernel, session_id))(),
+    wrap(kernel, transport, "list_ambiguities", ({ session_id }) => listAmbiguities(kernel, session_id)),
   );
 
   server.registerTool(
@@ -187,8 +260,9 @@ export function registerAuthoringTools(
         chosen: z.string().describe("Chosen candidate, usually table.column"),
       },
     },
-    async ({ session_id, id, chosen }) =>
-      wrap(kernel, transport, () => resolveAmbiguity(kernel, session_id, id, chosen))(),
+    wrap(kernel, transport, "resolve_ambiguity", ({ session_id, id, chosen }) =>
+      resolveAmbiguity(kernel, session_id, id, chosen),
+    ),
   );
 
   server.registerTool(
@@ -200,7 +274,7 @@ export function registerAuthoringTools(
         "Drafts stay on the session (status: experimental). They are not loaded into query().",
       inputSchema: { session_id: z.string() },
     },
-    async ({ session_id }) => wrap(kernel, transport, () => proposeDefinitions(kernel, session_id))(),
+    wrap(kernel, transport, "propose_definitions", ({ session_id }) => proposeDefinitions(kernel, session_id)),
   );
 
   server.registerTool(
@@ -211,7 +285,7 @@ export function registerAuthoringTools(
         "Return draft YAML and a structural validation report. Does not execute warehouse queries and does not write production files.",
       inputSchema: { session_id: z.string() },
     },
-    async ({ session_id }) => wrap(kernel, transport, () => previewYaml(kernel, session_id))(),
+    wrap(kernel, transport, "preview_yaml", ({ session_id }) => previewYaml(kernel, session_id)),
   );
 
   server.registerTool(
@@ -226,6 +300,6 @@ export function registerAuthoringTools(
         slug: z.string().optional().describe("Optional proposal slug"),
       },
     },
-    async ({ session_id, slug }) => wrap(kernel, transport, () => submitProposal(kernel, session_id, slug))(),
+    wrap(kernel, transport, "submit_proposal", ({ session_id, slug }) => submitProposal(kernel, session_id, slug)),
   );
 }

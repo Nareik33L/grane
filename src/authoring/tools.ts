@@ -37,6 +37,8 @@ function discoveryFor(kernel: GraneKernel, sessionId: string) {
     sessionId,
     agent: kernel.agent?.id ?? null,
     http: kernel.http,
+    // Outer MCP tool call owns the single audit line.
+    audit: false,
   });
 }
 

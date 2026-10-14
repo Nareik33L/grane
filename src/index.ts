@@ -57,7 +57,14 @@ export {
   type WarehouseCertification,
   type WarehouseServerInfo,
 } from "./connectors/certification.js";
-export { buildMcpServer, CORE_MCP_TOOLS, AUTHORING_MCP_TOOLS, authoringToolsEnabled } from "./mcp/server.js";
+export {
+  buildMcpServer,
+  CORE_MCP_TOOLS,
+  AUTHORING_MCP_TOOLS,
+  authoringToolsEnabled,
+  advertiseAuthoringTools,
+  assertHttpAuthoringAgents,
+} from "./mcp/server.js";
 export { serveStdio, serveHttp, installHttpProcessShutdown, type HttpMcpHandle, type ServeHttpOptions } from "./mcp/transport.js";
 export {
   CLIENT_IDS,
@@ -72,14 +79,17 @@ export { GraneError, type Refusal, ambiguousQuery, invalidQuery, unsafeQuery } f
 export { explorationPolicy, isExplorable, matchColumnPattern } from "./explore/policy.js";
 export { listExplorableColumns } from "./explore/raw.js";
 export { promoteColumn, planPromotion } from "./explore/promote.js";
-export { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired } from "./auth/agents.js";
+export { authenticateAgent, bearerTokenFromHeaders, httpAuthRequired, httpAgentAuthenticated } from "./auth/agents.js";
 export type { AgentGrant } from "./auth/agents.js";
 export {
   recordAudit,
   recordDiscoveryAudit,
+  recordAuthoringAudit,
   discoveryAuditEvent,
+  authoringAuditEvent,
   type AuditEvent,
   type DiscoveryAuditEvent,
+  type AuthoringAuditEvent,
   type HttpAuditContext,
 } from "./audit.js";
 export {

@@ -5,13 +5,19 @@ import { semanticQuerySchema, type TrustLevel } from "../query/model.js";
 import { GraneError } from "../errors.js";
 import { mcpTrustText } from "../query/trust.js";
 import {
-  authoringToolsEnabled,
+  advertiseAuthoringTools,
   registerAuthoringTools,
   type BuildMcpServerOptions,
 } from "./authoring.js";
 
-export type { BuildMcpServerOptions, McpTransport } from "./authoring.js";
-export { AUTHORING_MCP_TOOLS, CORE_MCP_TOOLS, authoringToolsEnabled } from "./authoring.js";
+export type { BuildMcpServerOptions, McpTransport, AuthoringMcpTool } from "./authoring.js";
+export {
+  AUTHORING_MCP_TOOLS,
+  CORE_MCP_TOOLS,
+  advertiseAuthoringTools,
+  assertHttpAuthoringAgents,
+  authoringToolsEnabled,
+} from "./authoring.js";
 
 /**
  * The Grane MCP surface. Deliberately small and difficult to misuse:
@@ -51,7 +57,7 @@ function refuse(err: unknown): ToolResult {
 
 export function buildMcpServer(kernel: GraneKernel, options: BuildMcpServerOptions = {}): McpServer {
   const info = kernel.serverInfo();
-  const authoringOn = authoringToolsEnabled(kernel.config, options);
+  const authoringOn = advertiseAuthoringTools(kernel, options);
   const explorationHint = kernel.config.exploration.enabled
     ? " Exploration is enabled: catalog() also lists permitted raw warehouse columns. " +
       "You may pass raw_dimensions (table.column) or raw_metrics to investigate fields that are not governed. " +

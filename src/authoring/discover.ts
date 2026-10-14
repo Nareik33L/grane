@@ -34,6 +34,11 @@ export interface DiscoveryOptions {
   sessionId?: string | null;
   agent?: string | null;
   http?: HttpAuditContext | null;
+  /**
+   * When false, this instance does not write audit lines (the caller owns the
+   * single outer line). Default true so CLI/setup discovery still logs.
+   */
+  audit?: boolean;
   /** Override setup sampling decision. Default: config.authoring.sampling (on). */
   sampling?: boolean;
   /** Requested sample rows; clamped to {@link DISCOVERY_SAMPLE_ROW_HARD_CAP}. */
@@ -214,6 +219,7 @@ export function createDiscovery(options: DiscoveryOptions): Discovery {
   const policy = explorationPolicy(options.config);
 
   const emit = (input: Omit<DiscoveryAuditInput, "session_id" | "agent" | "connector">): void => {
+    if (options.audit === false) return;
     recordDiscoveryAudit(options.config, options.projectDir, {
       ...input,
       session_id: sessionId,

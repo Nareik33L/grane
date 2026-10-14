@@ -10,8 +10,10 @@ import {
   AUTHORING_MCP_TOOLS,
   CORE_MCP_TOOLS,
   buildMcpServer,
+  type AuthoringMcpTool,
   type BuildMcpServerOptions,
 } from "../../src/mcp/server.js";
+import { serveHttp } from "../../src/mcp/transport.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { getDialect } from "../../src/connectors/dialect.js";
 import type { DatabaseSchema, ExecutedRows, WarehouseConnector } from "../../src/connectors/types.js";
@@ -19,6 +21,7 @@ import { exampleConfig } from "../fixtures.js";
 import { ACTIVE_PIN_PATH, readActivePin } from "../../src/authoring/git.js";
 import { loadSession, sessionPath } from "../../src/authoring/session.js";
 import { GraneError } from "../../src/errors.js";
+import { httpAgentAuthenticated, toGrant } from "../../src/auth/agents.js";
 
 const temps: string[] = [];
 const SECRET_SAMPLE = "SECRET_SAMPLE_VALUE";
@@ -188,6 +191,16 @@ function initRepo(): string {
 
 const MAIN_MCP_TOOLS = ["catalog", "explain", "query", "validate"];
 
+function authorGrant(id = "author") {
+  return {
+    id,
+    metrics: null as string[] | null,
+    dimensions: null as string[] | null,
+    exploration: true,
+    explorationExclude: [] as string[],
+  };
+}
+
 describe("MCP tool list vs main", () => {
   it("without the authoring flag matches main's four-tool list", async () => {
     expect([...CORE_MCP_TOOLS].sort()).toEqual([...MAIN_MCP_TOOLS].sort());
@@ -214,10 +227,10 @@ describe("MCP tool list vs main", () => {
     expect(names).toEqual([...MAIN_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
   });
 
-  it("authoring.enabled with mode=shared registers tools on HTTP", async () => {
+  it("authoring.enabled with mode=shared registers tools on HTTP for an authenticated agent", async () => {
     const dir = tempDir();
     const names = await listNames(
-      kernelFor(dir, { authoring: { enabled: true, mode: "shared" } }),
+      kernelFor(dir, { authoring: { enabled: true, mode: "shared" } }).bindAgent(authorGrant()),
       { transport: "http" },
     );
     expect(names).toEqual([...MAIN_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
@@ -238,9 +251,22 @@ describe("MCP tool list vs main", () => {
     expect(names).toEqual([...MAIN_MCP_TOOLS].sort());
   });
 
-  it("--authoring on HTTP still advertises the nine tools (calls require an agent)", async () => {
+  it("anonymous HTTP never lists authoring tools even with --authoring", async () => {
     const dir = tempDir();
     const names = await listNames(kernelFor(dir), { authoring: true, transport: "http" });
+    expect(names).toEqual([...MAIN_MCP_TOOLS].sort());
+  });
+
+  it("authenticated HTTP lists the nine authoring tools", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir).bindAgent({
+      id: "author",
+      metrics: null,
+      dimensions: null,
+      exploration: true,
+      explorationExclude: [],
+    });
+    const names = await listNames(k, { authoring: true, transport: "http" });
     expect(names).toEqual([...MAIN_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
   });
 });
@@ -259,15 +285,15 @@ describe("authoring MCP tools", () => {
     expect(tools).toMatch(/createDiscovery/);
   });
 
-  it("HTTP calls refuse without an authenticated agent", async () => {
+  it("anonymous HTTP cannot call authoring tools (not on tools/list)", async () => {
     const dir = tempDir();
     const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "http" });
     try {
+      const listed = await client.listTools();
+      expect(listed.tools.map((tool) => tool.name)).not.toContain("authoring_start");
       const result = await client.callTool({ name: "authoring_start", arguments: {} });
       expect(result.isError).toBe(true);
-      const payload = parseTool(result) as Record<string, unknown>;
-      expect(payload.status).toBe("config_error");
-      expect(String(payload.message)).toMatch(/authenticated agent/);
+      expect((result.content as { text: string }[])[0]!.text).toMatch(/not found/i);
     } finally {
       await close();
     }
@@ -336,10 +362,14 @@ describe("authoring MCP tools", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { kind: string; operation: string });
-      expect(events.every((event) => event.kind === "discovery")).toBe(true);
-      expect(events.map((event) => event.operation).sort()).toEqual(
-        ["introspect", "profile", "profile", "relationships"].sort(),
-      );
+      expect(events.every((event) => event.kind === "authoring")).toBe(true);
+      expect(events.some((event) => event.kind === "discovery")).toBe(false);
+      expect(events.map((event) => event.operation)).toEqual([
+        "authoring_start",
+        "discover_schema",
+        "profile_column",
+        "profile_column",
+      ]);
     } finally {
       await close();
     }
@@ -414,6 +444,250 @@ describe("authoring MCP tools", () => {
       expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(headBefore);
       expect(readActivePin(dir)).toBeNull();
       expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    } finally {
+      await close();
+    }
+  });
+});
+
+function readAudit(dir: string, file = join(".grane", "audit.jsonl")): Record<string, unknown>[] {
+  const path = join(dir, file);
+  if (!existsSync(path)) return [];
+  const text = readFileSync(path, "utf8").trim();
+  if (!text) return [];
+  return text.split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+describe("HTTP authoring requires auth.agents", () => {
+  it("serveHttp --authoring refuses when no auth.agents are configured", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir);
+    await expect(serveHttp(k, 0, { authoring: true })).rejects.toBeInstanceOf(GraneError);
+    try {
+      await serveHttp(k, 0, { authoring: true });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as GraneError).refusal.status).toBe("config_error");
+      expect((err as GraneError).message).toMatch(/auth\.agents/);
+    }
+  });
+
+  it("serveHttp with authoring.enabled mode=shared refuses without auth.agents", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, { authoring: { enabled: true, mode: "shared" } });
+    await expect(serveHttp(k, 0)).rejects.toMatchObject({
+      refusal: { status: "config_error" },
+    });
+  });
+
+  it("serveHttp with authoring.enabled mode=local starts without agents (tools stay off HTTP)", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, { authoring: { enabled: true, mode: "local" } });
+    const handle = await serveHttp(k, 0, { onWarning: () => undefined });
+    try {
+      expect(handle.port).toBeGreaterThan(0);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("serveHttp --authoring starts when auth.agents are configured", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, {
+      auth: { agents: [{ id: "author", token: "secret-token-author", exploration: false }] },
+    });
+    const handle = await serveHttp(k, 0, { authoring: true });
+    try {
+      expect(handle.port).toBeGreaterThan(0);
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe("anonymous is grant state, not the id string", () => {
+  it("httpAgentAuthenticated is true for a bound grant whose id is anonymous", () => {
+    expect(httpAgentAuthenticated(null)).toBe(false);
+    expect(httpAgentAuthenticated(undefined)).toBe(false);
+    expect(httpAgentAuthenticated(authorGrant("anonymous"))).toBe(true);
+    expect(httpAgentAuthenticated(authorGrant("author"))).toBe(true);
+  });
+
+  it("a configured agent with id anonymous is granted its allow-list and sees authoring tools", async () => {
+    const dir = tempDir();
+    const configExtra = {
+      auth: {
+        agents: [
+          {
+            id: "anonymous",
+            token: "anon-token",
+            metrics: ["revenue"],
+            dimensions: ["country"],
+            exploration: false,
+          },
+        ],
+      },
+    };
+    const agent = exampleConfig(configExtra).auth.agents[0]!;
+    const k = kernelFor(dir, configExtra).bindAgent(toGrant(agent));
+    expect(k.agent?.id).toBe("anonymous");
+    expect(httpAgentAuthenticated(k.agent)).toBe(true);
+    expect(k.governedCatalog().metrics.map((m) => m.name)).toEqual(["revenue"]);
+    expect(() => k.compile({ metrics: ["payments_received"] })).toThrow(/undefined_metric|not a defined|Unknown/i);
+    try {
+      k.compile({ metrics: ["payments_received"] });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as GraneError).refusal.status).toBe("undefined_metric");
+    }
+
+    const names = await listNames(k, { authoring: true, transport: "http" });
+    expect(names).toEqual([...MAIN_MCP_TOOLS, ...AUTHORING_MCP_TOOLS].sort());
+    const { client, close } = await connectClient(k, { authoring: true, transport: "http" });
+    try {
+      const started = await client.callTool({ name: "authoring_start", arguments: {} });
+      expect(started.isError).toBeFalsy();
+    } finally {
+      await close();
+    }
+  });
+});
+
+type SeedLevel = "none" | "session" | "discovered" | "resolved" | "proposed";
+
+const SUCCESS_SEED: Record<AuthoringMcpTool, SeedLevel> = {
+  authoring_start: "none",
+  discover_schema: "session",
+  profile_column: "session",
+  record_term: "session",
+  list_ambiguities: "session",
+  resolve_ambiguity: "discovered",
+  propose_definitions: "resolved",
+  preview_yaml: "proposed",
+  submit_proposal: "proposed",
+};
+
+async function seedSession(client: Client, level: SeedLevel): Promise<string> {
+  if (level === "none") return "";
+  const started = parseTool(await client.callTool({ name: "authoring_start", arguments: {} })) as {
+    session: { id: string };
+  };
+  const sessionId = started.session.id;
+  if (level === "session") return sessionId;
+  await client.callTool({ name: "discover_schema", arguments: { session_id: sessionId } });
+  if (level === "discovered") return sessionId;
+  const listed = parseTool(
+    await client.callTool({ name: "list_ambiguities", arguments: { session_id: sessionId } }),
+  ) as { id: string; candidates: string[] }[];
+  const amb = listed[0]!;
+  await client.callTool({
+    name: "resolve_ambiguity",
+    arguments: { session_id: sessionId, id: amb.id, chosen: "orders.net_amount" },
+  });
+  await client.callTool({
+    name: "record_term",
+    arguments: { session_id: sessionId, term: "gmv", answer: "Gross merchandise value from orders." },
+  });
+  if (level === "resolved") return sessionId;
+  await client.callTool({ name: "propose_definitions", arguments: { session_id: sessionId } });
+  return sessionId;
+}
+
+function successArgs(tool: AuthoringMcpTool, sessionId: string): Record<string, unknown> {
+  switch (tool) {
+    case "authoring_start":
+      return {};
+    case "discover_schema":
+    case "list_ambiguities":
+    case "propose_definitions":
+    case "preview_yaml":
+      return { session_id: sessionId };
+    case "profile_column":
+      return { session_id: sessionId, table: "orders", column: "net_amount" };
+    case "record_term":
+      return { session_id: sessionId, term: "revenue", answer: "Net sales." };
+    case "resolve_ambiguity":
+      return { session_id: sessionId, id: "amb-revenue-like", chosen: "orders.net_amount" };
+    case "submit_proposal":
+      return { session_id: sessionId, slug: "add-gmv" };
+  }
+}
+
+function expectedSuccessOperation(tool: AuthoringMcpTool): string {
+  return tool === "submit_proposal" ? "proposal_created" : tool;
+}
+
+function refusalArgs(tool: AuthoringMcpTool): Record<string, unknown> {
+  switch (tool) {
+    case "authoring_start":
+      return {};
+    case "profile_column":
+      return { session_id: "missing-session", table: "orders", column: "net_amount" };
+    case "record_term":
+      return { session_id: "missing-session", term: "x", answer: "y" };
+    case "resolve_ambiguity":
+      return { session_id: "missing-session", id: "nope", chosen: "orders.net_amount" };
+    default:
+      return { session_id: "missing-session" };
+  }
+}
+
+describe("exactly one audit line per authoring tool", () => {
+  it.each(AUTHORING_MCP_TOOLS)("success: %s writes exactly one authoring line", async (tool) => {
+    const dir = initRepo();
+    const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "stdio" });
+    try {
+      const sessionId = await seedSession(client, SUCCESS_SEED[tool]);
+      const before = readAudit(dir);
+      const result = await client.callTool({ name: tool, arguments: successArgs(tool, sessionId) });
+      expect(result.isError).toBeFalsy();
+      const after = readAudit(dir);
+      expect(after).toHaveLength(before.length + 1);
+      const line = after[after.length - 1]!;
+      expect(line.kind).toBe("authoring");
+      expect(line.operation).toBe(expectedSuccessOperation(tool));
+      expect(line.refusal).toBeUndefined();
+      expect(JSON.stringify(line)).not.toContain(SECRET_SAMPLE);
+      expect(JSON.stringify(line)).not.toContain(SECRET_PASSWORD);
+      expect(after.filter((event) => event.kind === "discovery")).toEqual(
+        before.filter((event) => event.kind === "discovery"),
+      );
+      if (tool === "submit_proposal") {
+        expect(line.commit).toMatch(/^[0-9a-f]{40}$/);
+        expect(String(line.branch)).toMatch(/^grane\/proposal\//);
+        expect(line.pr).toBeTruthy();
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it.each(AUTHORING_MCP_TOOLS)("refusal: %s writes exactly one authoring line", async (tool) => {
+    const dir = tempDir();
+    const auditFile = join(dir, "audit.jsonl");
+    const kernel =
+      tool === "authoring_start"
+        ? new GraneKernel(
+            exampleConfig({
+              audit: { enabled: true, path: auditFile },
+              exploration: { enabled: true, mode: "denylist", exclude: ["*.email"] },
+            }),
+            { connector: recordingConnector() },
+          )
+        : kernelFor(dir);
+    const { client, close } = await connectClient(kernel, { authoring: true, transport: "stdio" });
+    try {
+      const before = tool === "authoring_start" ? (existsSync(auditFile) ? readAudit(dir, "audit.jsonl") : []) : readAudit(dir);
+      const result = await client.callTool({ name: tool, arguments: refusalArgs(tool) });
+      expect(result.isError).toBe(true);
+      const after = tool === "authoring_start" ? readAudit(dir, "audit.jsonl") : readAudit(dir);
+      expect(after).toHaveLength(before.length + 1);
+      const line = after[after.length - 1]!;
+      expect(line.kind).toBe("authoring");
+      expect(line.operation).toBe(tool);
+      expect(line.refusal).toMatchObject({ status: expect.any(String), message: expect.any(String) });
+      expect(JSON.stringify(line)).not.toContain(SECRET_SAMPLE);
+      expect(after.filter((event) => event.kind === "discovery")).toHaveLength(0);
     } finally {
       await close();
     }

@@ -90,12 +90,51 @@ export interface DiscoveryAuditEvent {
   user_agent?: string | null;
 }
 
+export type AuthoringAuditOperation =
+  | "authoring_start"
+  | "discover_schema"
+  | "profile_column"
+  | "record_term"
+  | "list_ambiguities"
+  | "resolve_ambiguity"
+  | "propose_definitions"
+  | "preview_yaml"
+  | "submit_proposal"
+  | "proposal_created";
+
+/**
+ * One authoring MCP tool call. The outer tool owns this line; nested
+ * `createDiscovery` calls from those tools must not write their own.
+ * Sample values and tokens are never fields. Successful `submit_proposal`
+ * uses `operation: "proposal_created"` plus commit / branch / PR ref.
+ */
+export interface AuthoringAuditEvent {
+  ts: string;
+  kind: "authoring";
+  operation: AuthoringAuditOperation;
+  session_id: string | null;
+  agent: string | null;
+  duration_ms: number;
+  refusal?: {
+    status: string;
+    message: string;
+    requested?: string;
+  };
+  commit?: string;
+  branch?: string;
+  /** Branch/PR ref (`owner/repo#head` or the proposal branch). */
+  pr?: string;
+  request_id?: string;
+  client_ip?: string | null;
+  user_agent?: string | null;
+}
+
 /**
  * One append-only audit record. Never include row payloads, sample values,
  * SQL bind params, or agent tokens. Discriminate on `kind`: query/refusal
- * events always have `query`; auth and discovery events never do.
+ * events always have `query`; auth, discovery, and authoring events never do.
  */
-export type AuditEvent = SemanticAuditEvent | AuthAuditEvent | DiscoveryAuditEvent;
+export type AuditEvent = SemanticAuditEvent | AuthAuditEvent | DiscoveryAuditEvent | AuthoringAuditEvent;
 
 export interface DiscoveryAuditInput {
   ts?: string;
@@ -220,6 +259,55 @@ export function recordDiscoveryAudit(
   input: DiscoveryAuditInput,
 ): void {
   recordAudit(config, projectDir, discoveryAuditEvent(input));
+}
+
+export interface AuthoringAuditInput {
+  ts?: string;
+  operation: AuthoringAuditOperation;
+  session_id: string | null;
+  agent: string | null;
+  duration_ms: number;
+  refusal?: NonNullable<AuthoringAuditEvent["refusal"]>;
+  commit?: string;
+  branch?: string;
+  pr?: string;
+  http?: HttpAuditContext | null;
+}
+
+/**
+ * Build an authoring line from known fields only, so extra keys (samples,
+ * draft YAML, tokens) cannot leak into JSONL.
+ */
+export function authoringAuditEvent(input: AuthoringAuditInput): AuthoringAuditEvent {
+  const event: AuthoringAuditEvent = {
+    ts: input.ts ?? new Date().toISOString(),
+    kind: "authoring",
+    operation: input.operation,
+    session_id: input.session_id,
+    agent: input.agent,
+    duration_ms: input.duration_ms,
+  };
+  if (input.refusal) {
+    event.refusal = {
+      status: input.refusal.status,
+      message: input.refusal.message,
+      ...(input.refusal.requested ? { requested: input.refusal.requested } : {}),
+    };
+  }
+  if (input.commit) event.commit = input.commit;
+  if (input.branch) event.branch = input.branch;
+  if (input.pr) event.pr = input.pr;
+  Object.assign(event, httpFields(input.http));
+  return event;
+}
+
+/** Record one authoring MCP tool call. Fail-closed uses the same `recordAudit` path. */
+export function recordAuthoringAudit(
+  config: GraneConfig,
+  projectDir: string | undefined,
+  input: AuthoringAuditInput,
+): void {
+  recordAudit(config, projectDir, authoringAuditEvent(input));
 }
 
 export function httpFields(http: HttpAuditContext | null | undefined): HttpAuditContext | Record<string, never> {

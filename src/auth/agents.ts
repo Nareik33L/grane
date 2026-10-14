@@ -101,6 +101,15 @@ export function authenticateAgent(
   return "invalid";
 }
 
+/**
+ * HTTP is authenticated when a grant was bound (`kernel.agent` is set).
+ * The literal id `"anonymous"` is a valid configured agent id — it is not a
+ * sentinel for the unauthenticated caller.
+ */
+export function httpAgentAuthenticated(grant: AgentGrant | null | undefined): boolean {
+  return grant != null;
+}
+
 export function metricAllowed(grant: AgentGrant | null | undefined, name: string): boolean {
   if (!grant?.metrics) return true;
   return grant.metrics.includes(name);
