@@ -5,6 +5,7 @@
  */
 
 import { toGrant } from "../../../src/auth/agents.js";
+import { runAuthoringActivateGauntlet } from "../authoring-activate.js";
 import { GOLD, GOLD_SQL } from "../gold.js";
 import { gauntletConfig } from "../model.js";
 import { BLOCKED_COLUMNS } from "../data.js";
@@ -29,6 +30,7 @@ export function trapScenarios(): Scenario[] {
     ...provenanceTraps(),
     ...readonlyTraps(),
     ...agentTraps(),
+    ...authoringActivateTraps(),
   ];
 }
 
@@ -810,6 +812,24 @@ function agentTraps(): Scenario[] {
       query: { metrics: ["revenue"], raw_dimensions: ["orders.discount_code"] },
       expectation: { kind: "refuse", statuses: ["exploration_disabled"], reason: "agent grant" },
       guessSeverity: "security",
+    }),
+  ];
+}
+
+function authoringActivateTraps(): Scenario[] {
+  return [
+    sc({
+      id: "mcp/agent-cannot-activate-demo-yaml",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "The agent tries to activate its own demo YAML and pin .grane/active.json.",
+      interpretation:
+        "A real MCP client with authoring walks Set up Grane through submit_proposal. Writes to .grane/ are refused. No pin.",
+      expectedSqlBehaviour: "n/a — no warehouse SQL.",
+      expectation: { kind: "refuse", reason: "no activate tool", statuses: ["config_error"] },
+      custom: async () => runAuthoringActivateGauntlet(),
     }),
   ];
 }

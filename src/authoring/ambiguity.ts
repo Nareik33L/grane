@@ -1,15 +1,17 @@
 import {
+  grainUniqueColumns,
   isCompositePrimaryKey,
   tablePrimaryKey,
   tablePrimaryKeyColumns,
   type DatabaseSchema,
   type TableInfo,
 } from "../connectors/types.js";
-import { isNumericType, isTemporalType } from "../connectors/dialect.js";
+import { isNumericType, looksTemporal } from "../connectors/dialect.js";
 import { RelationshipGraph, describeJoinPath } from "../model/graph.js";
 import { parseColumnRef } from "../model/refs.js";
 import type { RelationshipConfig } from "../config/schema.js";
 import type { OpenAmbiguity, ResolvedAmbiguity } from "./session.js";
+import { compareOrdinal } from "./yaml-merge.js";
 
 /**
  * Ambiguity classes V2-10 detects. Authoring asks; it does not guess.
@@ -54,11 +56,39 @@ export function quoteTableColumn(table: string, column: string): string {
 export interface DetectAmbiguitiesInput {
   schema: DatabaseSchema;
   relationships?: Record<string, { from: string; to: string; type: string }>;
+  /** Resolved grain (and later answers) so detection and glossary binding share one rule. */
+  session?: { resolved_ambiguities?: ReadonlyArray<Pick<ResolvedAmbiguity, "id" | "kind" | "chosen">> };
+}
+
+/**
+ * Unique revenue-like columns on tables with a usable grain. One shared rule
+ * for detection and glossary binding: introspected single-column PRIMARY KEY,
+ * single-column UNIQUE grain, or a later-resolved `primary_key` choice.
+ */
+export function uniqueRevenueLikeSources(
+  schema: DatabaseSchema,
+  session: DetectAmbiguitiesInput["session"] = {},
+): { table: string; column: string }[] {
+  const resolved = { resolved_ambiguities: session?.resolved_ambiguities ?? [] };
+  const sources: { table: string; column: string }[] = [];
+  for (const table of schema.tables) {
+    if (!resolvedEntityPrimaryKey(resolved, schema, table.name)) continue;
+    const cols = table.columns.filter(
+      (column) => looksRevenueLike(column.name, column.dataType) && !looksNonAdditive(column.name, column.dataType),
+    );
+    if (cols.length !== 1) continue;
+    sources.push({ table: table.name, column: cols[0]!.name });
+  }
+  sources.sort((a, b) => compareOrdinal(`${a.table}.${a.column}`, `${b.table}.${b.column}`));
+  return sources;
 }
 
 export function revenueLikeAmbiguityId(table: string): string {
   return `amb-revenue-like-${table}`;
 }
+
+/** Cross-table unique revenue-like columns — not a warehouse-specific table name. */
+export const CROSS_TABLE_REVENUE_LIKE_ID = "amb-revenue-like";
 
 export function dateColumnsAmbiguityId(table: string): string {
   return `amb-date-${table}`;
@@ -88,9 +118,7 @@ export function looksNonAdditive(column: string, dataType: string): boolean {
   return isNumericType(dataType) && NON_ADDITIVE_NAME.test(column);
 }
 
-export function looksTemporal(column: string, dataType: string): boolean {
-  return isTemporalType(dataType) || /(_at|_on|date|time|day)$/i.test(column);
-}
+export { looksTemporal } from "../connectors/dialect.js";
 
 export function parseNonAdditiveAmbiguityId(id: string): { table: string; column: string } | null {
   const match = /^amb-non-additive-([A-Za-z_][A-Za-z0-9_]*)-([A-Za-z_][A-Za-z0-9_]*)$/.exec(id);
@@ -240,7 +268,10 @@ export function resolvedEntityPrimaryKey(
   if (chosen) {
     const parsed = parseColumnRef(chosen);
     if (parsed?.table === table) {
-      if (isCompositePrimaryKey(info) && !(info?.uniqueColumns ?? []).includes(parsed.column)) {
+      if (isCompositePrimaryKey(info) && !grainUniqueColumns(info).includes(parsed.column)) {
+        return undefined;
+      }
+      if ((info?.uniqueColumns ?? []).includes(parsed.column) && !grainUniqueColumns(info).includes(parsed.column)) {
         return undefined;
       }
       return parsed.column;
@@ -255,7 +286,7 @@ export function resolvedEntityPrimaryKey(
  */
 export function detectAmbiguities(input: DetectAmbiguitiesInput): OpenAmbiguity[] {
   const found: OpenAmbiguity[] = [
-    ...detectRevenueLike(input.schema),
+    ...detectRevenueLike(input.schema, input.session),
     ...detectDateColumns(input.schema),
     ...detectNonAdditive(input.schema),
     ...detectFanoutJoins(input.relationships ?? {}),
@@ -278,7 +309,7 @@ function primaryKeyAmbiguity(table: TableInfo): OpenAmbiguity | null {
   const pkCols = tablePrimaryKeyColumns(table);
   if (pkCols.length === 1) return null;
   if (isCompositePrimaryKey(table)) {
-    const unique = table.uniqueColumns ?? [];
+    const unique = grainUniqueColumns(table);
     if (unique.length === 0) return null;
     return {
       id: primaryKeyAmbiguityId(table.name),
@@ -315,20 +346,36 @@ function detectPrimaryKeys(schema: DatabaseSchema): OpenAmbiguity[] {
   return out;
 }
 
-function detectRevenueLike(schema: DatabaseSchema): OpenAmbiguity[] {
+function detectRevenueLike(
+  schema: DatabaseSchema,
+  session?: DetectAmbiguitiesInput["session"],
+): OpenAmbiguity[] {
   const out: OpenAmbiguity[] = [];
   for (const table of schema.tables) {
-    const candidates = table.columns
-      .filter((column) => looksRevenueLike(column.name, column.dataType))
-      .map((column) => `${table.name}.${column.name}`);
-    if (candidates.length < 2) continue;
+    const revenueCols = table.columns.filter((column) => looksRevenueLike(column.name, column.dataType));
+    const candidates = revenueCols.map((column) => `${table.name}.${column.name}`);
+    if (candidates.length >= 2) {
+      out.push({
+        id: revenueLikeAmbiguityId(table.name),
+        kind: "revenue_like_columns",
+        question:
+          `Which column on ${quoteIdent(table.name)} is governed revenue? ` +
+          `Grane will not guess. Candidates are column names only.`,
+        candidates,
+      });
+    }
+  }
+  const uniqueSources = uniqueRevenueLikeSources(schema, session).map(
+    (item) => `${item.table}.${item.column}`,
+  );
+  if (uniqueSources.length >= 2) {
     out.push({
-      id: revenueLikeAmbiguityId(table.name),
+      id: CROSS_TABLE_REVENUE_LIKE_ID,
       kind: "revenue_like_columns",
       question:
-        `Which column on ${quoteIdent(table.name)} is governed revenue? ` +
-        `Grane will not guess. Candidates are column names only.`,
-      candidates,
+        "Which column is governed revenue? Several tables have a single revenue-like column. " +
+        "Grane will not guess.",
+      candidates: uniqueSources,
     });
   }
   return out;
@@ -424,11 +471,12 @@ function detectFanoutJoins(
           id,
           kind: "fanout_join",
           question:
-            `Joining ${quoteIdent(parent)} to ${quoteIdent(child)} multiplies rows ` +
-            `(one ${quoteIdent(parent)} row matches many ${quoteIdent(child)} rows). ` +
-            `How should measures be combined? Choose "preaggregate" to keep the relationship ` +
-            `(Grane pre-aggregates the many side at query time) or "do_not_join" to omit it ` +
-            `from the draft. Unresolved fan-out is not written. Grane will not guess.`,
+            `Joining ${quoteIdent(parent)} to ${quoteIdent(child)} multiplies rows: ` +
+            `one ${quoteIdent(parent)} row matches many ${quoteIdent(child)} rows, so measures ` +
+            `would be counted more than once. Choose "preaggregate" to keep the relationship — ` +
+            `Grane totals the many side first, then joins, so ${quoteIdent(parent)} measures are ` +
+            `not double-counted. Choose "do_not_join" to leave this relationship out of the draft. ` +
+            `Unresolved fan-out is not written. Grane will not guess.`,
           candidates: [...FANOUT_CANDIDATES],
         });
       }

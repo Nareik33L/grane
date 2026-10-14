@@ -77,7 +77,7 @@ function seedAmbiguities(
   return mergeAmbiguities(
     session.open_ambiguities,
     session.resolved_ambiguities,
-    detectAmbiguities({ schema, relationships }),
+    detectAmbiguities({ schema, relationships, session }),
   );
 }
 
@@ -314,7 +314,7 @@ export function previewYaml(kernel: GraneKernel, sessionId: string): {
       writeFileSync(path, contents);
     }
     const loaded = loadConfig(tmp);
-    const report = validateModel(new SemanticModel(loaded.config));
+    const report = validateModel(new SemanticModel(loaded.config), undefined, { generated: true });
     return {
       files: session.draft_yaml,
       validation: {

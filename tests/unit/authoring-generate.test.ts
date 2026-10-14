@@ -7,7 +7,11 @@ import * as publicApi from "../../src/index.js";
 import { generateDraftYaml } from "../../src/authoring/generate.js";
 import { createSession } from "../../src/authoring/session.js";
 import { applyPrimaryKeys, applySingleColumnUniques, type DatabaseSchema } from "../../src/connectors/types.js";
-import { PRIMARY_KEY_SKIP, primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
+import {
+  CROSS_TABLE_REVENUE_LIKE_ID,
+  PRIMARY_KEY_SKIP,
+  primaryKeyAmbiguityId,
+} from "../../src/authoring/ambiguity.js";
 import { loadConfig } from "../../src/config/load.js";
 import { validateModel } from "../../src/validate/validate.js";
 import { SemanticModel } from "../../src/model/model.js";
@@ -183,6 +187,30 @@ describe("generateDraftYaml", () => {
     expect(files["entities.yml"]).not.toMatch(/primary_key:\s*tenant_id/);
   });
 
+  it("refuses a nullable UNIQUE column as grain", () => {
+    const dir = tempDir();
+    const session = sessionWithRevenue(dir);
+    const schema = productsSchema();
+    schema.tables[0]!.primaryKey = undefined;
+    schema.tables[0]!.primaryKeyColumns = ["tenant_id", "product_id"];
+    schema.tables[0]!.uniqueColumns = ["sku"];
+    schema.tables[0]!.columns[0]!.nullable = true;
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      resolved_ambiguities: [
+        ...session.resolved_ambiguities,
+        {
+          id: primaryKeyAmbiguityId("products"),
+          kind: "primary_key",
+          question: "nullable unique",
+          candidates: ["products.sku", PRIMARY_KEY_SKIP],
+          chosen: "products.sku",
+        },
+      ],
+    });
+    expect(() => generateDraftYaml({ session: resolved, schema, inferred: {} })).toThrow(/products/);
+  });
+
   it("honours skip on a keyless table", () => {
     const dir = tempDir();
     const schema = productsSchema();
@@ -240,6 +268,244 @@ describe("generateDraftYaml", () => {
     expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(
       /Skipped tables without a usable primary key: products/,
     );
+  });
+
+  it("lists composite-PK and keyless tables instead of silently dropping them", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "inventory_levels",
+          primaryKeyColumns: ["warehouse_id", "sku"],
+          uniqueColumns: ["loc_code"],
+          columns: [
+            { name: "warehouse_id", dataType: "integer", nullable: false },
+            { name: "sku", dataType: "text", nullable: false },
+            { name: "loc_code", dataType: "text", nullable: true },
+            { name: "on_hand", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "event_stream",
+          columns: [
+            { name: "payload", dataType: "text", nullable: true },
+            { name: "ts", dataType: "bigint", nullable: true },
+            { name: "amount", dataType: "numeric", nullable: true },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+    });
+    const { files, skipped_tables } = generateDraftYaml({ session, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
+    expect(skipped_tables).toEqual(["event_stream", "inventory_levels"]);
+    expect(files["entities.yml"]).not.toMatch(/inventory_levels|event_stream/);
+  });
+
+  it("binds a glossary term to the unique revenue-like column when there is only one", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
+            { name: "completed_at", dataType: "timestamptz", nullable: true },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue on the demo shop." }],
+    });
+    const { files } = generateDraftYaml({ session, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/revenue:/);
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{orders\.net_amount\}/);
+    expect(files["metrics.yml"]).toMatch(/description:\s*Completed order revenue on the demo shop\./);
+    expect(files["entities.yml"]).toMatch(/primary_key:\s*id/);
+  });
+
+  it("binds a glossary term on a keyless table after the user resolves the grain", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "event_stream",
+          columns: [
+            { name: "event_id", dataType: "integer", nullable: false },
+            { name: "amount", dataType: "numeric", nullable: false },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const unresolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Event amount." }],
+    });
+    expect(() => generateDraftYaml({ session: unresolved, schema, inferred: {} })).toThrow(/Nothing to propose/);
+
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Event amount." }],
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key",
+          question: "Which column is the entity grain?",
+          candidates: ["event_stream.event_id", "skip"],
+          chosen: "event_stream.event_id",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: resolved, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/revenue:/);
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{event_stream\.amount\}/);
+    expect(files["entities.yml"]).toMatch(/primary_key:\s*event_id/);
+  });
+
+  it("asks instead of dropping the glossary metric when a later-resolved keyless table joins unique sources", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "event_stream",
+          columns: [
+            { name: "event_id", dataType: "integer", nullable: false },
+            { name: "amount", dataType: "numeric", nullable: false },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const afterGrain = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key",
+          question: "Which column is the entity grain?",
+          candidates: ["event_stream.event_id", "skip"],
+          chosen: "event_stream.event_id",
+        },
+      ],
+    });
+    expect(() => generateDraftYaml({ session: afterGrain, schema, inferred: {} })).toThrow(/Nothing to propose/);
+
+    const chosen = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Event amount." }],
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key",
+          question: "Which column is the entity grain?",
+          candidates: ["event_stream.event_id", "skip"],
+          chosen: "event_stream.event_id",
+        },
+        {
+          id: CROSS_TABLE_REVENUE_LIKE_ID,
+          kind: "revenue_like_columns",
+          question: "Which column is governed revenue?",
+          candidates: ["orders.net_amount", "event_stream.amount"],
+          chosen: "event_stream.amount",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: chosen, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{event_stream\.amount\}/);
+    expect(files["metrics.yml"]).not.toMatch(/orders\.net_amount/);
+  });
+
+  it("does not prefer a table named orders when several unique revenue-like columns exist", () => {
+    const dir = tempDir();
+    const schema: DatabaseSchema = {
+      schemaName: "public",
+      tables: [
+        {
+          schema: "public",
+          name: "orders",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "net_amount", dataType: "numeric", nullable: false },
+          ],
+        },
+        {
+          schema: "public",
+          name: "products",
+          primaryKey: "id",
+          primaryKeyColumns: ["id"],
+          columns: [
+            { name: "id", dataType: "integer", nullable: false },
+            { name: "price", dataType: "numeric", nullable: false },
+          ],
+        },
+      ],
+      foreignKeys: [],
+    };
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+    });
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/Nothing to propose/);
+
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      glossary_answers: [{ term: "revenue", answer: "Completed order revenue." }],
+      resolved_ambiguities: [
+        {
+          id: "amb-revenue-like",
+          kind: "revenue_like_columns",
+          question: "Which column is governed revenue?",
+          candidates: ["orders.net_amount", "products.price"],
+          chosen: "products.price",
+        },
+      ],
+    });
+    const { files } = generateDraftYaml({ session: resolved, schema, inferred: {} });
+    expect(files["metrics.yml"]).toMatch(/sql:\s*\$\{products\.price\}/);
+    expect(files["metrics.yml"]).not.toMatch(/orders\.net_amount/);
   });
 
   it("includes the glossary answer as the metric description", () => {

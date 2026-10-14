@@ -5,10 +5,11 @@ import {
   type SemanticModel,
   type Metric,
 } from "../model/model.js";
-import { parseColumnRef } from "../model/refs.js";
+import { parseColumnRef, type ColumnRef } from "../model/refs.js";
 import {
   isNumericType,
   isTemporalType,
+  looksTemporal,
 } from "../connectors/dialect.js";
 import type { DatabaseSchema } from "../connectors/types.js";
 import { isReservedInternalIdent, reservedInternalMessage } from "../compile/internal-namespace.js";
@@ -48,7 +49,19 @@ export interface ValidationReport {
   relationshipCount: number;
 }
 
-export function validateModel(model: SemanticModel, schema?: DatabaseSchema): ValidationReport {
+export interface ValidateOptions {
+  /**
+   * Authoring/generated drafts: temporal semi-additive group_by is an error.
+   * Existing unpinned YAML: warning only (no-pin = today).
+   */
+  generated?: boolean;
+}
+
+export function validateModel(
+  model: SemanticModel,
+  schema?: DatabaseSchema,
+  options?: ValidateOptions,
+): ValidationReport {
   const issues: ValidationIssue[] = [];
   const tableColumns = buildSchemaIndex(schema);
 
@@ -195,7 +208,13 @@ export function validateModel(model: SemanticModel, schema?: DatabaseSchema): Va
       : [];
     const metricIssues = [
       ...reserved,
-      ...validateMetric(model, metric, checkColumnFactory(issues, tableColumns), columnType),
+      ...validateMetric(
+        model,
+        metric,
+        checkColumnFactory(issues, tableColumns),
+        columnType,
+        Boolean(options?.generated),
+      ),
     ];
     issues.push(...metricIssues);
     const ok = metricIssues.every((i) => i.severity !== "error");
@@ -258,6 +277,7 @@ function validateMetric(
   metric: Metric,
   checkColumn: CheckColumn,
   columnType: (table: string, column: string) => string | null,
+  generated: boolean,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const subject = `metric:${metric.name}`;
@@ -385,6 +405,15 @@ function validateMetric(
           code: "vacuous_semi_additive_group_by",
           subject,
           message: vacuousSnapshotSeriesMessage(metric, vacuousKeys),
+        });
+      }
+      const temporalKeys = temporalSemiAdditiveGroupByKeys(metric, columnType);
+      if (temporalKeys.length > 0) {
+        issues.push({
+          severity: generated ? "error" : "warning",
+          code: "temporal_semi_additive_group_by",
+          subject,
+          message: temporalSemiAdditiveGroupByMessage(metric, temporalKeys),
         });
       }
     }
@@ -559,6 +588,36 @@ function validateExplorationPatterns(
       });
     }
   }
+}
+
+/**
+ * `group_by` keys that are the time_dimension or a time-like column (including
+ * `ts` bigint, `period` varchar, `as_of` text). Grouping by them keeps one row
+ * per timestamp and sums every snapshot.
+ */
+export function temporalSemiAdditiveGroupByKeys(
+  metric: Metric,
+  columnType: (table: string, column: string) => string | null,
+): ColumnRef[] {
+  const spec = metric.semiAdditive;
+  if (!spec || spec.keys.length === 0) return [];
+  const time = metric.timeDimension;
+  return spec.keys.filter((key) => {
+    if (time && key.table === time.table && key.column === time.column) return true;
+    const type = key.table ? columnType(key.table, key.column) : null;
+    return looksTemporal(key.column, type ?? "");
+  });
+}
+
+export function temporalSemiAdditiveGroupByMessage(metric: Metric, keys: ColumnRef[]): string {
+  const named = keys.map((key) => `${key.table}.${key.column}`).join(", ");
+  return (
+    `Semi-additive metric "${metric.name}" uses semi_additive.group_by on a time dimension ` +
+    `or time-like column (${named}). Grouping by the metric time_dimension (or columns that ` +
+    `track time when stored as number/text, such as ts, period, as_of) keeps one row per ` +
+    `timestamp and sums every snapshot. Use group_by: [] for one global snapshot, or a ` +
+    `non-temporal series key.`
+  );
 }
 
 function buildSchemaIndex(schema?: DatabaseSchema): Map<string, Map<string, string>> | null {

@@ -7,7 +7,7 @@ import { ACTIVE_PIN_PATH, readActivePin } from "../../src/authoring/git.js";
 import { writeInitProject } from "../../src/cli/init-project.js";
 import { loadConfig } from "../../src/config/load.js";
 import { WAREHOUSE_TYPES } from "../../src/connectors/dialect.js";
-import { DEMO_QUESTION, type DemoResult } from "../../src/demo/run.js";
+import { DEFAULT_DEMO_POSTGRES, DEMO_QUESTION, demoPostgresUrl, type DemoResult } from "../../src/demo/run.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { formatValidateReport } from "../../src/validate/format.js";
 import {
@@ -27,10 +27,19 @@ import {
   type RunSetupOptions,
   type SetupResult,
 } from "../../src/setup/run.js";
+import { DEMO_AUTHORING_QUESTION, assertNotExistingGitRepo } from "../../src/setup/demo-postgres.js";
 import {
+  MAIN_WIZARD_DEMO_TRANSCRIPT,
+  MAIN_WIZARD_OWN_TRANSCRIPT,
+  MAIN_WIZARD_PATH_COPY,
+} from "../fixtures/setup-wizard-main.js";
+import {
+  DEMO_ENGINE_QUESTION,
+  DEMO_YAML_QUESTION,
   EXISTING_YAML_QUESTION,
   PATH_CHOICES,
   PATH_QUESTION,
+  demoReviewLine,
   pathReviewLine,
   promptSetupAnswers,
 } from "../../src/setup/wizard.js";
@@ -465,6 +474,112 @@ audit:
     expect(logs.join("\n")).toContain(SETUP_BANNER.split("\n")[0]);
   });
 
+  it("--yes --path demo --postgres uses shipped YAML via runDemo({ postgres: true })", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    let seenPostgres: boolean | undefined;
+    const result = await runSetup({
+      yes: true,
+      path: "demo",
+      postgres: true,
+      dir: demoDir,
+      skipConnect: true,
+      stdinIsTty: false,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: quiet,
+      runDemoFn: async (opts) => {
+        seenPostgres = Boolean(opts.postgres);
+        return stubDemo(demoDir);
+      },
+    });
+    expect(seenPostgres).toBe(true);
+    expect(result.path).toBe("demo");
+    expect(result.warehouse).toBe("postgres");
+    expect(result.demoEngine).toBe("postgres");
+    expect(result.demoYaml).toBe("shipped");
+    expect(result.question).toBe(DEMO_QUESTION);
+    expect(existsSync(join(demoDir, ACTIVE_PIN_PATH))).toBe(false);
+  });
+
+  it("--yes --path demo --postgres --authoring writes a git project, no pin, no production YAML overwrite of the parent", async () => {
+    const dir = tempDir();
+    const result = await runSetup({
+      yes: true,
+      path: "demo",
+      postgres: true,
+      authoring: true,
+      dir,
+      skipConnect: true,
+      stdinIsTty: false,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: quiet,
+      runDemoAuthoringFn: async () => undefined,
+    });
+    expect(result.path).toBe("demo");
+    expect(result.warehouse).toBe("postgres");
+    expect(result.demoYaml).toBe("authoring");
+    expect(result.question).toBe(DEMO_AUTHORING_QUESTION);
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(readActivePin(dir)).toBeNull();
+    const yaml = readFileSync(join(dir, "grane.yml"), "utf8");
+    expect(yaml).toMatch(/type:\s*postgres/);
+    expect(yaml).toMatch(/authoring:\n\s+enabled:\s*true/);
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).toMatch(/metrics:\s*\{\}/);
+    const git = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir, encoding: "utf8" });
+    expect(git.status).toBe(0);
+    expect(git.stdout.trim()).toBe("main");
+    const branches = spawnSync("git", ["branch"], { cwd: dir, encoding: "utf8" }).stdout;
+    expect(branches).not.toMatch(/grane\/proposal/);
+  });
+
+  it("demo authoring refuses --dir that is already a git repository", async () => {
+    const dir = tempDir();
+    const git = spawnSync("git", ["init", "-b", "main"], { cwd: dir, encoding: "utf8" });
+    expect(git.status).toBe(0);
+    expect(() => assertNotExistingGitRepo(dir)).toThrow(/already a git repository/);
+    await expect(
+      runSetup({
+        yes: true,
+        path: "demo",
+        postgres: true,
+        authoring: true,
+        dir,
+        skipConnect: true,
+        stdinIsTty: false,
+        homeDir: tempDir(),
+        workspaceDir: tempDir(),
+        io: quiet,
+      }),
+    ).rejects.toThrow(/already a git repository/);
+  });
+
+  it("demo postgres url uses GRANE_DEMO_DATABASE_URL and ignores DATABASE_URL", () => {
+    expect(
+      demoPostgresUrl({ DATABASE_URL: "postgres://prod.example/db", GRANE_DEMO_DATABASE_URL: undefined }),
+    ).toBe(DEFAULT_DEMO_POSTGRES);
+    expect(
+      demoPostgresUrl({
+        DATABASE_URL: "postgres://prod.example/db",
+        GRANE_DEMO_DATABASE_URL: "postgres://demo.example/shop",
+      }),
+    ).toBe("postgres://demo.example/shop");
+  });
+
+  it("demo authoring without --postgres is refused", async () => {
+    await expect(
+      runSetup({
+        yes: true,
+        path: "demo",
+        authoring: true,
+        skipConnect: true,
+        stdinIsTty: false,
+        io: quiet,
+      }),
+    ).rejects.toThrow(/requires demo Postgres/);
+  });
+
   it("own path writes a project, persists the URL, validates offline, and connects", async () => {
     const home = tempDir();
     const workspace = tempDir();
@@ -579,7 +694,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: { log: (line) => logs.push(line), error: () => undefined },
-      prompt: scriptedPrompter({ select: ["no", "demo", "skip"] }),
+      prompt: scriptedPrompter({ select: ["no", "demo", "duckdb", "skip"] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -618,7 +733,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["no", "own", BACK, "demo", "skip"] }),
+      prompt: scriptedPrompter({ select: ["no", "own", BACK, "demo", "duckdb", "skip"] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -657,7 +772,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["no", "demo", "skip", "cursor"], confirm: [BACK, true] }),
+      prompt: scriptedPrompter({ select: ["no", "demo", "duckdb", "skip", "cursor"], confirm: [BACK, true] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.client).toBe("cursor");
@@ -937,7 +1052,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["yes", "no", "demo"], confirm: [BACK, true] }),
+      prompt: scriptedPrompter({ select: ["yes", "no", "demo", "duckdb"], confirm: [BACK, true] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -984,39 +1099,33 @@ describe("SetupResult.warehouse null handling", () => {
 });
 
 describe("wizard existing-YAML fork", () => {
-  it("freezes demo/own path copy as byte-identical to today", () => {
-    expect(PATH_QUESTION).toBe("How do you want to start?");
-    expect(PATH_CHOICES).toEqual([
-      {
-        value: "demo",
-        label: "Try Grane's demo shop",
-        hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
-      },
-      {
-        value: "own",
-        label: "Connect my own data",
-        hint: "Any warehouse Grane already supports. We write grane.yml, validate, then connect an agent.",
-      },
-    ]);
-    expect(pathReviewLine("demo")).toBe("demo shop (DuckDB)");
-    expect(pathReviewLine("own")).toBe("own data");
+  it("freezes demo/own path copy as byte-identical to main", () => {
     expect({
       PATH_QUESTION,
       PATH_CHOICES,
       demoReview: pathReviewLine("demo"),
       ownReview: pathReviewLine("own"),
-    }).toMatchSnapshot();
+    }).toEqual(MAIN_WIZARD_PATH_COPY);
   });
 
-  it("demo path after answering no matches the frozen wizard transcript", async () => {
+  it("demo path after answering no matches main plus a defaulted warehouse question", async () => {
     const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["no", "demo"] }));
     const answers = await promptSetupAnswers(wizardOpts(prompt, io));
     expect(answers.path).toBe("demo");
+    expect(answers.demoEngine).toBe("duckdb");
     expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
-    expect(transcript.slice(1)).toMatchSnapshot();
+    const afterExisting = transcript.slice(1);
+    const [pathStep, warehouseStep, ...rest] = afterExisting;
+    expect(pathStep).toEqual(MAIN_WIZARD_DEMO_TRANSCRIPT[0]);
+    expect(warehouseStep).toMatchObject({
+      kind: "select",
+      question: DEMO_ENGINE_QUESTION,
+      defaultValue: "duckdb",
+    });
+    expect(rest).toEqual(MAIN_WIZARD_DEMO_TRANSCRIPT.slice(1));
   });
 
-  it("own path after answering no matches the frozen wizard transcript", async () => {
+  it("own path after answering no matches the main fixture transcript", async () => {
     const { prompt, io, transcript } = recordingPrompter(
       scriptedPrompter({
         select: ["no", "own", "postgres"],
@@ -1027,7 +1136,7 @@ describe("wizard existing-YAML fork", () => {
     expect(answers.path).toBe("own");
     expect(answers.engine).toBe("postgres");
     expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
-    expect(transcript.slice(1)).toMatchSnapshot();
+    expect(transcript.slice(1)).toEqual(MAIN_WIZARD_OWN_TRANSCRIPT);
   });
 
   it("answering yes never enters path, warehouse, or client steps", async () => {
@@ -1044,6 +1153,37 @@ describe("wizard existing-YAML fork", () => {
     expect(questions).not.toContain(PATH_QUESTION);
     expect(questions).not.toContain("Which warehouse?");
     expect(questions).not.toContain("Which agent should Grane register with?");
+    expect(questions).not.toContain(DEMO_ENGINE_QUESTION);
+    expect(questions).not.toContain(DEMO_YAML_QUESTION);
+  });
+
+  it("demo Postgres path offers shipped YAML or authoring, with back-nav", async () => {
+    const { prompt, io, transcript } = recordingPrompter(
+      scriptedPrompter({
+        select: ["no", "demo", "postgres", BACK, "postgres", "shipped"],
+      }),
+    );
+    const answers = await promptSetupAnswers(wizardOpts(prompt, io));
+    expect(answers.path).toBe("demo");
+    expect(answers.demoEngine).toBe("postgres");
+    expect(answers.demoYaml).toBe("shipped");
+    expect(demoReviewLine(answers.demoEngine, answers.demoYaml)).toBe("demo Postgres (shipped YAML)");
+    const questions = transcript
+      .filter((e) => e.kind === "select")
+      .map((e) => String(e.question));
+    expect(questions).toContain(DEMO_ENGINE_QUESTION);
+    expect(questions).toContain(DEMO_YAML_QUESTION);
+    expect(questions.filter((q) => q === DEMO_YAML_QUESTION).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("demo Postgres authoring path is a distinct review line", async () => {
+    const { prompt, io } = recordingPrompter(
+      scriptedPrompter({ select: ["no", "demo", "postgres", "authoring"] }),
+    );
+    const answers = await promptSetupAnswers(wizardOpts(prompt, io));
+    expect(answers.demoEngine).toBe("postgres");
+    expect(answers.demoYaml).toBe("authoring");
+    expect(demoReviewLine("postgres", "authoring")).toBe("demo Postgres (author YAML)");
   });
 });
 

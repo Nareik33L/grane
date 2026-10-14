@@ -12,6 +12,7 @@ import {
   resolvedEntityPrimaryKey,
   resolvedTimeColumn,
   semiAdditiveGroupById,
+  uniqueRevenueLikeSources,
 } from "./ambiguity.js";
 import type { AuthoringSession } from "./session.js";
 import { compareOrdinal, mergeNamedDefs } from "./yaml-merge.js";
@@ -34,6 +35,27 @@ export interface GenerateDraftResult {
 
 function parseColumn(ref: string): { table: string; column: string } | null {
   return parseColumnRef(ref);
+}
+
+/**
+ * Glossary terms bind to a unique revenue-like column when there is no
+ * revenue_like_columns ambiguity. One candidate is not a guess. Several
+ * unique sources: return null so detectAmbiguities asks rather than picking
+ * a table by name.
+ */
+function uniqueRevenueLikeSource(
+  session: AuthoringSession,
+  schema: DatabaseSchema,
+  slug: string,
+): { table: string; column: string } | null {
+  const sources = uniqueRevenueLikeSources(schema, session);
+  if (sources.length === 0) return null;
+  const compact = slug.replace(/_/g, "");
+  const named = sources.filter(
+    (item) => item.column === slug || item.column.replace(/_/g, "") === compact,
+  );
+  if (named.length === 1) return named[0]!;
+  return sources.length === 1 ? sources[0]! : null;
 }
 
 function sortRecord<T>(obj: Record<string, T>): Record<string, T> {
@@ -171,7 +193,9 @@ export function generateDraftYaml(input: GenerateDraftInput): GenerateDraftResul
     const fromResolved = session.resolved_ambiguities.find(
       (item) => item.kind === "revenue_like_columns" && parseColumn(item.chosen),
     );
-    const parsed = fromResolved ? parseColumn(fromResolved.chosen) : null;
+    const parsed = fromResolved
+      ? parseColumn(fromResolved.chosen)
+      : uniqueRevenueLikeSource(session, schema, slug);
     if (!parsed) continue;
     if (slug === "revenue" && metrics.revenue) {
       if (entry.answer && !metrics.revenue.description) {
@@ -180,6 +204,11 @@ export function generateDraftYaml(input: GenerateDraftInput): GenerateDraftResul
       continue;
     }
     addMetric(slug, parsed.table, parsed.column, entry.answer);
+  }
+
+  for (const table of schema.tables) {
+    if (entities[table.name]) continue;
+    if (!resolvedEntityPrimaryKey(session, schema, table.name)) skipped.add(table.name);
   }
 
   const skipped_tables = [...skipped].sort(compareOrdinal);

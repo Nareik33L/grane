@@ -58,6 +58,18 @@ export function isCompositePrimaryKey(table: TableInfo | undefined): boolean {
 }
 
 /**
+ * Single-column UNIQUE constraints that can be a Grane grain.
+ * Nullable UNIQUE columns are not grain — PostgreSQL UNIQUE allows multiple NULLs.
+ */
+export function grainUniqueColumns(table: TableInfo | undefined): string[] {
+  if (!table?.uniqueColumns?.length) return [];
+  return table.uniqueColumns.filter((name) => {
+    const col = table.columns.find((item) => item.name === name);
+    return Boolean(col && !col.nullable);
+  });
+}
+
+/**
  * Record columns that appear in a single-column UNIQUE constraint.
  * Composite UNIQUE indexes are ignored — they are not a Grane grain.
  */

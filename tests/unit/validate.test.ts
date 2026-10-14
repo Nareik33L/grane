@@ -173,6 +173,97 @@ describe("structural validation", () => {
     expect(report.ok).toBe(false);
   });
 
+  it("refuses semi-additive group_by on the time_dimension or time-like columns", () => {
+    const config = exampleConfig();
+    config.metrics["on_hand"] = {
+      entity: "order",
+      type: "sum",
+      sql: "${orders.net_amount}",
+      time_dimension: "${orders.completed_at}",
+      additive: "semi",
+      semi_additive: { window: "last", group_by: ["${orders.completed_at}"] },
+      status: "approved",
+      synonyms: [],
+    };
+    const sameTime = validateModel(new SemanticModel(config));
+    const existingIssue = sameTime.metrics.find((m) => m.metric === "on_hand")!.issues.find(
+      (i) => i.code === "temporal_semi_additive_group_by",
+    );
+    expect(existingIssue?.severity).toBe("warning");
+    expect(sameTime.ok).toBe(true);
+    expect(sameTime.metrics.find((m) => m.metric === "on_hand")!.ok).toBe(true);
+
+    const generated = validateModel(new SemanticModel(config), undefined, { generated: true });
+    expect(generated.ok).toBe(false);
+    expect(
+      generated.metrics.find((m) => m.metric === "on_hand")!.issues.find((i) => i.code === "temporal_semi_additive_group_by")
+        ?.severity,
+    ).toBe("error");
+
+    for (const column of ["ts", "period", "as_of"] as const) {
+      const next = exampleConfig();
+      next.metrics["on_hand"] = {
+        entity: "order",
+        type: "sum",
+        sql: "${orders.net_amount}",
+        time_dimension: "${orders.completed_at}",
+        additive: "semi",
+        semi_additive: { window: "last", group_by: [`\${orders.${column}}`] },
+        status: "approved",
+        synonyms: [],
+      };
+      const report = validateModel(new SemanticModel(next));
+      expect(
+        report.metrics.find((m) => m.metric === "on_hand")!.issues.some((i) => i.code === "temporal_semi_additive_group_by"),
+        column,
+      ).toBe(true);
+      expect(report.ok, column).toBe(true);
+    }
+
+    const withTypes = exampleConfig();
+    withTypes.metrics["on_hand"] = {
+      entity: "order",
+      type: "sum",
+      sql: "${orders.net_amount}",
+      time_dimension: "${orders.completed_at}",
+      additive: "semi",
+      semi_additive: { window: "last", group_by: ["${orders.ts}"] },
+      status: "approved",
+      synonyms: [],
+    };
+    const schema = schemaFixture();
+    schema.tables.find((t) => t.name === "orders")!.columns.push(
+      { name: "ts", dataType: "bigint", nullable: true },
+      { name: "period", dataType: "varchar", nullable: true },
+      { name: "as_of", dataType: "text", nullable: true },
+    );
+    const typed = validateModel(new SemanticModel(withTypes), schema);
+    expect(typed.metrics.find((m) => m.metric === "on_hand")!.issues.some((i) => i.code === "temporal_semi_additive_group_by")).toBe(
+      true,
+    );
+    expect(typed.ok).toBe(true);
+  });
+
+  it("an existing config with temporal semi-additive group_by still validates", () => {
+    const config = exampleConfig();
+    config.metrics["on_hand"] = {
+      entity: "order",
+      type: "sum",
+      sql: "${orders.net_amount}",
+      time_dimension: "${orders.completed_at}",
+      additive: "semi",
+      semi_additive: { window: "last", group_by: ["${orders.completed_at}"] },
+      status: "approved",
+      synonyms: [],
+    };
+    const report = validateModel(new SemanticModel(config));
+    expect(report.ok).toBe(true);
+    expect(report.issues.some((i) => i.code === "temporal_semi_additive_group_by" && i.severity === "warning")).toBe(
+      true,
+    );
+    expect(report.issues.some((i) => i.severity === "error")).toBe(false);
+  });
+
   it("allows a many_to_one parent filter that compile joins onto the grain", () => {
     const config = exampleConfig();
     config.metrics["revenue"]!.filters = { "orders.status": "completed", "customers.country": "UK" };

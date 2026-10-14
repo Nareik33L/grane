@@ -21,8 +21,10 @@ import {
   quoteTableColumn,
   resolvedTimeColumn,
   revenueLikeAmbiguityId,
+  CROSS_TABLE_REVENUE_LIKE_ID,
   semiAdditiveGroupByAmbiguity,
   semiAdditiveGroupById,
+  uniqueRevenueLikeSources,
 } from "../../src/authoring/ambiguity.js";
 import { createSession, updateSession } from "../../src/authoring/session.js";
 import {
@@ -215,6 +217,29 @@ describe("revenue-like columns", () => {
     assertQuestionHasNoSamples(amb!.question);
   });
 
+  it("asks which unique revenue-like column when several tables each have one", () => {
+    const found = detectAmbiguities({
+      schema: schemaOf([
+        table("orders", [
+          { name: "id", dataType: "integer", nullable: false },
+          { name: "net_amount", dataType: "numeric" },
+        ]),
+        table("products", [
+          { name: "id", dataType: "integer", nullable: false },
+          { name: "price", dataType: "numeric" },
+        ]),
+      ]),
+    });
+    const amb = found.find((item) => item.id === CROSS_TABLE_REVENUE_LIKE_ID);
+    expect(amb).toMatchObject({
+      id: CROSS_TABLE_REVENUE_LIKE_ID,
+      kind: "revenue_like_columns",
+      candidates: ["orders.net_amount", "products.price"],
+    });
+    expect(amb?.question).toMatch(/will not guess/i);
+    expect(amb?.question).not.toMatch(/orders/);
+  });
+
   it("does not open an ambiguity for a single revenue-like column", () => {
     const found = detectAmbiguities({
       schema: schemaOf([
@@ -226,6 +251,44 @@ describe("revenue-like columns", () => {
       ]),
     });
     expect(found.some((item) => item.kind === "revenue_like_columns")).toBe(false);
+  });
+
+  it("uses the same grain rule as glossary binding after a keyless table is resolved", () => {
+    const schema = schemaOf([
+      table("orders", [
+        { name: "id", dataType: "integer", nullable: false },
+        { name: "net_amount", dataType: "numeric" },
+      ]),
+      table(
+        "event_stream",
+        [
+          { name: "event_id", dataType: "integer", nullable: false },
+          { name: "amount", dataType: "numeric" },
+        ],
+        [],
+      ),
+    ]);
+    expect(uniqueRevenueLikeSources(schema)).toEqual([{ table: "orders", column: "net_amount" }]);
+    expect(detectAmbiguities({ schema }).find((item) => item.id === CROSS_TABLE_REVENUE_LIKE_ID)).toBeUndefined();
+
+    const session = {
+      resolved_ambiguities: [
+        {
+          id: primaryKeyAmbiguityId("event_stream"),
+          kind: "primary_key" as const,
+          chosen: "event_stream.event_id",
+        },
+      ],
+    };
+    expect(uniqueRevenueLikeSources(schema, session)).toEqual([
+      { table: "event_stream", column: "amount" },
+      { table: "orders", column: "net_amount" },
+    ]);
+    expect(detectAmbiguities({ schema, session }).find((item) => item.id === CROSS_TABLE_REVENUE_LIKE_ID)).toMatchObject({
+      id: CROSS_TABLE_REVENUE_LIKE_ID,
+      kind: "revenue_like_columns",
+      candidates: ["event_stream.amount", "orders.net_amount"],
+    });
   });
 
   it("propose_definitions uses the resolved column, not the other candidate", async () => {
@@ -383,6 +446,9 @@ describe("non-additive measures", () => {
     expect(
       isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "snapshot_at", "snapshot_at"),
     ).toBe(true);
+    expect(isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "ts")).toBe(true);
+    expect(isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "period")).toBe(true);
+    expect(isForbiddenSemiGroupByColumn(nonAdditiveSchema, "inventory", "balance", "as_of")).toBe(true);
     expect(
       semiAdditiveGroupByAmbiguity(nonAdditiveSchema, "inventory", "balance", "snapshot_at").candidates,
     ).not.toContain("inventory.snapshot_at");
@@ -447,6 +513,21 @@ const missingPkSchema = schemaOf([
 describe("primary key grain", () => {
   it("does not ask to pick a composite PRIMARY KEY column as grain", () => {
     const found = detectAmbiguities({ schema: compositeSchema });
+    expect(found.some((item) => item.kind === "primary_key")).toBe(false);
+  });
+
+  it("does not offer a nullable UNIQUE column as grain on a composite-PK table", () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["loc_code"],
+        columns: [
+          ...compositeSchema.tables[0]!.columns,
+          { name: "loc_code", dataType: "text", nullable: true },
+        ],
+      },
+    ]);
+    const found = detectAmbiguities({ schema });
     expect(found.some((item) => item.kind === "primary_key")).toBe(false);
   });
 
@@ -585,6 +666,8 @@ describe("fanout joins", () => {
       candidates: [...FANOUT_CANDIDATES],
     });
     expect(amb?.question).toMatch(/multiplies rows/i);
+    expect(amb?.question).toMatch(/totals the many side first/i);
+    expect(amb?.question).toMatch(/not double-counted/i);
     expect(amb?.question).toContain(quoteIdent("customers"));
     expect(amb?.question).toContain(quoteIdent("orders"));
     expect(amb?.question).toMatch(/will not guess/i);

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Setup offers **demo Postgres** (preloaded sample data) nested under the
+  existing demo shop path. Inside it the user picks shipped demo YAML (today's
+  `grane demo --postgres` behaviour) or builds YAML against demo Postgres via
+  discovery, authoring tools, the Set up Grane prompt, the YAML generator, and
+  a proposal PR. No shortcuts, no production YAML writes, no pin. DuckDB demo
+  and own-data paths stay byte-identical (compared to a fixture captured from
+  main). Back-nav on every new step. A glossary term binds to a unique
+  revenue-like column when there is only one; several unique sources ask
+  rather than preferring a table named `orders`. Detection and glossary
+  binding share one grain rule, so a keyless table the user later resolves
+  is asked about instead of silently dropping the metric. Composite-PK and
+  keyless tables are listed in `skipped_tables`, not dropped. Demo Postgres
+  uses `GRANE_DEMO_DATABASE_URL` only (ignores `DATABASE_URL`). `--dir` that
+  is already a git repository is refused. The activate gauntlet records
+  `git rev-parse main` before the MCP walk and asserts it is unchanged after,
+  with the proposal branch parented at that original SHA.
+- Validator warns (does not fail) existing YAML whose semi-additive
+  `group_by` tracks the `time_dimension` or time-like columns stored as
+  number/text (`ts` bigint, `period` varchar, `as_of` text). Authoring
+  drafts still refuse that `group_by` as an error. Fan-out `preaggregate`
+  copy explains that Grane totals the many side first. Nullable UNIQUE
+  columns are not a grain.
+- Demo Postgres schema includes a composite-PK table (`inventory_levels`), a
+  keyless table (`event_stream`), and a partitioned parent (`daily_rollups`).
 - `grane setup` (`grane onboard`) is a guided first-run after `git clone` +
   `npm install`: demo DuckDB or your own warehouse, validate, then
   `mcp connect`. Interactive prompts by default; `--yes --path demo|own` is

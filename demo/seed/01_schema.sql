@@ -91,6 +91,29 @@ CREATE TABLE support_tickets (
   created_at  timestamptz NOT NULL
 );
 
+-- Authoring grain traps (V2-11b): composite PK, nullable UNIQUE, keyless, partitioned parent.
+CREATE TABLE inventory_levels (
+  warehouse_id integer NOT NULL,
+  sku          text NOT NULL,
+  loc_code     text UNIQUE,
+  on_hand      numeric(10, 2) NOT NULL,
+  as_of        date NOT NULL,
+  PRIMARY KEY (warehouse_id, sku)
+);
+
+CREATE TABLE event_stream (
+  payload text,
+  ts      bigint,
+  period  varchar,
+  as_of   text,
+  amount  numeric(10, 2)
+);
+
+CREATE TABLE daily_rollups (
+  id integer PRIMARY KEY,
+  n  numeric(10, 2)
+) PARTITION BY RANGE (id);
+
 CREATE ROLE grane_readonly LOGIN PASSWORD 'grane_readonly';
 GRANT CONNECT ON DATABASE grane_demo TO grane_readonly;
 GRANT USAGE ON SCHEMA public TO grane_readonly;

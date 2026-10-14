@@ -20,7 +20,7 @@ export {
 export { SemanticModel, type Metric, type Dimension } from "./model/model.js";
 export { RelationshipGraph } from "./model/graph.js";
 export { parseColumnRef } from "./model/refs.js";
-export { validateModel, type ValidationReport } from "./validate/validate.js";
+export { validateModel, type ValidationReport, type ValidateOptions } from "./validate/validate.js";
 export {
   semanticQuerySchema,
   QUERY_MODEL_VERSION,
