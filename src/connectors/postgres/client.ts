@@ -8,6 +8,8 @@ import { unsafeQuery } from "../../errors.js";
 
 export const POSTGRES_READ_ONLY_BEGIN = "BEGIN TRANSACTION READ ONLY";
 export const POSTGRES_SESSION_UTC = "SET LOCAL TIME ZONE 'UTC'";
+/** Force extended protocol so multi-statement SQL cannot COMMIT out of READ ONLY. */
+export const POSTGRES_USER_QUERY_MODE = "extended" as const;
 
 export function postgresStatementTimeoutSql(timeoutMs: number): string {
   return `SET LOCAL statement_timeout = ${Math.floor(timeoutMs)}`;
@@ -68,7 +70,11 @@ export class PostgresConnector implements WarehouseConnector {
       await client.query(POSTGRES_READ_ONLY_BEGIN);
       await client.query(postgresStatementTimeoutSql(limits.timeout_ms));
       await client.query(POSTGRES_SESSION_UTC);
-      const result = await client.query<Record<string, unknown>>(sql, params);
+      const result = await client.query<Record<string, unknown>>({
+        text: sql,
+        values: params,
+        queryMode: POSTGRES_USER_QUERY_MODE,
+      } as pg.QueryConfig & { queryMode: typeof POSTGRES_USER_QUERY_MODE });
       await client.query("COMMIT");
       return {
         columns: result.fields.map((f) => f.name),

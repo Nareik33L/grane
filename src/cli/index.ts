@@ -74,7 +74,7 @@ program
   .option("--path <kind>", "demo | own")
   .option(
     "--import <dir>",
-    "non-interactive: load, validate, and inspect existing Grane YAML (never pins)",
+    "non-interactive: load, validate, and inspect existing Grane YAML (never pins; live import writes .grane/audit.jsonl)",
   )
   .option("--dir <dir>", "project directory (demo destination, or where to write grane.yml)")
   .option("--engine <type>", "own-path warehouse: postgres, mysql, duckdb, clickhouse, snowflake, bigquery, databricks, redshift")

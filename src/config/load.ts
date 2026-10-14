@@ -33,7 +33,16 @@ const UNSUPPORTED_MAP = {
   dimension: "dimensions",
   relationship: "relationships",
 } as const;
-const SINGLETON_KEYS = ["project", "connection", "limits", "exploration", "auth", "audit", "providers"] as const;
+const SINGLETON_KEYS = [
+  "project",
+  "connection",
+  "limits",
+  "exploration",
+  "auth",
+  "audit",
+  "authoring",
+  "providers",
+] as const;
 
 /**
  * YAML next to `grane.yml` that is not project config. `grane test` loads

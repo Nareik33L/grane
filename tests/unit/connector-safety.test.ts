@@ -11,16 +11,19 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import pg from "pg";
 import { DuckDbConnector } from "../../src/connectors/duckdb.js";
 import { PostgresConnector } from "../../src/connectors/postgres/client.js";
 import {
   POSTGRES_READ_ONLY_BEGIN,
   POSTGRES_SESSION_UTC,
+  POSTGRES_USER_QUERY_MODE,
   postgresStatementTimeoutSql,
 } from "../../src/connectors/postgres/client.js";
 import {
   MYSQL_SESSION_READONLY,
   MYSQL_SESSION_UTC,
+  MYSQL_POOL_DEFAULTS,
   MysqlConnector,
   mysqlMaxExecutionTimeSql,
   mysqlQueryWithDeadline,
@@ -39,6 +42,7 @@ import {
   type ExecutedRows,
   type WarehouseConnector,
 } from "../../src/connectors/types.js";
+import { runDiscoveryQuery } from "../../src/authoring/discover.js";
 import { executeCompiled } from "../../src/execute/executor.js";
 import type { CompiledQuery } from "../../src/compile/compiler.js";
 import { GraneError } from "../../src/errors.js";
@@ -57,6 +61,7 @@ const CONNECTOR_QUERY_FILES = [
   "src/connectors/clickhouse.ts",
   "src/connectors/databricks.ts",
   "src/execute/executor.ts",
+  "src/authoring/discover.ts",
 ];
 
 const LOCAL_WRITE_REGEX = /\/\^[^/\n]*(insert\|update\|delete)/i;
@@ -161,6 +166,13 @@ describe("single write guard", () => {
         expect(src, rel).not.toMatch(/\bWRITE_KEYWORDS\s*=/);
       }
     }
+  });
+
+  it("Postgres user SQL uses extended protocol (single-statement)", () => {
+    expect(POSTGRES_USER_QUERY_MODE).toBe("extended");
+    const src = readFileSync(join(repoRoot, "src/connectors/postgres/client.ts"), "utf8");
+    expect(src).toMatch(/queryMode:\s*POSTGRES_USER_QUERY_MODE/);
+    expect(src).toMatch(/queryMode:\s*"extended"|POSTGRES_USER_QUERY_MODE\s*=\s*"extended"/);
   });
 
   it("no other src/connectors file defines a write-keyword regex", () => {
@@ -368,6 +380,14 @@ describe.skipIf(!duckOk)("DuckDB connector safety", () => {
     });
   });
 
+  it("discovery refuses a write before touching the engine", async () => {
+    const c = new DuckDbConnector({ type: "duckdb", path: ":memory:", schema: "main" });
+    connectors.push(c);
+    await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
   it("cancels a deliberately slow query via timeout_ms", async () => {
     const c = new DuckDbConnector({ type: "duckdb", path: ":memory:", schema: "main" });
     connectors.push(c);
@@ -392,6 +412,41 @@ describe.skipIf(!duckOk)("DuckDB connector safety", () => {
     await c.query("SET TimeZone = 'America/New_York'", [], LIMITS);
     const result = await c.query("SELECT current_setting('TimeZone') AS tz", [], LIMITS);
     expect(String(result.rows[0]?.tz).toUpperCase()).toBe("UTC");
+  });
+
+  it("file access_mode READ_ONLY rejects CREATE TABLE at the engine", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grane-cs-"));
+    const path = join(dir, "ro.duckdb");
+    const mod = (await import("@duckdb/node-api")) as {
+      DuckDBInstance: {
+        create: (path: string, opts?: Record<string, string>) => Promise<{
+          connect: () => Promise<{
+            runAndReadAll: (sql: string) => Promise<unknown>;
+            closeSync?: () => void;
+          }>;
+          closeSync?: () => void;
+        }>;
+      };
+    };
+    const writer = await mod.DuckDBInstance.create(path);
+    const wconn = await writer.connect();
+    await wconn.runAndReadAll("CREATE TABLE t (id INTEGER)");
+    wconn.closeSync?.();
+    writer.closeSync?.();
+
+    const ro = await mod.DuckDBInstance.create(path, { access_mode: "READ_ONLY" });
+    const rconn = await ro.connect();
+    try {
+      await rconn.runAndReadAll("INSERT INTO t VALUES (1)");
+      throw new Error("DuckDB accepted INSERT with access_mode=READ_ONLY");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      expect(message).not.toMatch(/accepted INSERT/);
+      expect(message).toMatch(/read.?only|cannot|permission|write/i);
+    } finally {
+      rconn.closeSync?.();
+      ro.closeSync?.();
+    }
   });
 
   it("opens file databases READ_ONLY and introspects classifiable types", async () => {
@@ -455,6 +510,47 @@ describe.skipIf(!pgEnv)("Postgres connector safety", () => {
     });
   });
 
+  it("discovery refuses a write before the engine", async () => {
+    const c = live();
+    await expect(runDiscoveryQuery(c, "INSERT INTO pg_catalog.pg_class VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("extended protocol rejects SELECT 1; COMMIT; CREATE so it cannot leave READ ONLY", async () => {
+    expect(POSTGRES_USER_QUERY_MODE).toBe("extended");
+    const c = live();
+    const table = `qa_disc_escape_${Date.now().toString(36)}`;
+    const escape = `SELECT 1; COMMIT; CREATE TABLE ${table} (id INTEGER)`;
+    expect(isWriteSql(escape)).toBe(false);
+    await expect(runDiscoveryQuery(c, "SELECT 1; INSERT INTO pg_catalog.pg_class VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+    await expect(runDiscoveryQuery(c, escape, LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+    await expect(c.query(escape, [], LIMITS)).rejects.toThrow(/multiple commands|cannot insert multiple/i);
+    const check = await c.query(
+      "SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_name = $1",
+      [table],
+      LIMITS,
+    );
+    expect(Number(check.rows[0]?.n)).toBe(0);
+    const cleanup = new pg.Pool({ connectionString: pgEnv!.writeUrl });
+    try {
+      await cleanup.query(`DROP TABLE IF EXISTS ${table}`);
+    } finally {
+      await cleanup.end();
+    }
+  });
+
+  it("READ ONLY transaction rejects SELECT FOR UPDATE at the engine", async () => {
+    const c = live();
+    const sql = "SELECT oid FROM pg_class FOR UPDATE LIMIT 1";
+    expect(isWriteSql(sql)).toBe(false);
+    await expect(c.query(sql, [], LIMITS)).rejects.toThrow(/read-only|cannot execute/i);
+  });
+
   it("runs inside a READ ONLY UTC transaction", async () => {
     const c = live();
     const result = await c.query(
@@ -494,6 +590,27 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
     await expect(c.query("INSERT INTO t VALUES (1)", [], LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
+  });
+
+  it("discovery refuses a write before the engine", async () => {
+    const c = live();
+    await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("SET SESSION TRANSACTION READ ONLY rejects CREATE TABLE at the engine", async () => {
+    const mysql = await import("mysql2/promise");
+    const conn = await mysql.createConnection({
+      uri: mysqlEnv!.writeUrl,
+      ...MYSQL_POOL_DEFAULTS,
+    });
+    try {
+      await conn.query(MYSQL_SESSION_READONLY);
+      await expect(conn.query("CREATE TABLE qa_cs_write_probe (id INT)")).rejects.toThrow(/read.?only|1792/i);
+    } finally {
+      await conn.end();
+    }
   });
 
   it("runs with SESSION TRANSACTION READ ONLY and UTC", async () => {
@@ -554,6 +671,32 @@ describe.skipIf(!chEnv)("ClickHouse connector safety", () => {
     await expect(c.query("INSERT INTO t VALUES (1)", [], LIMITS)).rejects.toMatchObject({
       refusal: { status: "unsafe_query" },
     });
+  });
+
+  it("discovery refuses a write before the engine", async () => {
+    const c = live();
+    await expect(runDiscoveryQuery(c, "INSERT INTO t VALUES (1)", LIMITS)).rejects.toMatchObject({
+      refusal: { status: "unsafe_query" },
+    });
+  });
+
+  it("readonly=1 rejects CREATE TABLE at the engine", async () => {
+    const { clickhouseQuerySettings } = await import("../../src/connectors/clickhouse.js");
+    const { createClickHouseClient } = await import("../helpers/clickhouse-live.js");
+    const client = await createClickHouseClient(chEnv!.url);
+    try {
+      await client.query({
+        query: "CREATE TABLE qa_cs_write_probe (id Int32) ENGINE = Memory",
+        clickhouse_settings: clickhouseQuerySettings(5_000),
+      });
+      throw new Error("ClickHouse accepted CREATE TABLE with readonly=1");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      expect(message).not.toMatch(/accepted CREATE TABLE/);
+      expect(message).toMatch(/readonly|Cannot execute|read-only|not allowed/i);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
   });
 
   it("pins readonly, UTC, and join_use_nulls so unmatched LEFT JOIN is NULL not 0/''", async () => {
