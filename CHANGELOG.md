@@ -7,7 +7,9 @@
   `grane demo --postgres` behaviour) or builds YAML against demo Postgres via
   discovery, authoring tools, the Set up Grane prompt, the YAML generator, and
   a proposal PR. No shortcuts, no production YAML writes, no pin. DuckDB demo
-  and own-data paths stay byte-identical. Back-nav on every new step.
+  and own-data paths stay byte-identical. Back-nav on every new step. A glossary
+  term binds to a unique revenue-like column (`orders.net_amount`) so
+  `propose_definitions` works without a two-column `revenue_like` question.
 - Validator refuses semi-additive `group_by` on the metric `time_dimension` or
   time-like columns stored as number/text (`ts` bigint, `period` varchar,
   `as_of` text). Fan-out `preaggregate` copy explains that Grane totals the

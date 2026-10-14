@@ -7,6 +7,7 @@ import {
   fanoutAmbiguityId,
   isForbiddenSemiGroupByColumn,
   looksNonAdditive,
+  looksRevenueLike,
   parseGroupByChoice,
   parseNonAdditiveAmbiguityId,
   resolvedEntityPrimaryKey,
@@ -34,6 +35,39 @@ export interface GenerateDraftResult {
 
 function parseColumn(ref: string): { table: string; column: string } | null {
   return parseColumnRef(ref);
+}
+
+/**
+ * Glossary terms (e.g. "revenue") bind to a unique revenue-like column when
+ * there is no revenue_like_columns ambiguity. Demo shop `orders.net_amount`
+ * is the usual case — asking would be guessing among one candidate.
+ * Several unique sources: prefer `orders`, otherwise refuse to guess.
+ */
+function uniqueRevenueLikeSource(
+  session: AuthoringSession,
+  schema: DatabaseSchema,
+  slug: string,
+): { table: string; column: string } | null {
+  const sources: { table: string; column: string }[] = [];
+  for (const table of schema.tables) {
+    if (!resolvedEntityPrimaryKey(session, schema, table.name)) continue;
+    const cols = table.columns.filter(
+      (column) => looksRevenueLike(column.name, column.dataType) && !looksNonAdditive(column.name, column.dataType),
+    );
+    if (cols.length !== 1) continue;
+    sources.push({ table: table.name, column: cols[0]!.name });
+  }
+  if (sources.length === 0) return null;
+  const compact = slug.replace(/_/g, "");
+  const named = sources.filter(
+    (item) => item.column === slug || item.column.replace(/_/g, "") === compact,
+  );
+  if (named.length === 1) return named[0]!;
+  if (slug === "revenue") {
+    const orders = sources.find((item) => item.table === "orders");
+    if (orders) return orders;
+  }
+  return sources.length === 1 ? sources[0]! : null;
 }
 
 function sortRecord<T>(obj: Record<string, T>): Record<string, T> {
@@ -171,7 +205,9 @@ export function generateDraftYaml(input: GenerateDraftInput): GenerateDraftResul
     const fromResolved = session.resolved_ambiguities.find(
       (item) => item.kind === "revenue_like_columns" && parseColumn(item.chosen),
     );
-    const parsed = fromResolved ? parseColumn(fromResolved.chosen) : null;
+    const parsed = fromResolved
+      ? parseColumn(fromResolved.chosen)
+      : uniqueRevenueLikeSource(session, schema, slug);
     if (!parsed) continue;
     if (slug === "revenue" && metrics.revenue) {
       if (entry.answer && !metrics.revenue.description) {
