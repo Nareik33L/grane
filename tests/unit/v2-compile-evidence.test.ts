@@ -27,10 +27,14 @@ describe("pre-V2 compile evidence", () => {
 
     for (const project of live.projects) {
       const frozen = expected.projects.find((item) => item.project === project.project) as ProjectEvidence;
-      expect(project.yaml_bytes_identical_to_pre_v2, project.project).toBe(true);
+      // Shallow CI checkouts do not contain 7a7ffc6. Identity vs pre-V2 is the
+      // fixture hashes recorded from that commit, not a live `git show`.
       expect(frozen.yaml_bytes_identical_to_pre_v2, project.project).toBe(true);
-      expect(project.yaml_hashes_now, project.project).toEqual(project.yaml_hashes_pre_v2);
+      expect(project.yaml_hashes_now, project.project).toEqual(frozen.yaml_hashes_pre_v2);
       expect(project.yaml_hashes_now, project.project).toEqual(frozen.yaml_hashes_now);
+      if (Object.keys(project.yaml_hashes_pre_v2).length > 0) {
+        expect(project.yaml_hashes_now, project.project).toEqual(project.yaml_hashes_pre_v2);
+      }
       expect(project.metrics, `${project.project} metric meaning`).toEqual(frozen.metrics);
       expect(project.validate_ok, project.project).toBe(true);
       expect(project.compiles, `${project.project} compiled SQL`).toEqual(frozen.compiles);

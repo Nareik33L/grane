@@ -183,7 +183,7 @@ export async function collectAllEvidence(root: string): Promise<{
   return {
     baseline_commit: PRE_V2_BASELINE,
     generated_note:
-      "Pre-V2 baseline is 7a7ffc6. YAML hashes must match that commit. Metric meaning and compiled SQL are produced by the current compiler on that identical YAML (no silent semantic change).",
+      "Pre-V2 baseline is 7a7ffc6. YAML hashes in the committed fixture were taken from that commit. CI compares current YAML/SQL to those hashes (shallow clones may not contain 7a7ffc6). Metric meaning and compiled SQL are produced by the current compiler on that identical YAML (no silent semantic change).",
     projects,
   };
 }
