@@ -143,7 +143,6 @@ describe.skipIf(!pgAvailable)("demo Postgres authoring (path b)", () => {
         expect(written.url).toBe(session.readConnection().url);
       } finally {
         await kernel.close();
-        await connector.close();
       }
     } finally {
       await session.teardown();
