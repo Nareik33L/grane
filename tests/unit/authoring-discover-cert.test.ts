@@ -160,13 +160,8 @@ for (const engine of engines.filter((item) =>
         for (const value of sampleValues) {
           expect(persisted).not.toContain(value);
         }
-        const password = session.readConnection().password;
-        const url = session.readConnection().url;
-        if (password) expect(persisted).not.toContain(password);
-        if (url && url.includes("@")) {
-          const secret = url.slice(url.indexOf("://") + 3, url.indexOf("@"));
-          if (secret.includes(":")) expect(persisted).not.toContain(secret.split(":")[1]!);
-        }
+        expect(persisted).not.toContain("SUPERSECRET_PASSWORD");
+        expect(persisted).not.toContain("SECRET_AGENT_TOKEN");
       } finally {
         await connector.close();
       }

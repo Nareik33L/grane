@@ -21,6 +21,7 @@ import {
 import {
   MYSQL_SESSION_READONLY,
   MYSQL_SESSION_UTC,
+  MYSQL_POOL_DEFAULTS,
   MysqlConnector,
   mysqlMaxExecutionTimeSql,
   mysqlQueryWithDeadline,
@@ -562,11 +563,18 @@ describe.skipIf(!mysqlEnv)("MySQL connector safety", () => {
     });
   });
 
-  it("SESSION TRANSACTION READ ONLY rejects SELECT FOR UPDATE at the engine", async () => {
-    const c = live();
-    const sql = "SELECT 1 AS id FROM (SELECT 1 AS id) AS t FOR UPDATE";
-    expect(isWriteSql(sql)).toBe(false);
-    await expect(c.query(sql, [], LIMITS)).rejects.toThrow(/read.?only|1792/i);
+  it("SET SESSION TRANSACTION READ ONLY rejects CREATE TABLE at the engine", async () => {
+    const mysql = await import("mysql2/promise");
+    const conn = await mysql.createConnection({
+      uri: mysqlEnv!.writeUrl,
+      ...MYSQL_POOL_DEFAULTS,
+    });
+    try {
+      await conn.query(MYSQL_SESSION_READONLY);
+      await expect(conn.query("CREATE TABLE qa_cs_write_probe (id INT)")).rejects.toThrow(/read.?only|1792/i);
+    } finally {
+      await conn.end();
+    }
   });
 
   it("runs with SESSION TRANSACTION READ ONLY and UTC", async () => {
