@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { DEMO_AUTHORING_MARKER } from "../authoring/demo-marker.js";
 import { writeInitProject } from "../cli/init-project.js";
 import { demoPostgresUrl } from "../demo/run.js";
 import { persistOwnConnection } from "./connection.js";
@@ -35,6 +36,7 @@ export function writeDemoAuthoringProject(
     schema: options.schema ?? "public",
   });
   persistAuthoringEnabled(dir);
+  writeFileSync(join(dir, DEMO_AUTHORING_MARKER), "demo-authoring\n");
   return { projectDir: dir, url };
 }
 

@@ -4,11 +4,17 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { recordPinAudit } from "../audit.js";
+import { preflightAuditWrite, recordPinAudit, recordProposalAudit } from "../audit.js";
 import { findProjectDir, isAdopterTestYaml, loadConfig, type LoadedConfig } from "../config/load.js";
 import { graneConfigSchema, type GraneConfig } from "../config/schema.js";
 import { configError } from "../errors.js";
-import { combineSemanticYaml } from "./yaml-merge.js";
+import { isDemoAuthoringProject, DEMO_AUTHORING_MARKER } from "./demo-marker.js";
+import {
+  combineSemanticYamlWithReport,
+  emptyRestored,
+  SEMANTIC_YAML_KEYS,
+  type SemanticYamlRestored,
+} from "./yaml-merge.js";
 
 const FULL_SHA = /^[0-9a-fA-F]{40}$/;
 
@@ -21,7 +27,8 @@ const FULL_SHA = /^[0-9a-fA-F]{40}$/;
  *
  * This module never writes to the active branch. Proposal commits are created
  * with plumbing (`commit-tree` + `update-ref` on `grane/proposal/*` only).
- * Approval is a read of merged state. Rollback re-pins `.grane/active.json`.
+ * `approveProposal` pins a merge commit after a GitHub PR merge (or a TTY).
+ * Rollback re-pins `.grane/active.json`. Reject deletes a proposal ref only.
  */
 
 export const PROPOSAL_BRANCH_PREFIX = "grane/proposal/";
@@ -52,10 +59,17 @@ export interface NameDiff {
   removed: string[];
 }
 
+export interface SemanticMergeReport {
+  restored: SemanticYamlRestored;
+  lost_comments: string[];
+}
+
 export interface SemanticProposalDiff {
   metrics: NameDiff;
   dimensions: NameDiff;
   relationships: NameDiff;
+  entities: NameDiff;
+  merge: SemanticMergeReport;
 }
 
 export interface ProposalDiff {
@@ -278,6 +292,14 @@ export function configuredBaseBranch(projectDir: string): string {
         ? `, and project.base_branch "${explicit}" is not an existing local refs/heads/ branch`
         : "") +
       `). Set project.base_branch in grane.yml to an existing local branch.`,
+  );
+}
+
+function assertNotDemoAuthoring(projectDir: string, action: string): void {
+  if (!isDemoAuthoringProject(projectDir)) return;
+  throw configError(
+    `Refusing to ${action} in a nested demo authoring repo (${DEMO_AUTHORING_MARKER}). ` +
+      `Setup --dir is for proposal branches only; approve, rollback, and pin from a real project.`,
   );
 }
 
@@ -560,6 +582,7 @@ function assertPinnableCommit(root: string, rev: string, ref: string, approved: 
 }
 
 export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
+  assertNotDemoAuthoring(projectDir, "write the active pin");
   const parsed = activePinSchema.parse(pin);
   const ref = assertPinRef(projectDir, parsed.ref);
   const root = gitRoot(projectDir);
@@ -569,7 +592,11 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
     ? assertPinnableCommit(root, parsed.previous_commit, ref, approved, "previous_commit")
     : parsed.previous_commit;
   const next = { ...parsed, ref, commit, previous_commit };
+  assertServablePin(projectDir, next);
+  const audit = pinAuditConfig(projectDir);
+  preflightAuditWrite(audit.config, audit.dir);
   const path = join(projectDir, ACTIVE_PIN_PATH);
+  const previous = existsSync(path) ? readFileSync(path) : null;
   mkdirSync(dirname(path), { recursive: true });
   const tmpPath = join(dirname(path), `.active-${process.pid}-${Date.now()}.json.tmp`);
   try {
@@ -579,12 +606,22 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
     rmSync(tmpPath, { force: true });
     throw err;
   }
-  recordPinEvent(projectDir, {
-    operation: "write",
-    ref: next.ref,
-    commit: next.commit,
-    approved_by: next.approved_by,
-  });
+  try {
+    recordPinEvent(
+      projectDir,
+      {
+        operation: "write",
+        ref: next.ref,
+        commit: next.commit,
+        approved_by: next.approved_by,
+      },
+      audit.config,
+    );
+  } catch (err) {
+    if (previous === null) rmSync(path, { force: true });
+    else writeFileSync(path, previous);
+    throw err;
+  }
   return next;
 }
 
@@ -650,9 +687,37 @@ function commitOnProposalBranch(
   }
 }
 
-function proposalMessage(id: string, title: string, baseBranch: string, baseCommit: string, body?: string): string {
+function formatRestoredTrailer(restored: SemanticYamlRestored): string | undefined {
+  const parts = SEMANTIC_YAML_KEYS
+    .filter((key) => restored[key].length > 0)
+    .map((key) => `${key}=${restored[key].join(",")}`);
+  return parts.length > 0 ? parts.join(";") : undefined;
+}
+
+function parseRestoredTrailer(raw: string | undefined): SemanticYamlRestored {
+  const restored = emptyRestored();
+  if (!raw) return restored;
+  for (const part of raw.split(";")) {
+    const [key, names] = part.split("=");
+    if (!key || !names || !(SEMANTIC_YAML_KEYS as readonly string[]).includes(key)) continue;
+    restored[key as keyof SemanticYamlRestored] = names
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+  return restored;
+}
+
+function proposalMessage(
+  id: string,
+  title: string,
+  baseBranch: string,
+  baseCommit: string,
+  body?: string,
+  merge?: { restored: SemanticYamlRestored; lost_comments: string[] },
+): string {
   const subject = body ?? `feat(authoring): propose ${id}`;
-  return [
+  const lines = [
     subject.split("\n")[0],
     "",
     title,
@@ -660,10 +725,16 @@ function proposalMessage(id: string, title: string, baseBranch: string, baseComm
     `Grane-Proposal: ${id}`,
     `Grane-Base: ${baseBranch}`,
     `Grane-Base-Commit: ${baseCommit}`,
+  ];
+  const restored = merge ? formatRestoredTrailer(merge.restored) : undefined;
+  if (restored) lines.push(`Grane-Merge-Restored: ${restored}`);
+  if (merge?.lost_comments.length) lines.push(`Grane-Lost-Comments: ${merge.lost_comments.join(",")}`);
+  lines.push(
     "",
     "AI-generated metrics in this proposal are experimental until the GitHub PR is merged.",
     "Merging (anyone with merge rights) marks them governed.",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function parseTrailer(message: string, key: string): string | undefined {
@@ -673,6 +744,8 @@ function parseTrailer(message: string, key: string): string | undefined {
 
 /** Create `grane/proposal/<yyyymmdd>-<slug>` and commit `files` on it. Never updates HEAD. */
 export function createProposal(projectDir: string, input: CreateProposalInput): Proposal {
+  const audit = pinAuditConfig(projectDir);
+  preflightAuditWrite(audit.config, audit.dir);
   const root = gitRoot(projectDir);
   assertCleanWorktree(projectDir);
   const active = resolveActiveRef(projectDir);
@@ -688,9 +761,16 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
     throw configError("Proposal has no draft files to commit.");
   }
   const staged: Record<string, string> = {};
+  const mergeRestored = emptyRestored();
+  const lostComments: string[] = [];
   for (const [rel, contents] of entries) {
     const path = gitPath(root, projectDir, rel);
-    staged[path] = combineSemanticYaml(fileAtCommit(root, active.commit, path), contents, rel);
+    const report = combineSemanticYamlWithReport(fileAtCommit(root, active.commit, path), contents, rel);
+    staged[path] = report.contents;
+    for (const key of SEMANTIC_YAML_KEYS) {
+      mergeRestored[key] = [...new Set([...mergeRestored[key], ...report.restored[key]])].sort();
+    }
+    if (report.lost_comments) lostComments.push(path);
   }
   const title = input.title?.trim() || `Grane proposal: ${id}`;
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
@@ -700,7 +780,10 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
     branch,
     active.commit,
     staged,
-    proposalMessage(id, title, active.branch, active.commit, input.message),
+    proposalMessage(id, title, active.branch, active.commit, input.message, {
+      restored: mergeRestored,
+      lost_comments: lostComments,
+    }),
   );
   const headAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   const activeAfter = git(root, ["rev-parse", active.branch]).trim();
@@ -715,7 +798,12 @@ export function createProposal(projectDir: string, input: CreateProposalInput): 
 function loadCommitMaps(
   root: string,
   commit: string,
-): { metrics: Record<string, unknown>; dimensions: Record<string, unknown>; relationships: Record<string, unknown> } {
+): {
+  metrics: Record<string, unknown>;
+  dimensions: Record<string, unknown>;
+  relationships: Record<string, unknown>;
+  entities: Record<string, unknown>;
+} {
   const dest = mkdtempSync(join(tmpdir(), "grane-proposal-tree-"));
   try {
     const names = git(root, ["ls-tree", "-r", "--name-only", commit])
@@ -733,6 +821,7 @@ function loadCommitMaps(
       metrics: loaded.config.metrics,
       dimensions: loaded.config.dimensions,
       relationships: loaded.config.relationships,
+      entities: loaded.config.entities,
     };
   } finally {
     rmSync(dest, { recursive: true, force: true });
@@ -753,6 +842,25 @@ function nameDiff(before: Record<string, unknown>, after: Record<string, unknown
   return { added, changed, removed };
 }
 
+function yamlCommentLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("#") || /(?:^|\s)#.+$/.test(line));
+}
+
+function lostCommentFiles(root: string, baseCommit: string, proposalCommit: string, files: string[]): string[] {
+  const lost: string[] = [];
+  for (const file of files) {
+    const before = runGit(root, ["show", `${baseCommit}:${file}`], { allowFail: true });
+    const after = runGit(root, ["show", `${proposalCommit}:${file}`], { allowFail: true });
+    if (before.status !== 0 || after.status !== 0) continue;
+    const kept = new Set(yamlCommentLines(after.stdout));
+    if (yamlCommentLines(before.stdout).some((line) => !kept.has(line))) lost.push(file);
+  }
+  return lost;
+}
+
 export function diffProposal(projectDir: string, idOrBranch: string): ProposalDiff {
   const root = gitRoot(projectDir);
   const branch = resolveProposalBranch(root, idOrBranch);
@@ -766,6 +874,12 @@ export function diffProposal(projectDir: string, idOrBranch: string): ProposalDi
   try {
     const before = loadCommitMaps(root, active.commit);
     const after = loadCommitMaps(root, proposal);
+    const message = git(root, ["log", "-1", "--format=%B", proposal]);
+    const trailerLost = (parseTrailer(message, "Grane-Lost-Comments") ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const lost_comments = [...new Set([...trailerLost, ...lostCommentFiles(root, active.commit, proposal, files)])].sort();
     return {
       unified,
       files,
@@ -773,6 +887,11 @@ export function diffProposal(projectDir: string, idOrBranch: string): ProposalDi
         metrics: nameDiff(before.metrics, after.metrics),
         dimensions: nameDiff(before.dimensions, after.dimensions),
         relationships: nameDiff(before.relationships, after.relationships),
+        entities: nameDiff(before.entities, after.entities),
+        merge: {
+          restored: parseRestoredTrailer(parseTrailer(message, "Grane-Merge-Restored")),
+          lost_comments,
+        },
       },
     };
   } catch (err) {
@@ -877,53 +996,221 @@ function findExactProposalTrailer(root: string, baseCommit: string, proposalId: 
  * Does not merge, fast-forward, or otherwise write to the active branch.
  * The proposal id always comes from the branch name, never from the commit trailer.
  */
-export function readMergedApproval(projectDir: string, idOrBranch: string): MergedApproval {
+export function readMergedApproval(
+  projectDir: string,
+  idOrBranch: string,
+  options: { against?: "active" | "base" } = {},
+): MergedApproval {
   const root = gitRoot(projectDir);
   const branch = resolveProposalBranch(root, idOrBranch);
   const proposal_id = proposalIdFromBranch(branch);
   const proposal_commit = git(root, ["rev-parse", branch]).trim();
-  const active = resolveActiveRef(projectDir);
-  const ancestor = isAncestor(root, proposal_commit, active.commit);
-  const trailer_commit = findExactProposalTrailer(root, active.commit, proposal_id);
+  const against = options.against ?? "active";
+  const base_branch = against === "base" ? configuredBaseBranch(projectDir) : resolveActiveRef(projectDir).branch;
+  const tip =
+    against === "base"
+      ? git(root, ["rev-parse", `refs/heads/${base_branch}`]).trim()
+      : resolveActiveRef(projectDir).commit;
+  const ancestor = isAncestor(root, proposal_commit, tip);
+  const trailer_commit = findExactProposalTrailer(root, tip, proposal_id);
   const merged = ancestor || Boolean(trailer_commit);
   return {
     merged,
     proposal_id,
     proposal_branch: branch,
     proposal_commit,
-    base_branch: active.branch,
-    merge_commit: merged ? (ancestor ? active.commit : trailer_commit) : null,
+    base_branch,
+    merge_commit: merged ? (ancestor ? tip : trailer_commit) : null,
     metric_trust: merged ? "governed" : "experimental",
   };
 }
 
-/** Re-pin a previously approved commit. Never checks out, resets, or commits on the active branch. */
+function baseHeadsSha(root: string, projectDir: string): string {
+  const base = configuredBaseBranch(projectDir);
+  return git(root, ["rev-parse", `refs/heads/${base}`]).trim();
+}
+
+function recordProposalLine(
+  projectDir: string,
+  input: { operation: "list" | "diff" | "approve" | "reject" | "rollback"; proposal_id?: string; branch?: string; commit?: string; reason?: string },
+): void {
+  const audit = pinAuditConfig(projectDir);
+  recordProposalAudit(audit.config, audit.dir, input);
+}
+
+/** Delete `refs/heads/grane/proposal/*` only. Never touches the configured base. */
+export function deleteProposalBranch(projectDir: string, idOrBranch: string): string {
+  const root = gitRoot(projectDir);
+  const branch = resolveProposalBranch(root, idOrBranch);
+  const mainBefore = baseHeadsSha(root, projectDir);
+  git(root, ["update-ref", "-d", `refs/heads/${branch}`]);
+  const mainAfter = baseHeadsSha(root, projectDir);
+  if (mainAfter !== mainBefore) {
+    throw configError("Internal error: deleting a proposal branch moved the configured base. Refusing.");
+  }
+  return branch;
+}
+
+export function listProposalsAction(projectDir: string): Proposal[] {
+  const listed = listProposals(projectDir);
+  recordProposalLine(projectDir, { operation: "list" });
+  return listed;
+}
+
+export function diffProposalAction(projectDir: string, idOrBranch: string): ProposalDiff {
+  const diff = diffProposal(projectDir, idOrBranch);
+  const root = gitRoot(projectDir);
+  const branch = resolveProposalBranch(root, idOrBranch);
+  recordProposalLine(projectDir, {
+    operation: "diff",
+    proposal_id: proposalIdFromBranch(branch),
+    branch,
+  });
+  return diff;
+}
+
+/**
+ * Pin the merge commit of a proposal. Requires a human TTY or a merged GitHub PR.
+ * Never merges, fast-forwards, or moves the configured base branch.
+ */
+export function approveProposal(
+  projectDir: string,
+  idOrBranch: string,
+  options: { tty?: boolean; approved_by?: string } = {},
+): ActivePin {
+  assertNotDemoAuthoring(projectDir, "approve");
+  const approval = readMergedApproval(projectDir, idOrBranch, { against: "base" });
+  if (!options.tty && !approval.merged) {
+    const reason =
+      `approve requires a human TTY or a merged GitHub PR. Merge the PR, or run "grane proposals approve" in a terminal.`;
+    recordProposalLine(projectDir, {
+      operation: "approve",
+      proposal_id: approval.proposal_id,
+      branch: approval.proposal_branch,
+      reason,
+    });
+    throw configError(reason);
+  }
+  if (!approval.merged || !approval.merge_commit) {
+    const reason = `Merge the GitHub PR for "${approval.proposal_id}" before approving. Approve pins the merge commit; it does not merge.`;
+    recordProposalLine(projectDir, {
+      operation: "approve",
+      proposal_id: approval.proposal_id,
+      branch: approval.proposal_branch,
+      reason,
+    });
+    throw configError(reason);
+  }
+  const root = gitRoot(projectDir);
+  const mainBefore = baseHeadsSha(root, projectDir);
+  const existing = readActivePin(projectDir);
+  const previous =
+    existing && existing.commit !== approval.merge_commit
+      ? existing.commit
+      : (existing?.previous_commit ?? null);
+  const pin = writeActivePin(projectDir, {
+    ref: configuredBaseBranch(projectDir),
+    commit: approval.merge_commit,
+    approved_by: options.approved_by ?? identity(root).name,
+    approved_at: new Date().toISOString(),
+    proposal: approval.proposal_id,
+    previous_commit: previous,
+  });
+  const mainAfter = baseHeadsSha(root, projectDir);
+  if (mainAfter !== mainBefore) {
+    throw configError("Internal error: approve moved the configured base branch. Refusing.");
+  }
+  return pin;
+}
+
+/** Delete a proposal branch. Never writes the pin or the configured base. */
+export function rejectProposal(
+  projectDir: string,
+  idOrBranch: string,
+  options: { tty?: boolean; yes?: boolean; confirm?: () => boolean } = {},
+): { id: string; branch: string; commit: string } {
+  assertNotDemoAuthoring(projectDir, "reject");
+  if (!options.yes) {
+    if (!options.tty) {
+      const reason = `reject requires a human TTY or --yes.`;
+      recordProposalLine(projectDir, { operation: "reject", reason });
+      throw configError(reason);
+    }
+    const confirmed = options.confirm ? options.confirm() : false;
+    if (!confirmed) {
+      const reason = options.confirm
+        ? `reject cancelled.`
+        : `reject requires confirmation (y/N) or --yes.`;
+      recordProposalLine(projectDir, { operation: "reject", reason });
+      throw configError(reason);
+    }
+  }
+  const root = gitRoot(projectDir);
+  const branch = resolveProposalBranch(root, idOrBranch);
+  const id = proposalIdFromBranch(branch);
+  const commit = git(root, ["rev-parse", branch]).trim();
+  const audit = pinAuditConfig(projectDir);
+  preflightAuditWrite(audit.config, audit.dir);
+  const mainBefore = baseHeadsSha(root, projectDir);
+  deleteProposalBranch(projectDir, branch);
+  try {
+    recordProposalLine(projectDir, { operation: "reject", proposal_id: id, branch, commit });
+  } catch (err) {
+    restoreProposalRef(root, branch, commit);
+    throw err;
+  }
+  const mainAfter = baseHeadsSha(root, projectDir);
+  if (mainAfter !== mainBefore) {
+    restoreProposalRef(root, branch, commit);
+    throw configError("Internal error: reject moved the configured base branch. Refusing.");
+  }
+  return { id, branch, commit };
+}
+
+function restoreProposalRef(root: string, branch: string, sha: string): void {
+  requireProposalBranch(branch);
+  runGit(root, ["update-ref", `refs/heads/${branch}`, sha], { allowFail: true });
+}
+
+/** Re-pin a previously approved commit. Never resets or commits on the active branch. */
 export function rollbackPin(
   projectDir: string,
   options: { to?: string; approved_by?: string } = {},
 ): ActivePin {
+  assertNotDemoAuthoring(projectDir, "rollback");
   gitRoot(projectDir);
   const pin = readActivePin(projectDir);
   if (!pin) {
-    throw configError(
-      `Nothing to roll back: ${ACTIVE_PIN_PATH} does not exist. After a GitHub PR merge, pin that commit first.`,
-    );
+    const reason = `Nothing to roll back: ${ACTIVE_PIN_PATH} does not exist. After a GitHub PR merge, pin that commit first.`;
+    recordProposalLine(projectDir, { operation: "rollback", reason });
+    throw configError(reason);
   }
   const ref = assertPinRef(projectDir, pin.ref);
   const target = options.to ?? pin.previous_commit ?? undefined;
   if (!target) {
-    throw configError(
+    const reason =
       `No previous approved commit on the pin. Pass to: "<commit>" of a previously merged proposal. ` +
-        `Rollback re-pins; it does not rewrite git history or move the active branch.`,
-    );
+      `Rollback re-pins; it does not rewrite git history or move the active branch.`;
+    recordProposalLine(projectDir, { operation: "rollback", reason });
+    throw configError(reason);
   }
   const root = gitRoot(projectDir);
-  const resolved = git(root, ["rev-parse", "--verify", `${target}^{commit}`]).trim();
+  const resolved = resolveCommit(root, target);
   if (resolved === pin.commit) {
-    throw configError(`Already pinned at ${resolved}.`);
+    const reason = `Already pinned at ${resolved}.`;
+    recordProposalLine(projectDir, { operation: "rollback", reason, commit: resolved });
+    throw configError(reason);
   }
+  const approved = previouslyApprovedCommits(root, pin);
+  if (!approved.has(resolved)) {
+    const reason =
+      `Refusing to roll back to ${resolved}: it is not a previously approved pin. ` +
+      `Pass --to of a commit recorded on the current pin (commit or previous_commit).`;
+    recordProposalLine(projectDir, { operation: "rollback", reason, commit: resolved });
+    throw configError(reason);
+  }
+  const mainBefore = baseHeadsSha(root, projectDir);
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
-  const branchShaBefore = git(root, ["rev-parse", pin.ref], { allowFail: true }).trim();
   const next = writeActivePin(projectDir, {
     ref,
     commit: resolved,
@@ -933,9 +1220,9 @@ export function rollbackPin(
     previous_commit: pin.commit,
   });
   const headAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
-  const branchShaAfter = git(root, ["rev-parse", pin.ref], { allowFail: true }).trim();
-  if (headAfter !== headBefore || (branchShaBefore && branchShaAfter !== branchShaBefore)) {
-    throw configError("Internal error: rollback moved the active branch. Refusing.");
+  const mainAfter = baseHeadsSha(root, projectDir);
+  if (headAfter !== headBefore || mainAfter !== mainBefore) {
+    throw configError("Internal error: rollback moved the configured base branch. Refusing.");
   }
   return next;
 }

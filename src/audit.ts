@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { accessSync, appendFileSync, constants, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { GraneConfig } from "./config/schema.js";
 import { GraneError, configError } from "./errors.js";
@@ -104,6 +104,8 @@ export type AuthoringAuditOperation =
 
 export type PinAuditOperation = "load" | "refuse" | "write";
 
+export type ProposalAuditOperation = "list" | "diff" | "approve" | "reject" | "rollback";
+
 /**
  * One authoring MCP tool call. The outer tool owns this line; nested
  * `createDiscovery` calls from those tools must not write their own.
@@ -146,16 +148,31 @@ export interface PinAuditEvent {
 }
 
 /**
+ * One `grane proposals` action. Approve/rollback reuse the pin write line
+ * (this event is for list/diff/reject, or a refused approve/rollback).
+ */
+export interface ProposalAuditEvent {
+  ts: string;
+  kind: "proposal";
+  operation: ProposalAuditOperation;
+  proposal_id?: string;
+  branch?: string;
+  commit?: string;
+  reason?: string;
+}
+
+/**
  * One append-only audit record. Never include row payloads, sample values,
  * SQL bind params, or agent tokens. Discriminate on `kind`: query/refusal
- * events always have `query`; auth, discovery, authoring, and pin events never do.
+ * events always have `query`; auth, discovery, authoring, pin, and proposal events never do.
  */
 export type AuditEvent =
   | SemanticAuditEvent
   | AuthAuditEvent
   | DiscoveryAuditEvent
   | AuthoringAuditEvent
-  | PinAuditEvent;
+  | PinAuditEvent
+  | ProposalAuditEvent;
 
 export interface DiscoveryAuditInput {
   ts?: string;
@@ -273,6 +290,24 @@ export function recordAudit(
   }
 }
 
+/**
+ * When `audit.fail_closed` is set, prove the audit path is writable before a
+ * write tool/CLI action mutates git or the pin. Does not append an event.
+ */
+export function preflightAuditWrite(config: GraneConfig, projectDir: string | undefined): void {
+  if (!config.audit.enabled || !config.audit.fail_closed) return;
+  try {
+    const path = resolveAuditPath(projectDir, config.audit.path);
+    if (path) {
+      const parent = dirname(path);
+      mkdirSync(parent, { recursive: true });
+      accessSync(parent, constants.W_OK);
+    }
+  } catch (err) {
+    throw auditWriteFailed(err);
+  }
+}
+
 /** Record one discovery call. Fail-closed uses the same `recordAudit` path as queries. */
 export function recordDiscoveryAudit(
   config: GraneConfig,
@@ -364,6 +399,36 @@ export function recordPinAudit(
   input: PinAuditInput,
 ): void {
   recordAudit(config, projectDir, pinAuditEvent(input));
+}
+
+export interface ProposalAuditInput {
+  ts?: string;
+  operation: ProposalAuditOperation;
+  proposal_id?: string;
+  branch?: string;
+  commit?: string;
+  reason?: string;
+}
+
+export function proposalAuditEvent(input: ProposalAuditInput): ProposalAuditEvent {
+  const event: ProposalAuditEvent = {
+    ts: input.ts ?? new Date().toISOString(),
+    kind: "proposal",
+    operation: input.operation,
+  };
+  if (input.proposal_id) event.proposal_id = input.proposal_id;
+  if (input.branch) event.branch = input.branch;
+  if (input.commit) event.commit = input.commit;
+  if (input.reason) event.reason = input.reason;
+  return event;
+}
+
+export function recordProposalAudit(
+  config: GraneConfig,
+  projectDir: string | undefined,
+  input: ProposalAuditInput,
+): void {
+  recordAudit(config, projectDir, proposalAuditEvent(input));
 }
 
 export function httpFields(http: HttpAuditContext | null | undefined): HttpAuditContext | Record<string, never> {

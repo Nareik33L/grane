@@ -18,7 +18,7 @@ import {
   type AuthoringSession,
   type OpenAmbiguity,
 } from "./session.js";
-import { createProposal, githubPrPlan, type GitHubPrPlan, type Proposal } from "./git.js";
+import { createProposal, deleteProposalBranch, githubPrPlan, type GitHubPrPlan, type Proposal } from "./git.js";
 import { readRelationshipsFile, type InferredRelationship } from "../discover/relationships.js";
 import { readYamlMapFile } from "./yaml-merge.js";
 import {
@@ -369,4 +369,9 @@ export function submitProposal(
     title: `Grane authoring proposal from session ${sessionId}`,
   });
   return { proposal, github: githubPrPlan(projectDir, proposal.id) };
+}
+
+/** Undo a proposal branch after a failed post-submit audit. MCP must not call git delete itself. */
+export function revertFailedProposal(projectDir: string, branch: string): void {
+  deleteProposalBranch(projectDir, branch);
 }

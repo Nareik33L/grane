@@ -7,9 +7,18 @@ export {
   readActivePin,
   configuredBaseBranch,
   resolveActiveRef,
+  approveProposal,
+  rejectProposal,
+  rollbackPin,
+  listProposals,
+  listProposalsAction,
+  diffProposal,
+  diffProposalAction,
+  deleteProposalBranch,
   ACTIVE_PIN_PATH,
   type ActivePin,
 } from "./authoring/git.js";
+export { DEMO_AUTHORING_MARKER, isDemoAuthoringProject } from "./authoring/demo-marker.js";
 export {
   graneConfigSchema,
   type GraneConfig,
@@ -97,13 +106,17 @@ export {
   recordDiscoveryAudit,
   recordAuthoringAudit,
   recordPinAudit,
+  recordProposalAudit,
+  preflightAuditWrite,
   discoveryAuditEvent,
   authoringAuditEvent,
   pinAuditEvent,
+  proposalAuditEvent,
   type AuditEvent,
   type DiscoveryAuditEvent,
   type AuthoringAuditEvent,
   type PinAuditEvent,
+  type ProposalAuditEvent,
   type HttpAuditContext,
 } from "./audit.js";
 export {
