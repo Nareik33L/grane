@@ -1,11 +1,19 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { writeInitProject } from "../cli/init-project.js";
+import {
+  ACTIVE_PIN_PATH,
+  assertCleanWorktree,
+  readActivePin,
+  resolveActiveRef,
+  writeActivePin,
+} from "../authoring/git.js";
 import { loadConfig } from "../config/load.js";
 import type { WarehouseType } from "../connectors/dialect.js";
 import { WAREHOUSE_TYPES } from "../connectors/dialect.js";
 import { DEMO_QUESTION, runDemo, type DemoIo, type DemoResult } from "../demo/run.js";
-import { GraneKernel } from "../kernel.js";
+import { GraneKernel, type Catalog } from "../kernel.js";
+import { formatValidateReport } from "../validate/format.js";
 import {
   connectMcp,
   findWorkspaceDir,
@@ -23,10 +31,10 @@ import {
   type ConnectionDraft,
 } from "./connection.js";
 import {
-  IMPORT_HANDOFF,
   OWN_QUESTION,
   SETUP_BANNER,
   demoReadyLines,
+  importReadyLines,
   ownReadyLines,
   skipConnectHint,
 } from "./copy.js";
@@ -115,7 +123,14 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
       return runDemoPath({ ...options, io, cwd, env, client: answers.client, skipConnect });
     }
     if (answers.path === "import") {
-      return runImportStub({ io, cwd, dir: options.dir, json: options.json });
+      return runImportPath({
+        ...options,
+        io,
+        cwd,
+        json: options.json,
+        skipConnect,
+        client: answers.client,
+      });
     }
     return runOwnPath({
       ...options,
@@ -318,25 +333,104 @@ function defaultOwnProjectDir(cwd: string): string {
   return cwd;
 }
 
-/** V2-04 stub: yes-I-have-YAML never writes files or enters authoring. V2-05 replaces this. */
-function runImportStub(opts: {
+/**
+ * Existing YAML: loadConfig → validateModel (same messages as `grane validate`)
+ * → kernel catalog → pin HEAD via writeActivePin. Never edits the user's YAML.
+ */
+async function runImportPath(opts: {
   io: SetupIo;
   cwd: string;
   dir?: string;
   json?: boolean;
-}): SetupResult {
-  const projectDir = resolve(opts.dir ?? opts.cwd);
-  printReady(opts.io, opts.json, ["────────────────────────────────────────", IMPORT_HANDOFF, "", `Project  ${projectDir}`]);
-  return {
-    path: "import",
+  offline?: boolean;
+  skipConnect: boolean;
+  client: string | null;
+  homeDir?: string;
+  workspaceDir?: string;
+  platform?: NodeJS.Platform;
+  connectMcpFn?: RunSetupOptions["connectMcpFn"];
+}): Promise<SetupResult> {
+  const startDir = resolve(opts.dir ?? opts.cwd);
+  const loaded = loadConfig(startDir);
+  const projectDir = loaded.projectDir;
+  const kernel = new GraneKernel(loaded.config, {
     projectDir,
-    warehouse: null,
-    client: null,
-    question: IMPORT_HANDOFF,
-    validated: false,
-    live: false,
-    connect: null,
-  };
+    providerWarnings: loaded.warnings,
+  });
+  const live = !opts.offline;
+  try {
+    const schema = live ? await kernel.introspectSchema() : undefined;
+    const report = kernel.validate(schema);
+    for (const line of formatValidateReport(report, {
+      providers: kernel.serverInfo().semantic_providers,
+      providerWarnings: kernel.providerWarnings,
+      schemaLive: live,
+    })) {
+      opts.io.log(line);
+    }
+    if (!report.ok) {
+      throw new Error("Validate failed.");
+    }
+
+    const catalog: Catalog = live
+      ? await kernel.catalog()
+      : {
+          ...kernel.governedCatalog(),
+          exploration: {
+            enabled: false,
+            mode: kernel.config.exploration.mode,
+            schemas: [],
+            included: kernel.config.exploration.include,
+            excluded: kernel.config.exploration.exclude,
+            columns: [],
+          },
+        };
+    opts.io.log("");
+    opts.io.log("Catalog");
+    opts.io.log(`  Metrics     ${catalog.metrics.length}`);
+    opts.io.log(`  Dimensions  ${catalog.dimensions.length}`);
+    opts.io.log(`  Entities    ${catalog.entities.length}`);
+    if (catalog.exploration.enabled) {
+      opts.io.log(`  Explorable  ${catalog.exploration.columns.length} columns`);
+    }
+    for (const metric of catalog.metrics) {
+      opts.io.log(`  - ${metric.name} (${metric.status})`);
+    }
+
+    assertCleanWorktree(projectDir);
+    const active = resolveActiveRef(projectDir);
+    const existing = readActivePin(projectDir);
+    const previous =
+      existing && existing.commit !== active.commit ? existing.commit : (existing?.previous_commit ?? null);
+    const pin = writeActivePin(projectDir, {
+      ref: active.branch,
+      commit: active.commit,
+      approved_by: "setup-import",
+      approved_at: new Date().toISOString(),
+      previous_commit: previous,
+    });
+    opts.io.log(`activate    ${ACTIVE_PIN_PATH}  ${pin.ref} @ ${pin.commit.slice(0, 7)}`);
+
+    const connected = connectIfRequested(opts, projectDir);
+    printReady(
+      opts.io,
+      opts.json,
+      importReadyLines({ projectDir, pinRef: pin.ref, pinCommit: pin.commit }),
+    );
+
+    return {
+      path: "import",
+      projectDir,
+      warehouse: loaded.config.connection.type,
+      client: opts.client,
+      question: OWN_QUESTION,
+      validated: true,
+      live,
+      connect: connected.result,
+    };
+  } finally {
+    await kernel.close();
+  }
 }
 
 async function validateOwnProject(

@@ -4,9 +4,26 @@ export { DEMO_QUESTION };
 
 export const OWN_QUESTION = "What can you see in the catalog?";
 
-/** V2-04 stub copy. V2-05 replaces this with load → validate → inspect → activate. */
-export const IMPORT_HANDOFF =
-  "Existing YAML — load, validate, inspect, and activate land in V2-05. No files were written; this path does not use AI authoring.";
+export function importReadyLines(opts: {
+  projectDir: string;
+  pinRef: string;
+  pinCommit: string;
+}): string[] {
+  return [
+    "────────────────────────────────────────",
+    "You're ready.",
+    "",
+    "Existing YAML loaded, validated, and activated. No files were edited.",
+    "",
+    `  Pin      ${opts.pinRef} @ ${opts.pinCommit.slice(0, 7)}`,
+    "",
+    "Ask your agent:",
+    "",
+    `  ${OWN_QUESTION}`,
+    "",
+    `Project  ${opts.projectDir}`,
+  ];
+}
 
 export const SETUP_BANNER = [
   "Grane setup",

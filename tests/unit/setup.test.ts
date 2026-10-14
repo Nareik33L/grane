@@ -1,10 +1,15 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ACTIVE_PIN_PATH, readActivePin } from "../../src/authoring/git.js";
 import { writeInitProject } from "../../src/cli/init-project.js";
+import { loadConfig } from "../../src/config/load.js";
 import { WAREHOUSE_TYPES } from "../../src/connectors/dialect.js";
 import { DEMO_QUESTION, type DemoResult } from "../../src/demo/run.js";
+import { GraneKernel } from "../../src/kernel.js";
+import { formatValidateReport } from "../../src/validate/format.js";
 import {
   connectionFields,
   inferWarehouseFromUrl,
@@ -13,7 +18,7 @@ import {
   parseOwnDatabaseUrl,
   persistOwnConnection,
 } from "../../src/setup/connection.js";
-import { IMPORT_HANDOFF, OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
+import { OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
 import { BACK, scriptedPrompter, type Prompter } from "../../src/setup/prompts.js";
 import { runSetup } from "../../src/setup/run.js";
 import {
@@ -30,6 +35,35 @@ function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "grane-setup-"));
   temps.push(dir);
   return dir;
+}
+
+function git(cwd: string, args: string[]): string {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if ((result.status ?? 1) !== 0) {
+    throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`);
+  }
+  return (result.stdout ?? "").trim();
+}
+
+function initImportRepo(): string {
+  const dir = tempDir();
+  git(dir, ["init", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@grane.dev"]);
+  git(dir, ["config", "user.name", "Grane Test"]);
+  writeInitProject(dir);
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-m", "existing yaml"]);
+  return dir;
+}
+
+function snapshotYaml(dir: string): Record<string, string> {
+  const files = ["grane.yml", "metrics.yml", "dimensions.yml", "relationships.yml"];
+  const out: Record<string, string> = {};
+  for (const name of files) {
+    const path = join(dir, name);
+    if (existsSync(path)) out[name] = readFileSync(path, "utf8");
+  }
+  return out;
 }
 
 afterEach(() => {
@@ -495,14 +529,17 @@ describe("runSetup", () => {
     expect(readFileSync(join(ch, "grane.yml"), "utf8")).toMatch(/type:\s*clickhouse/);
   });
 
-  it("import path stubs V2-05 and never writes YAML, runs demo, or authoring", async () => {
-    const dir = tempDir();
+  it("import path loads, validates, inspects, and pins without editing YAML", async () => {
+    const dir = initImportRepo();
+    const before = snapshotYaml(dir);
+    const head = git(dir, ["rev-parse", "HEAD"]);
     const logs: string[] = [];
     const result = await runSetup({
       stdinIsTty: true,
       dir,
       cwd: dir,
       skipConnect: true,
+      offline: true,
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: { log: (line) => logs.push(line), error: () => undefined },
@@ -512,35 +549,150 @@ describe("runSetup", () => {
       },
     });
     expect(result.path).toBe("import");
-    expect(result.warehouse).toBeNull();
+    expect(result.warehouse).toBe("postgres");
     expect(result.client).toBeNull();
     expect(result.connect).toBeNull();
-    expect(result.validated).toBe(false);
+    expect(result.validated).toBe(true);
     expect(result.live).toBe(false);
-    expect(result.question).toBe(IMPORT_HANDOFF);
+    expect(result.question).toBe(OWN_QUESTION);
     expect(result.projectDir).toBe(dir);
-    expect(logs.join("\n")).toContain(IMPORT_HANDOFF);
-    expect(existsSync(join(dir, "grane.yml"))).toBe(false);
-    expect(existsSync(join(dir, "metrics.yml"))).toBe(false);
-    expect(existsSync(join(dir, ".grane"))).toBe(false);
+    expect(snapshotYaml(dir)).toEqual(before);
+    expect(git(dir, ["rev-parse", "HEAD"])).toBe(head);
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+    const pin = readActivePin(dir);
+    expect(pin?.ref).toBe("main");
+    expect(pin?.commit).toBe(head);
+    expect(pin?.approved_by).toBe("setup-import");
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(true);
+    expect(existsSync(join(dir, ".grane", "authoring"))).toBe(false);
+    expect(logs.join("\n")).toContain("0/0 metrics valid");
+    expect(logs.join("\n")).toContain("Catalog");
+    expect(logs.join("\n")).toContain("Existing YAML loaded, validated, and activated");
+    expect(logs.join("\n")).toMatch(/activate\s+.grane\/active.json/);
+  });
+
+  it("import path prints the same validate messages as grane validate and does not pin", async () => {
+    const dir = initImportRepo();
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+`,
+    );
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "invalid metric"]);
+    const before = snapshotYaml(dir);
+
+    const loaded = loadConfig(dir);
+    const kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
+    const expected = formatValidateReport(kernel.validate(), {
+      providers: kernel.serverInfo().semantic_providers,
+      providerWarnings: kernel.providerWarnings,
+      schemaLive: false,
+    });
+    await kernel.close();
+
+    const logs: string[] = [];
+    await expect(
+      runSetup({
+        stdinIsTty: true,
+        dir,
+        cwd: dir,
+        skipConnect: true,
+        offline: true,
+        homeDir: tempDir(),
+        workspaceDir: tempDir(),
+        io: { log: (line) => logs.push(line), error: () => undefined },
+        prompt: scriptedPrompter({ select: ["yes"] }),
+        runDemoFn: async () => {
+          throw new Error("runDemo must not run on the import path");
+        },
+      }),
+    ).rejects.toThrow(/Validate failed/);
+    expect(logs.join("\n")).toContain(expected.join("\n"));
+    expect(logs.join("\n")).toContain("ERROR revenue");
+    expect(logs.join("\n")).toMatch(/undefined entity "order"/);
+    expect(readActivePin(dir)).toBeNull();
+    expect(snapshotYaml(dir)).toEqual(before);
+  });
+
+  it("import path repeats loadConfig errors the same way as grane validate", async () => {
+    const dir = initImportRepo();
+    writeFileSync(join(dir, "extra.yml"), "bogus: true\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "unknown key"]);
+    const before = snapshotYaml(dir);
+    let loadMessage = "";
+    try {
+      loadConfig(dir);
+    } catch (err) {
+      loadMessage = (err as Error).message;
+    }
+    expect(loadMessage).toMatch(/Unknown top-level key "bogus"/);
+    await expect(
+      runSetup({
+        stdinIsTty: true,
+        dir,
+        cwd: dir,
+        skipConnect: true,
+        offline: true,
+        homeDir: tempDir(),
+        workspaceDir: tempDir(),
+        io: quiet,
+        prompt: scriptedPrompter({ select: ["yes"] }),
+        runDemoFn: async () => {
+          throw new Error("runDemo must not run on the import path");
+        },
+      }),
+    ).rejects.toThrow(loadMessage);
+    expect(readActivePin(dir)).toBeNull();
+    expect(snapshotYaml(dir)).toEqual(before);
+  });
+
+  it("import path does not write YAML when there is no git repo to pin", async () => {
+    const dir = tempDir();
+    writeInitProject(dir);
+    const before = snapshotYaml(dir);
+    await expect(
+      runSetup({
+        stdinIsTty: true,
+        dir,
+        cwd: dir,
+        skipConnect: true,
+        offline: true,
+        homeDir: tempDir(),
+        workspaceDir: tempDir(),
+        io: quiet,
+        prompt: scriptedPrompter({ select: ["yes"] }),
+        runDemoFn: async () => {
+          throw new Error("runDemo must not run on the import path");
+        },
+      }),
+    ).rejects.toThrow(/No git repository/);
+    expect(snapshotYaml(dir)).toEqual(before);
+    expect(readActivePin(dir)).toBeNull();
   });
 
   it("goes back from the path step to the existing-YAML question", async () => {
     const demoDir = join(tempDir(), "shop");
     mkdirSync(demoDir);
-    const result = await runSetup({
-      stdinIsTty: true,
-      dir: demoDir,
-      skipConnect: true,
-      homeDir: tempDir(),
-      workspaceDir: tempDir(),
-      io: quiet,
-      prompt: scriptedPrompter({ select: ["no", BACK, "yes"] }),
-      runDemoFn: async () => {
-        throw new Error("runDemo must not run on the import path");
-      },
-    });
-    expect(result.path).toBe("import");
+    await expect(
+      runSetup({
+        stdinIsTty: true,
+        dir: demoDir,
+        skipConnect: true,
+        homeDir: tempDir(),
+        workspaceDir: tempDir(),
+        io: quiet,
+        prompt: scriptedPrompter({ select: ["no", BACK, "yes"] }),
+        runDemoFn: async () => {
+          throw new Error("runDemo must not run on the import path");
+        },
+      }),
+    ).rejects.toThrow(/No grane.yml found/);
     expect(existsSync(join(demoDir, "grane.yml"))).toBe(false);
   });
 
