@@ -22,7 +22,14 @@ import {
   persistOwnConnection,
   type ConnectionDraft,
 } from "./connection.js";
-import { OWN_QUESTION, SETUP_BANNER, demoReadyLines, ownReadyLines, skipConnectHint } from "./copy.js";
+import {
+  IMPORT_HANDOFF,
+  OWN_QUESTION,
+  SETUP_BANNER,
+  demoReadyLines,
+  ownReadyLines,
+  skipConnectHint,
+} from "./copy.js";
 import { createReadlinePrompter, type Prompter } from "./prompts.js";
 import type { SetupIo, SetupPath } from "./types.js";
 import { promptSetupAnswers } from "./wizard.js";
@@ -57,7 +64,7 @@ export interface RunSetupOptions {
 export interface SetupResult {
   path: SetupPath;
   projectDir: string;
-  warehouse: WarehouseType;
+  warehouse: WarehouseType | null;
   client: string | null;
   question: string;
   validated: boolean;
@@ -106,6 +113,9 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
     });
     if (answers.path === "demo") {
       return runDemoPath({ ...options, io, cwd, env, client: answers.client, skipConnect });
+    }
+    if (answers.path === "import") {
+      return runImportStub({ io, cwd, dir: options.dir, json: options.json });
     }
     return runOwnPath({
       ...options,
@@ -306,6 +316,27 @@ async function runOwnPath(opts: {
 function defaultOwnProjectDir(cwd: string): string {
   if (isGraneSourceTree(cwd)) return join(cwd, "my-analytics");
   return cwd;
+}
+
+/** V2-04 stub: yes-I-have-YAML never writes files or enters authoring. V2-05 replaces this. */
+function runImportStub(opts: {
+  io: SetupIo;
+  cwd: string;
+  dir?: string;
+  json?: boolean;
+}): SetupResult {
+  const projectDir = resolve(opts.dir ?? opts.cwd);
+  printReady(opts.io, opts.json, ["────────────────────────────────────────", IMPORT_HANDOFF, "", `Project  ${projectDir}`]);
+  return {
+    path: "import",
+    projectDir,
+    warehouse: null,
+    client: null,
+    question: IMPORT_HANDOFF,
+    validated: false,
+    live: false,
+    connect: null,
+  };
 }
 
 async function validateOwnProject(

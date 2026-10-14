@@ -13,9 +13,16 @@ import {
   parseOwnDatabaseUrl,
   persistOwnConnection,
 } from "../../src/setup/connection.js";
-import { OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
-import { BACK, scriptedPrompter } from "../../src/setup/prompts.js";
+import { IMPORT_HANDOFF, OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
+import { BACK, scriptedPrompter, type Prompter } from "../../src/setup/prompts.js";
 import { runSetup } from "../../src/setup/run.js";
+import {
+  EXISTING_YAML_QUESTION,
+  PATH_CHOICES,
+  PATH_QUESTION,
+  pathReviewLine,
+  promptSetupAnswers,
+} from "../../src/setup/wizard.js";
 
 const temps: string[] = [];
 
@@ -174,6 +181,12 @@ describe("runSetup", () => {
     await expect(runSetup({ yes: true, stdinIsTty: false, io: quiet })).rejects.toThrow(/--path/);
   });
 
+  it("--yes still only accepts demo or own (import is interactive until V2-06)", async () => {
+    await expect(
+      runSetup({ yes: true, path: "import", stdinIsTty: false, io: quiet }),
+    ).rejects.toThrow(/demo or own/);
+  });
+
   it("demo path builds via runDemo, registers MCP, and prints the revenue-drop question", async () => {
     const home = tempDir();
     const workspace = tempDir();
@@ -318,7 +331,7 @@ describe("runSetup", () => {
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: { log: (line) => logs.push(line), error: () => undefined },
-      prompt: scriptedPrompter({ select: ["demo", "skip"] }),
+      prompt: scriptedPrompter({ select: ["no", "demo", "skip"] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -357,7 +370,7 @@ describe("runSetup", () => {
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["own", BACK, "demo", "skip"] }),
+      prompt: scriptedPrompter({ select: ["no", "own", BACK, "demo", "skip"] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -377,7 +390,7 @@ describe("runSetup", () => {
       env: { ...process.env },
       io: { log: (line) => logs.push(line), error: () => undefined },
       prompt: scriptedPrompter({
-        select: ["own", "mysql", "postgres"],
+        select: ["no", "own", "mysql", "postgres"],
         input: ["back", "postgres://ro@localhost:5432/app", ""],
       }),
     });
@@ -396,7 +409,7 @@ describe("runSetup", () => {
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["demo", "skip", "cursor"], confirm: [BACK, true] }),
+      prompt: scriptedPrompter({ select: ["no", "demo", "skip", "cursor"], confirm: [BACK, true] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.client).toBe("cursor");
@@ -414,7 +427,7 @@ describe("runSetup", () => {
       env: { ...process.env },
       io: quiet,
       prompt: scriptedPrompter({
-        select: ["own", "mysql"],
+        select: ["no", "own", "mysql"],
         input: ["mysql://ro:x@localhost:3306/shop", "shop"],
       }),
     });
@@ -437,7 +450,7 @@ describe("runSetup", () => {
       env: { ...process.env },
       io: { log: (line) => logs.push(line), error: () => undefined },
       prompt: scriptedPrompter({
-        select: ["own", "snowflake"],
+        select: ["no", "own", "snowflake"],
         input: ["xy12345", "ro", "s3cret", "COMPUTE_WH", "ANALYTICS", "PUBLIC", "GRANE_READONLY"],
       }),
     });
@@ -481,4 +494,197 @@ describe("runSetup", () => {
     expect(chResult.warehouse).toBe("clickhouse");
     expect(readFileSync(join(ch, "grane.yml"), "utf8")).toMatch(/type:\s*clickhouse/);
   });
+
+  it("import path stubs V2-05 and never writes YAML, runs demo, or authoring", async () => {
+    const dir = tempDir();
+    const logs: string[] = [];
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir,
+      cwd: dir,
+      skipConnect: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: { log: (line) => logs.push(line), error: () => undefined },
+      prompt: scriptedPrompter({ select: ["yes"] }),
+      runDemoFn: async () => {
+        throw new Error("runDemo must not run on the import path");
+      },
+    });
+    expect(result.path).toBe("import");
+    expect(result.warehouse).toBeNull();
+    expect(result.client).toBeNull();
+    expect(result.connect).toBeNull();
+    expect(result.validated).toBe(false);
+    expect(result.live).toBe(false);
+    expect(result.question).toBe(IMPORT_HANDOFF);
+    expect(result.projectDir).toBe(dir);
+    expect(logs.join("\n")).toContain(IMPORT_HANDOFF);
+    expect(existsSync(join(dir, "grane.yml"))).toBe(false);
+    expect(existsSync(join(dir, "metrics.yml"))).toBe(false);
+    expect(existsSync(join(dir, ".grane"))).toBe(false);
+  });
+
+  it("goes back from the path step to the existing-YAML question", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir: demoDir,
+      skipConnect: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: quiet,
+      prompt: scriptedPrompter({ select: ["no", BACK, "yes"] }),
+      runDemoFn: async () => {
+        throw new Error("runDemo must not run on the import path");
+      },
+    });
+    expect(result.path).toBe("import");
+    expect(existsSync(join(demoDir, "grane.yml"))).toBe(false);
+  });
+
+  it("goes back from import confirm onto the demo path", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir: demoDir,
+      skipConnect: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: quiet,
+      prompt: scriptedPrompter({ select: ["yes", "no", "demo"], confirm: [BACK, true] }),
+      runDemoFn: async () => stubDemo(demoDir),
+    });
+    expect(result.path).toBe("demo");
+    expect(result.warehouse).toBe("duckdb");
+  });
 });
+
+describe("wizard existing-YAML fork", () => {
+  it("freezes demo/own path copy as byte-identical to today", () => {
+    expect(PATH_QUESTION).toBe("How do you want to start?");
+    expect(PATH_CHOICES).toEqual([
+      {
+        value: "demo",
+        label: "Try Grane's demo shop",
+        hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
+      },
+      {
+        value: "own",
+        label: "Connect my own data",
+        hint: "Any warehouse Grane already supports. We write grane.yml, validate, then connect an agent.",
+      },
+    ]);
+    expect(pathReviewLine("demo")).toBe("demo shop (DuckDB)");
+    expect(pathReviewLine("own")).toBe("own data");
+    expect({
+      PATH_QUESTION,
+      PATH_CHOICES,
+      demoReview: pathReviewLine("demo"),
+      ownReview: pathReviewLine("own"),
+    }).toMatchSnapshot();
+  });
+
+  it("demo path after answering no matches the frozen wizard transcript", async () => {
+    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["no", "demo"] }));
+    const answers = await promptSetupAnswers(wizardOpts(prompt, io));
+    expect(answers.path).toBe("demo");
+    expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
+    expect(transcript.slice(1)).toMatchSnapshot();
+  });
+
+  it("own path after answering no matches the frozen wizard transcript", async () => {
+    const { prompt, io, transcript } = recordingPrompter(
+      scriptedPrompter({
+        select: ["no", "own", "postgres"],
+        input: ["postgres://ro@localhost:5432/app", ""],
+      }),
+    );
+    const answers = await promptSetupAnswers(wizardOpts(prompt, io));
+    expect(answers.path).toBe("own");
+    expect(answers.engine).toBe("postgres");
+    expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
+    expect(transcript.slice(1)).toMatchSnapshot();
+  });
+
+  it("answering yes never enters path, warehouse, or client steps", async () => {
+    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["yes"] }));
+    const answers = await promptSetupAnswers(wizardOpts(prompt, io));
+    expect(answers.path).toBe("import");
+    expect(answers.engine).toBeUndefined();
+    expect(answers.connection).toBeUndefined();
+    expect(answers.client).toBeNull();
+    const questions = transcript
+      .filter((e) => e.kind === "select" || e.kind === "input")
+      .map((e) => String(e.question));
+    expect(questions).toEqual([EXISTING_YAML_QUESTION]);
+    expect(questions).not.toContain(PATH_QUESTION);
+    expect(questions).not.toContain("Which warehouse?");
+    expect(questions).not.toContain("Which agent should Grane register with?");
+  });
+});
+
+function wizardOpts(prompt: Prompter, io: { log: (line: string) => void; error: (line: string) => void }) {
+  return {
+    io,
+    prompt,
+    env: {},
+    skipConnect: true,
+    resolveClientId: (name: string) => name,
+    listClients: () => [
+      { id: "cursor", label: "Cursor" },
+      { id: "generic", label: "Generic" },
+    ],
+  };
+}
+
+function recordingPrompter(inner: Prompter): {
+  prompt: Prompter;
+  io: { log: (line: string) => void; error: (line: string) => void };
+  transcript: Array<Record<string, unknown>>;
+} {
+  const transcript: Array<Record<string, unknown>> = [];
+  return {
+    io: {
+      log: (line: string) => {
+        transcript.push({ kind: "log", line });
+      },
+      error: () => undefined,
+    },
+    transcript,
+    prompt: {
+      async select(question, choices, opts) {
+        transcript.push({
+          kind: "select",
+          question,
+          choices: choices.map((c) => ({ value: c.value, label: c.label, hint: c.hint })),
+          allowBack: Boolean(opts?.allowBack),
+          defaultValue: opts?.defaultValue,
+        });
+        return inner.select(question, choices, opts);
+      },
+      async input(question, opts) {
+        transcript.push({
+          kind: "input",
+          question,
+          defaultValue: opts?.defaultValue,
+          allowEmpty: Boolean(opts?.allowEmpty),
+          allowBack: Boolean(opts?.allowBack),
+        });
+        return inner.input(question, opts);
+      },
+      async confirm(question, opts = true) {
+        const resolved = typeof opts === "boolean" ? { defaultYes: opts } : opts;
+        transcript.push({
+          kind: "confirm",
+          question,
+          defaultYes: resolved.defaultYes !== false,
+          allowBack: Boolean(resolved.allowBack),
+        });
+        return inner.confirm(question, opts);
+      },
+    },
+  };
+}

@@ -8,5 +8,12 @@ export {
   isGraneSourceTree,
 } from "./connection.js";
 export { createReadlinePrompter, scriptedPrompter, BACK } from "./prompts.js";
-export { DEMO_QUESTION, OWN_QUESTION, SETUP_BANNER } from "./copy.js";
-export { promptSetupAnswers } from "./wizard.js";
+export { DEMO_QUESTION, OWN_QUESTION, IMPORT_HANDOFF, SETUP_BANNER } from "./copy.js";
+export {
+  promptSetupAnswers,
+  PATH_QUESTION,
+  PATH_CHOICES,
+  EXISTING_YAML_QUESTION,
+  EXISTING_YAML_CHOICES,
+  pathReviewLine,
+} from "./wizard.js";
