@@ -1,4 +1,11 @@
-export { runSetup, type RunSetupOptions, type SetupResult, type SetupPath } from "./run.js";
+export {
+  runSetup,
+  serializeSetupResult,
+  formatSetupWarehouse,
+  type RunSetupOptions,
+  type SetupResult,
+  type SetupPath,
+} from "./run.js";
 export {
   parseOwnDatabaseUrl,
   persistOwnConnection,

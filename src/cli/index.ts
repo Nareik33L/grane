@@ -19,7 +19,7 @@ import { usageRanked } from "../explore/usage.js";
 import { writeDiscoveredRelationships } from "../discover/relationships.js";
 import { runDemo } from "../demo/run.js";
 import { WAREHOUSE_TYPES, type WarehouseType } from "../connectors/dialect.js";
-import { runSetup } from "../setup/run.js";
+import { runSetup, serializeSetupResult } from "../setup/run.js";
 import { parseFilterSpec } from "./args.js";
 import { writeInitProject } from "./init-project.js";
 import { formatProductionLint, lintProduction } from "./production-lint.js";
@@ -126,22 +126,7 @@ program
             : undefined,
         });
         if (options.json) {
-          console.log(
-            JSON.stringify(
-              {
-                path: result.path,
-                projectDir: result.projectDir,
-                warehouse: result.warehouse,
-                client: result.client,
-                question: result.question,
-                validated: result.validated,
-                live: result.live,
-                mcpPath: result.connect?.path ?? null,
-              },
-              null,
-              2,
-            ),
-          );
+          console.log(JSON.stringify(serializeSetupResult(result), null, 2));
         }
       } catch (err) {
         fail(err);

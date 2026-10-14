@@ -80,6 +80,38 @@ export interface SetupResult {
   connect: ConnectResult | null;
 }
 
+/** Human label for `SetupResult.warehouse`. Null (import before an engine is known) is "none". */
+export function formatSetupWarehouse(warehouse: WarehouseType | null): string {
+  if (warehouse === null) return "none";
+  return warehouse;
+}
+
+/** JSON payload for `grane setup --json`. Null warehouse/client stay JSON `null`, never omitted. */
+export function serializeSetupResult(result: SetupResult): {
+  path: SetupPath;
+  projectDir: string;
+  warehouse: WarehouseType | null;
+  client: string | null;
+  question: string;
+  validated: boolean;
+  live: boolean;
+  mcpPath: string | null;
+} {
+  const warehouse: WarehouseType | null = result.warehouse === null ? null : result.warehouse;
+  const client: string | null = result.client === null ? null : result.client;
+  const mcpPath: string | null = result.connect === null || result.connect === undefined ? null : result.connect.path;
+  return {
+    path: result.path,
+    projectDir: result.projectDir,
+    warehouse,
+    client,
+    question: result.question,
+    validated: result.validated,
+    live: result.live,
+    mcpPath,
+  };
+}
+
 const defaultIo: SetupIo = {
   log: (line) => console.log(line),
   error: (line) => console.error(line),
@@ -412,16 +444,22 @@ async function runImportPath(opts: {
     opts.io.log(`activate    ${ACTIVE_PIN_PATH}  ${pin.ref} @ ${pin.commit.slice(0, 7)}`);
 
     const connected = connectIfRequested(opts, projectDir);
+    const warehouse: WarehouseType | null = loaded.config.connection.type;
     printReady(
       opts.io,
       opts.json,
-      importReadyLines({ projectDir, pinRef: pin.ref, pinCommit: pin.commit }),
+      importReadyLines({
+        projectDir,
+        pinRef: pin.ref,
+        pinCommit: pin.commit,
+        warehouseLabel: formatSetupWarehouse(warehouse),
+      }),
     );
 
     return {
       path: "import",
       projectDir,
-      warehouse: loaded.config.connection.type,
+      warehouse,
       client: opts.client,
       question: OWN_QUESTION,
       validated: true,

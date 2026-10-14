@@ -8,6 +8,7 @@ export function importReadyLines(opts: {
   projectDir: string;
   pinRef: string;
   pinCommit: string;
+  warehouseLabel: string;
 }): string[] {
   return [
     "────────────────────────────────────────",
@@ -16,6 +17,7 @@ export function importReadyLines(opts: {
     "Existing YAML loaded, validated, and activated. No files were edited.",
     "",
     `  Pin      ${opts.pinRef} @ ${opts.pinCommit.slice(0, 7)}`,
+    `  Engine   ${opts.warehouseLabel}`,
     "",
     "Ask your agent:",
     "",

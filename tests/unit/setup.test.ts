@@ -20,7 +20,7 @@ import {
 } from "../../src/setup/connection.js";
 import { OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
 import { BACK, scriptedPrompter, type Prompter } from "../../src/setup/prompts.js";
-import { runSetup } from "../../src/setup/run.js";
+import { formatSetupWarehouse, runSetup, serializeSetupResult, type SetupResult } from "../../src/setup/run.js";
 import {
   EXISTING_YAML_QUESTION,
   PATH_CHOICES,
@@ -550,6 +550,8 @@ describe("runSetup", () => {
     });
     expect(result.path).toBe("import");
     expect(result.warehouse).toBe("postgres");
+    expect(serializeSetupResult(result).warehouse).toBe("postgres");
+    expect(JSON.parse(JSON.stringify(serializeSetupResult(result))).warehouse).toBe("postgres");
     expect(result.client).toBeNull();
     expect(result.connect).toBeNull();
     expect(result.validated).toBe(true);
@@ -568,6 +570,7 @@ describe("runSetup", () => {
     expect(logs.join("\n")).toContain("0/0 metrics valid");
     expect(logs.join("\n")).toContain("Catalog");
     expect(logs.join("\n")).toContain("Existing YAML loaded, validated, and activated");
+    expect(logs.join("\n")).toContain("Engine   postgres");
     expect(logs.join("\n")).toMatch(/activate\s+.grane\/active.json/);
   });
 
@@ -711,6 +714,44 @@ describe("runSetup", () => {
     });
     expect(result.path).toBe("demo");
     expect(result.warehouse).toBe("duckdb");
+  });
+});
+
+describe("SetupResult.warehouse null handling", () => {
+  function importShaped(warehouse: SetupResult["warehouse"]): SetupResult {
+    return {
+      path: "import",
+      projectDir: "/tmp/existing-yaml",
+      warehouse,
+      client: null,
+      question: OWN_QUESTION,
+      validated: false,
+      live: false,
+      connect: null,
+    };
+  }
+
+  it("formatSetupWarehouse maps null to none and keeps engine ids", () => {
+    expect(formatSetupWarehouse(null)).toBe("none");
+    expect(formatSetupWarehouse("duckdb")).toBe("duckdb");
+    expect(formatSetupWarehouse("postgres")).toBe("postgres");
+  });
+
+  it("serializeSetupResult keeps JSON warehouse null for the import-shaped result", () => {
+    const json = serializeSetupResult(importShaped(null));
+    expect(json.warehouse).toBeNull();
+    expect(json.client).toBeNull();
+    expect(json.mcpPath).toBeNull();
+    expect(json.path).toBe("import");
+    const parsed = JSON.parse(JSON.stringify(json)) as { warehouse: unknown };
+    expect(Object.prototype.hasOwnProperty.call(parsed, "warehouse")).toBe(true);
+    expect(parsed.warehouse).toBeNull();
+  });
+
+  it("serializeSetupResult does not coerce a loaded import warehouse to null", () => {
+    const json = serializeSetupResult(importShaped("postgres"));
+    expect(json.warehouse).toBe("postgres");
+    expect(JSON.parse(JSON.stringify(json)).warehouse).toBe("postgres");
   });
 });
 
