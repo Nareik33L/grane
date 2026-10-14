@@ -19,6 +19,8 @@ export interface TableInfo {
   primaryKey?: string;
   /** All PRIMARY KEY columns in ordinal order. Length > 1 is composite. */
   primaryKeyColumns?: string[];
+  /** Columns that each have their own single-column UNIQUE constraint. */
+  uniqueColumns?: string[];
 }
 
 /** Apply introspected PRIMARY KEY columns. Composite keys are recorded, not truncated. */
@@ -53,6 +55,34 @@ export function tablePrimaryKeyColumns(table: TableInfo | undefined): string[] {
 
 export function isCompositePrimaryKey(table: TableInfo | undefined): boolean {
   return tablePrimaryKeyColumns(table).length > 1;
+}
+
+/**
+ * Record columns that appear in a single-column UNIQUE constraint.
+ * Composite UNIQUE indexes are ignored — they are not a Grane grain.
+ */
+export function applySingleColumnUniques(
+  tables: Iterable<TableInfo>,
+  keys: ReadonlyArray<{ table: string; column: string; constraint: string }>,
+): void {
+  const byConstraint = new Map<string, { table: string; columns: string[] }>();
+  for (const key of keys) {
+    const id = `${key.table}\0${key.constraint}`;
+    const entry = byConstraint.get(id) ?? { table: key.table, columns: [] };
+    if (!entry.columns.includes(key.column)) entry.columns.push(key.column);
+    byConstraint.set(id, entry);
+  }
+  const byTable = new Map<string, string[]>();
+  for (const { table, columns } of byConstraint.values()) {
+    if (columns.length !== 1) continue;
+    const list = byTable.get(table) ?? [];
+    if (!list.includes(columns[0]!)) list.push(columns[0]!);
+    byTable.set(table, list);
+  }
+  for (const table of tables) {
+    const cols = byTable.get(table.name);
+    if (cols && cols.length > 0) table.uniqueColumns = cols;
+  }
 }
 
 export interface ForeignKeyInfo {

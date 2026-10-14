@@ -205,6 +205,30 @@ describe.each(engines)("certification corpus ($type)", (engine: CertEngine) => {
       await expect(session.queryRead(`INSERT INTO ${session.schemaName}.orders (id) VALUES (-1)`)).rejects.toThrow(
         /permission denied/i,
       );
+      await session.execWrite(
+        "CREATE TABLE pk_simple (product_id INTEGER PRIMARY KEY, sku TEXT, net_amount NUMERIC)",
+      );
+      await session.execWrite(
+        "CREATE TABLE pk_composite (tenant_id INTEGER, order_id INTEGER, amount NUMERIC, PRIMARY KEY (tenant_id, order_id), UNIQUE (order_id))",
+      );
+      await session.execWrite(
+        "CREATE TABLE pk_parted (id INTEGER PRIMARY KEY, n NUMERIC) PARTITION BY RANGE (id)",
+      );
+      await session.execWrite(
+        `GRANT SELECT ON ALL TABLES IN SCHEMA ${session.schemaName} TO ${PG_READONLY_USER}`,
+      );
+      const k = kernel();
+      const schema = await k.introspectSchema();
+      const simple = schema.tables.find((table) => table.name === "pk_simple");
+      const composite = schema.tables.find((table) => table.name === "pk_composite");
+      const parted = schema.tables.find((table) => table.name === "pk_parted");
+      expect(simple?.primaryKey, "SELECT-only role must see PRIMARY KEY via pg_constraint").toBe("product_id");
+      expect(simple?.primaryKeyColumns).toEqual(["product_id"]);
+      expect(composite?.primaryKey).toBeUndefined();
+      expect(composite?.primaryKeyColumns).toEqual(["tenant_id", "order_id"]);
+      expect(composite?.uniqueColumns, "SELECT-only role must see single-column UNIQUE").toEqual(["order_id"]);
+      expect(parted?.primaryKey, "partitioned parent relkind p must be included").toBe("id");
+      expect(parted?.primaryKeyColumns).toEqual(["id"]);
     } else {
       expect(
         session.capabilities.postgresReadonlyRole,

@@ -111,6 +111,7 @@ export {
   NON_ADDITIVE_CANDIDATES,
   FANOUT_CANDIDATES,
   GLOBAL_SNAPSHOT_GROUP_BY,
+  PRIMARY_KEY_SKIP,
   type AmbiguityKind,
 } from "./authoring/ambiguity.js";
 export { generateDraftYaml } from "./authoring/generate.js";

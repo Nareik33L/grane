@@ -14,6 +14,7 @@ import {
   mergeAmbiguities,
   nonAdditiveAmbiguityId,
   primaryKeyAmbiguityId,
+  PRIMARY_KEY_SKIP,
   parseNonAdditiveAmbiguityId,
   isForbiddenSemiGroupByColumn,
   quoteIdent,
@@ -195,7 +196,9 @@ describe("public API", () => {
   it("exports the ambiguity engine", () => {
     expect(publicApi).toHaveProperty("detectAmbiguities");
     expect(publicApi).toHaveProperty("mergeAmbiguities");
+    expect(publicApi).toHaveProperty("PRIMARY_KEY_SKIP");
     expect(publicApi.AMBIGUITY_KINDS).toEqual([...AMBIGUITY_KINDS]);
+    expect(publicApi.PRIMARY_KEY_SKIP).toBe("skip");
   });
 });
 
@@ -442,20 +445,32 @@ const missingPkSchema = schemaOf([
 ]);
 
 describe("primary key grain", () => {
-  it("asks rather than truncating a composite PRIMARY KEY to the first column", () => {
+  it("does not ask to pick a composite PRIMARY KEY column as grain", () => {
     const found = detectAmbiguities({ schema: compositeSchema });
+    expect(found.some((item) => item.kind === "primary_key")).toBe(false);
+  });
+
+  it("offers only single-column UNIQUE constraints on a composite-PK table", () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["order_id"],
+      },
+    ]);
+    const found = detectAmbiguities({ schema });
     const amb = found.find((item) => item.kind === "primary_key");
     expect(amb).toMatchObject({
       id: primaryKeyAmbiguityId("orders"),
       kind: "primary_key",
-      candidates: ["orders.tenant_id", "orders.order_id"],
+      candidates: ["orders.order_id", PRIMARY_KEY_SKIP],
     });
     expect(amb?.question).toMatch(/composite PRIMARY KEY/i);
     expect(amb?.question).toMatch(/false grain/i);
-    expect(amb?.candidates[0]).toBe("orders.tenant_id");
+    expect(amb?.question).toMatch(/UNIQUE/i);
+    expect(amb?.candidates).not.toContain("orders.tenant_id");
   });
 
-  it("asks which column is the grain when PRIMARY KEY metadata is missing", () => {
+  it("asks which column is the grain when PRIMARY KEY metadata is missing and offers skip", () => {
     const found = detectAmbiguities({ schema: missingPkSchema });
     const amb = found.find((item) => item.kind === "primary_key");
     expect(amb).toMatchObject({
@@ -466,11 +481,32 @@ describe("primary key grain", () => {
     expect(amb?.question).toMatch(/will not guess/i);
     expect(amb?.candidates).toContain("orders.sku");
     expect(amb?.candidates).toContain("orders.net_amount");
+    expect(amb?.candidates).toContain(PRIMARY_KEY_SKIP);
+    expect(amb?.candidates.at(-1)).toBe(PRIMARY_KEY_SKIP);
   });
 
-  it("propose_definitions uses the resolved composite key column, not the first", async () => {
+  it("skips composite-PK tables instead of using one key column as grain", async () => {
     const dir = tempDir();
     const k = kernelFor(dir, compositeSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    expect(listAmbiguities(k, sessionId).some((item) => item.kind === "primary_key")).toBe(false);
+    const revenue = listAmbiguities(k, sessionId).find((item) => item.kind === "revenue_like_columns")!;
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(
+      /Skipped tables without a usable primary key: orders/,
+    );
+  });
+
+  it("uses a unique column on a composite-PK table when the user chooses it", async () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["order_id"],
+      },
+    ]);
+    const dir = tempDir();
+    const k = kernelFor(dir, schema);
     const sessionId = authoringStart(k).session.id;
     await discoverSchema(k, sessionId);
     const listed = listAmbiguities(k, sessionId);
@@ -493,6 +529,44 @@ describe("primary key grain", () => {
     await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
     await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(/Skipped tables without a usable primary key: orders/);
     expect(listAmbiguities(k, sessionId).some((item) => item.kind === "primary_key")).toBe(true);
+  });
+
+  it("accepts skip on a composite-PK table with a UNIQUE column", async () => {
+    const schema = schemaOf([
+      {
+        ...compositeSchema.tables[0]!,
+        uniqueColumns: ["order_id"],
+      },
+    ]);
+    const dir = tempDir();
+    const k = kernelFor(dir, schema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const pk = listed.find((item) => item.kind === "primary_key")!;
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    expect(pk.candidates.at(-1)).toBe(PRIMARY_KEY_SKIP);
+    await resolveAmbiguity(k, sessionId, pk.id, PRIMARY_KEY_SKIP);
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(
+      /Skipped tables without a usable primary key: orders/,
+    );
+  });
+
+  it("accepts skip on a keyless table and omits it from the draft", async () => {
+    const dir = tempDir();
+    const k = kernelFor(dir, missingPkSchema);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    const listed = listAmbiguities(k, sessionId);
+    const pk = listed.find((item) => item.kind === "primary_key")!;
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns")!;
+    await resolveAmbiguity(k, sessionId, pk.id, PRIMARY_KEY_SKIP);
+    await resolveAmbiguity(k, sessionId, revenue.id, "orders.net_amount");
+    await expect(proposeDefinitions(k, sessionId)).rejects.toThrow(
+      /Skipped tables without a usable primary key: orders/,
+    );
+    expect(listAmbiguities(k, sessionId).some((item) => item.kind === "primary_key")).toBe(false);
   });
 });
 

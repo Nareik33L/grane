@@ -39,6 +39,8 @@ export const NON_ADDITIVE_CANDIDATES = ["semi", "unsupported"] as const;
 /** One snapshot date for the whole result — never vacuous. */
 export const GLOBAL_SNAPSHOT_GROUP_BY = "[]";
 export const FANOUT_CANDIDATES = ["preaggregate", "do_not_join"] as const;
+/** Decline to author a table that has no usable single-column grain. */
+export const PRIMARY_KEY_SKIP = "skip";
 
 /** Quote a SQL identifier in question text. Candidates stay unquoted. */
 export function quoteIdent(name: string): string {
@@ -221,21 +223,29 @@ export function resolvedTimeColumn(
 
 /**
  * Entity grain: a resolved `primary_key` choice, or an introspected
- * single-column PRIMARY KEY. Never the first column of a composite key.
+ * single-column PRIMARY KEY. Never a composite-key column (false grain)
+ * unless that column has its own single-column UNIQUE constraint. `skip`
+ * means do not author the table.
  */
 export function resolvedEntityPrimaryKey(
   session: { resolved_ambiguities: ReadonlyArray<Pick<ResolvedAmbiguity, "id" | "kind" | "chosen">> },
   schema: DatabaseSchema,
   table: string,
 ): string | undefined {
+  const info = schema.tables.find((item) => item.name === table);
   const chosen = session.resolved_ambiguities.find(
     (item) => item.kind === "primary_key" && item.id === primaryKeyAmbiguityId(table),
   )?.chosen;
+  if (chosen === PRIMARY_KEY_SKIP) return undefined;
   if (chosen) {
     const parsed = parseColumnRef(chosen);
-    if (parsed?.table === table) return parsed.column;
+    if (parsed?.table === table) {
+      if (isCompositePrimaryKey(info) && !(info?.uniqueColumns ?? []).includes(parsed.column)) {
+        return undefined;
+      }
+      return parsed.column;
+    }
   }
-  const info = schema.tables.find((item) => item.name === table);
   return tablePrimaryKey(info);
 }
 
@@ -268,15 +278,17 @@ function primaryKeyAmbiguity(table: TableInfo): OpenAmbiguity | null {
   const pkCols = tablePrimaryKeyColumns(table);
   if (pkCols.length === 1) return null;
   if (isCompositePrimaryKey(table)) {
+    const unique = table.uniqueColumns ?? [];
+    if (unique.length === 0) return null;
     return {
       id: primaryKeyAmbiguityId(table.name),
       kind: "primary_key",
       question:
         `Table ${quoteIdent(table.name)} has a composite PRIMARY KEY ` +
-        `(${pkCols.map(quoteIdent).join(", ")}). Grane entities have a single-column grain — ` +
-        `using the first column would be a false grain. Choose one column as the grain. ` +
+        `(${pkCols.map(quoteIdent).join(", ")}). Picking one key column would be a false grain. ` +
+        `Choose a column that has its own single-column UNIQUE constraint, or "${PRIMARY_KEY_SKIP}". ` +
         `Grane will not guess.`,
-      candidates: pkCols.map((column) => `${table.name}.${column}`),
+      candidates: [...unique.map((column) => `${table.name}.${column}`), PRIMARY_KEY_SKIP],
     };
   }
   const hasMeasure = table.columns.some((column) => isNumericType(column.dataType));
@@ -288,8 +300,9 @@ function primaryKeyAmbiguity(table: TableInfo): OpenAmbiguity | null {
     kind: "primary_key",
     question:
       `No PRIMARY KEY was introspected on ${quoteIdent(table.name)}. ` +
-      `Which column is the entity grain? Grane will not guess id or the first column.`,
-    candidates,
+      `Which column is the entity grain? Choose "${PRIMARY_KEY_SKIP}" to omit this table. ` +
+      `Grane will not guess id or the first column.`,
+    candidates: [...candidates, PRIMARY_KEY_SKIP],
   };
 }
 

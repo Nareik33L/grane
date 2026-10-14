@@ -3,7 +3,13 @@ import type { ConnectionConfig, LimitsConfig, Scalar } from "../../config/schema
 import { configError } from "../../errors.js";
 import { postgresDialect, redshiftDialect, type WarehouseType } from "../dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "../types.js";
-import { applyPrimaryKeys, isWriteSql, warehouseSslOptions, connectionPoolSize } from "../types.js";
+import {
+  applyPrimaryKeys,
+  applySingleColumnUniques,
+  isWriteSql,
+  warehouseSslOptions,
+  connectionPoolSize,
+} from "../types.js";
 import { unsafeQuery } from "../../errors.js";
 
 export const POSTGRES_READ_ONLY_BEGIN = "BEGIN TRANSACTION READ ONLY";
@@ -184,7 +190,7 @@ export async function introspectPostgres(pool: pg.Pool, schemaName: string): Pro
        JOIN pg_attribute src_col ON src_col.attrelid = src.oid AND src_col.attnum = sk.attnum
        WHERE con.contype = 'p'
          AND ns.nspname = $1
-         AND src.relkind = 'r'
+         AND src.relkind IN ('r', 'p')
          AND NOT src_col.attisdropped
        ORDER BY src.relname, sk.ord`,
       [schemaName],
@@ -192,6 +198,31 @@ export async function introspectPostgres(pool: pg.Pool, schemaName: string): Pro
     applyPrimaryKeys(
       tablesByName.values(),
       pkResult.rows.map((row) => ({ table: row.table_name, column: row.column_name })),
+    );
+    const uniqueResult = await pool.query<{ table_name: string; column_name: string; constraint_name: string }>(
+      `SELECT
+         src.relname AS table_name,
+         src_col.attname AS column_name,
+         con.conname AS constraint_name
+       FROM pg_constraint con
+       JOIN pg_class src ON src.oid = con.conrelid
+       JOIN pg_namespace ns ON ns.oid = src.relnamespace
+       JOIN unnest(con.conkey) WITH ORDINALITY AS sk(attnum, ord) ON true
+       JOIN pg_attribute src_col ON src_col.attrelid = src.oid AND src_col.attnum = sk.attnum
+       WHERE con.contype = 'u'
+         AND ns.nspname = $1
+         AND src.relkind IN ('r', 'p')
+         AND NOT src_col.attisdropped
+       ORDER BY src.relname, con.conname, sk.ord`,
+      [schemaName],
+    );
+    applySingleColumnUniques(
+      tablesByName.values(),
+      uniqueResult.rows.map((row) => ({
+        table: row.table_name,
+        column: row.column_name,
+        constraint: row.constraint_name,
+      })),
     );
   } catch {
     /* PRIMARY KEY metadata is optional; authoring will not guess a grain. */

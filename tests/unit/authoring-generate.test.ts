@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as publicApi from "../../src/index.js";
 import { generateDraftYaml } from "../../src/authoring/generate.js";
 import { createSession } from "../../src/authoring/session.js";
-import { applyPrimaryKeys, type DatabaseSchema } from "../../src/connectors/types.js";
-import { primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
+import { applyPrimaryKeys, applySingleColumnUniques, type DatabaseSchema } from "../../src/connectors/types.js";
+import { PRIMARY_KEY_SKIP, primaryKeyAmbiguityId } from "../../src/authoring/ambiguity.js";
 import { loadConfig } from "../../src/config/load.js";
 import { validateModel } from "../../src/validate/validate.js";
 import { SemanticModel } from "../../src/model/model.js";
@@ -85,6 +85,8 @@ function validateFiles(files: Record<string, string>) {
 describe("public API", () => {
   it("exports generateDraftYaml", () => {
     expect(publicApi).toHaveProperty("generateDraftYaml");
+    expect(publicApi).toHaveProperty("PRIMARY_KEY_SKIP");
+    expect(publicApi.PRIMARY_KEY_SKIP).toBe("skip");
   });
 });
 
@@ -131,7 +133,7 @@ describe("generateDraftYaml", () => {
     );
   });
 
-  it("does not truncate a composite PRIMARY KEY to the first column", () => {
+  it("skips a composite PRIMARY KEY instead of using one key column as grain", () => {
     const dir = tempDir();
     const session = sessionWithRevenue(dir);
     const schema = productsSchema();
@@ -140,7 +142,7 @@ describe("generateDraftYaml", () => {
     expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/products/);
     expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(/primary_key/);
 
-    const resolved = createSession(dir, {
+    const pickedCompositeColumn = createSession(dir, {
       warehouse_ref: { type: "postgres", locator: "db" },
       resolved_ambiguities: [
         ...session.resolved_ambiguities,
@@ -153,9 +155,91 @@ describe("generateDraftYaml", () => {
         },
       ],
     });
+    expect(() => generateDraftYaml({ session: pickedCompositeColumn, schema, inferred: {} })).toThrow(/products/);
+  });
+
+  it("uses a single-column UNIQUE constraint as grain on a composite-PK table", () => {
+    const dir = tempDir();
+    const session = sessionWithRevenue(dir);
+    const schema = productsSchema();
+    schema.tables[0]!.primaryKey = undefined;
+    schema.tables[0]!.primaryKeyColumns = ["tenant_id", "product_id"];
+    schema.tables[0]!.uniqueColumns = ["product_id"];
+    const resolved = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      resolved_ambiguities: [
+        ...session.resolved_ambiguities,
+        {
+          id: primaryKeyAmbiguityId("products"),
+          kind: "primary_key",
+          question: "unique",
+          candidates: ["products.product_id", PRIMARY_KEY_SKIP],
+          chosen: "products.product_id",
+        },
+      ],
+    });
     const { files } = generateDraftYaml({ session: resolved, schema, inferred: {} });
     expect(files["entities.yml"]).toMatch(/primary_key:\s*product_id/);
     expect(files["entities.yml"]).not.toMatch(/primary_key:\s*tenant_id/);
+  });
+
+  it("honours skip on a keyless table", () => {
+    const dir = tempDir();
+    const schema = productsSchema();
+    delete schema.tables[0]!.primaryKey;
+    delete schema.tables[0]!.primaryKeyColumns;
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      resolved_ambiguities: [
+        {
+          id: "amb-revenue-like-products",
+          kind: "revenue_like_columns",
+          question: "Which column?",
+          candidates: ["products.net_amount", "products.gross_amount"],
+          chosen: "products.net_amount",
+        },
+        {
+          id: primaryKeyAmbiguityId("products"),
+          kind: "primary_key",
+          question: "grain",
+          candidates: ["products.sku", PRIMARY_KEY_SKIP],
+          chosen: PRIMARY_KEY_SKIP,
+        },
+      ],
+    });
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(
+      /Skipped tables without a usable primary key: products/,
+    );
+  });
+
+  it("honours skip on a composite-PK table that has a UNIQUE column", () => {
+    const dir = tempDir();
+    const schema = productsSchema();
+    schema.tables[0]!.primaryKey = undefined;
+    schema.tables[0]!.primaryKeyColumns = ["tenant_id", "product_id"];
+    schema.tables[0]!.uniqueColumns = ["product_id"];
+    const session = createSession(dir, {
+      warehouse_ref: { type: "postgres", locator: "db" },
+      resolved_ambiguities: [
+        {
+          id: "amb-revenue-like-products",
+          kind: "revenue_like_columns",
+          question: "Which column?",
+          candidates: ["products.net_amount", "products.gross_amount"],
+          chosen: "products.net_amount",
+        },
+        {
+          id: primaryKeyAmbiguityId("products"),
+          kind: "primary_key",
+          question: "composite unique",
+          candidates: ["products.product_id", PRIMARY_KEY_SKIP],
+          chosen: PRIMARY_KEY_SKIP,
+        },
+      ],
+    });
+    expect(() => generateDraftYaml({ session, schema, inferred: {} })).toThrow(
+      /Skipped tables without a usable primary key: products/,
+    );
   });
 
   it("includes the glossary answer as the metric description", () => {
@@ -300,6 +384,26 @@ describe("applyPrimaryKeys / refusal messages", () => {
     ]);
     expect(tables[0]!.primaryKey).toBeUndefined();
     expect(tables[0]!.primaryKeyColumns).toEqual(["tenant_id", "order_id"]);
+  });
+
+  it("records only single-column UNIQUE constraints", () => {
+    const tables = [
+      { schema: "public", name: "orders", columns: [] as { name: string; dataType: string; nullable: boolean }[] },
+    ];
+    applySingleColumnUniques(tables, [
+      { table: "orders", column: "order_id", constraint: "orders_order_id_key" },
+      { table: "orders", column: "tenant_id", constraint: "orders_composite_key" },
+      { table: "orders", column: "region_id", constraint: "orders_composite_key" },
+    ]);
+    expect(tables[0]!.uniqueColumns).toEqual(["order_id"]);
+  });
+
+  it("looks up Postgres PRIMARY KEY via pg_constraint including partitioned parents", () => {
+    const src = readFileSync(new URL("../../src/connectors/postgres/client.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/contype = 'p'/);
+    expect(src).toMatch(/contype = 'u'/);
+    expect(src).toMatch(/relkind IN \('r', 'p'\)/);
+    expect(src).not.toMatch(/\b(FROM|JOIN)\s+information_schema\.table_constraints\b/i);
   });
 
   it("gives the primary-key refusal a message distinct from the temporal one", () => {

@@ -39,11 +39,14 @@
   (refuses on key conflicts) so drafts do not clobber adopter files.
   Exploration allow-list wildcards are never emitted. Entity `primary_key`
   comes from introspected PRIMARY KEY metadata only — never `id`, the first
-  column, or the first column of a composite key. Composite and missing PKs
-  are asked as `primary_key` ambiguities; unresolved tables are listed, not
-  silently dropped. Glossary answers become metric `description`. Postgres PK
-  lookup uses `pg_constraint` (visible to SELECT-only roles). DuckDB PK lookup
-  is schema-filtered. YAML map keys sort in ordinal (not locale) order.
+  column, or a composite-key column (false grain). Composite-PK tables are
+  skipped unless a column has its own single-column UNIQUE constraint.
+  Keyless tables are asked, with `skip` to omit them. Unresolved/skipped
+  tables are listed, not silently dropped. Glossary answers become metric
+  `description`. Postgres PK lookup uses `pg_constraint` (visible to
+  SELECT-only roles) and includes partitioned parents (`relkind` `p`).
+  DuckDB PK lookup is schema-filtered. YAML map keys sort in ordinal (not
+  locale) order.
   Semi-additive group_by refusals for the primary key and for temporal columns
   have distinct messages. Postgres, MySQL, and DuckDB introspection populate
   that metadata.

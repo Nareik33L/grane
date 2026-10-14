@@ -651,7 +651,7 @@ function pickResolvedCandidate(item: { kind: string; candidates: string[] }): st
   if (item.kind === "non_additive_measure" && item.candidates.includes("unsupported")) return "unsupported";
   if (item.candidates.includes("do_not_join")) return "do_not_join";
   if (item.candidates.includes("[]")) return "[]";
-  const first = item.candidates[0];
+  const first = item.candidates.find((candidate) => candidate !== "skip") ?? item.candidates[0];
   if (!first) throw new Error(`ambiguity ${item.kind} has no candidates`);
   return first;
 }
