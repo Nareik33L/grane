@@ -598,14 +598,7 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   const path = join(projectDir, ACTIVE_PIN_PATH);
   const previous = existsSync(path) ? readFileSync(path) : null;
   mkdirSync(dirname(path), { recursive: true });
-  const tmpPath = join(dirname(path), `.active-${process.pid}-${Date.now()}.json.tmp`);
-  try {
-    writeFileSync(tmpPath, `${JSON.stringify(next, null, 2)}\n`);
-    renameSync(tmpPath, path);
-  } catch (err) {
-    rmSync(tmpPath, { force: true });
-    throw err;
-  }
+  atomicWriteFile(path, `${JSON.stringify(next, null, 2)}\n`);
   try {
     recordPinEvent(
       projectDir,
@@ -619,10 +612,21 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
     );
   } catch (err) {
     if (previous === null) rmSync(path, { force: true });
-    else writeFileSync(path, previous);
+    else atomicWriteFile(path, previous);
     throw err;
   }
   return next;
+}
+
+function atomicWriteFile(path: string, contents: string | Buffer): void {
+  const tmpPath = join(dirname(path), `.active-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json.tmp`);
+  try {
+    writeFileSync(tmpPath, contents);
+    renameSync(tmpPath, path);
+  } catch (err) {
+    rmSync(tmpPath, { force: true });
+    throw err;
+  }
 }
 
 export interface ActiveRef {
@@ -1214,7 +1218,7 @@ export function rollbackPin(
   const next = writeActivePin(projectDir, {
     ref,
     commit: resolved,
-    approved_by: options.approved_by ?? "rollback",
+    approved_by: options.approved_by ?? identity(root).name,
     approved_at: new Date().toISOString(),
     proposal: pin.proposal,
     previous_commit: pin.commit,

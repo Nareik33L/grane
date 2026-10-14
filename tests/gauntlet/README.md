@@ -69,7 +69,11 @@ CI fails when:
 - a known defect-class mutation (no cardinality check, empty exclude list,
   opened allowlist) stays green — meaning the suite would not have caught that bug
 - any scenario scores `SECURITY CRITICAL` or `CRITICAL FAIL` (the CRITICAL
-  ratchet)
+  ratchet, including V2-14 `tests/gauntlet/authoring*` cases)
+
+Authoring isolation lives in `tests/gauntlet/authoring*.ts`. The MCP sweep
+calls every tool `listTools` returns and fails if a new tool is missing from
+the sweep map. Pin bytes, `main`, and proposal parents must not move.
 
 Do not delete, weaken, or rewrite scenarios merely to raise the score.
 Do not turn executable failures into refusals.

@@ -7,6 +7,19 @@
 import { toGrant } from "../../../src/auth/agents.js";
 import { runAuthoringActivateGauntlet } from "../authoring-activate.js";
 import { runTamperedActivePinGauntlet } from "../active-pin-tamper.js";
+import { runAuthoringMcpSweep } from "../authoring-sweep.js";
+import {
+  runAuthoringActiveWrites,
+  runAuthoringHostileArgs,
+  runAuthoringPromptInjection,
+  runAuthoringSelfApprove,
+} from "../authoring-hostile.js";
+import {
+  runAuthoringDemoGrain,
+  runAuthoringExplorationPolicy,
+  runAuthoringHugeSchema,
+  runAuthoringTimeLikeGroupBy,
+} from "../authoring-schema.js";
 import { GOLD, GOLD_SQL } from "../gold.js";
 import { gauntletConfig } from "../model.js";
 import { BLOCKED_COLUMNS } from "../data.js";
@@ -33,6 +46,7 @@ export function trapScenarios(): Scenario[] {
     ...agentTraps(),
     ...authoringActivateTraps(),
     ...tamperedPinTraps(),
+    ...authoringV214Traps(),
   ];
 }
 
@@ -850,6 +864,123 @@ function tamperedPinTraps(): Scenario[] {
       expectedSqlBehaviour: "n/a — no warehouse SQL.",
       expectation: { kind: "refuse", reason: "tampered pin", statuses: ["config_error"] },
       custom: async () => runTamperedActivePinGauntlet(),
+    }),
+  ];
+}
+
+function authoringV214Traps(): Scenario[] {
+  const nA = "n/a — no warehouse SQL.";
+  const refuse = { kind: "refuse" as const, reason: "authoring isolation", statuses: ["config_error" as const] };
+  return [
+    sc({
+      id: "mcp/authoring-byte-identical-sweep",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "An MCP client calls every registered tool, including authoring, with a merged proposal present.",
+      interpretation:
+        "The sweep must include every listTools name (fails if a new tool is missing). Pin bytes, main SHA, and proposal branches stay identical.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringMcpSweep(),
+    }),
+    sc({
+      id: "mcp/authoring-prompt-injection",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "Column comments and sample values tell the agent to merge, pin, approve, or run SQL.",
+      interpretation: "Injection text is returned as samples only. No merge, pin, approve, or write SQL.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringPromptInjection(),
+    }),
+    sc({
+      id: "mcp/authoring-self-approve",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "The agent tries to approve or roll back its own proposal.",
+      interpretation: "approve/rollback are not MCP tools and refuse without a TTY or merged PR.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringSelfApprove(),
+    }),
+    sc({
+      id: "mcp/authoring-active-yaml-and-pin",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "The agent tries to write production YAML or .grane/active.json.",
+      interpretation: "createProposal refuses .grane paths; working-tree YAML and main stay put.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringActiveWrites(),
+    }),
+    sc({
+      id: "mcp/authoring-hostile-slug-path",
+      category: "hostile",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "Hostile slug and path arguments try to escape the proposal prefix.",
+      interpretation: "Slugs are sanitised; `..`, `.git`, and `.grane` paths are refused. Main unmoved.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringHostileArgs(),
+    }),
+    sc({
+      id: "mcp/authoring-discovery-outside-policy",
+      category: "exploration",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "Discovery profiles a column excluded by the exploration policy.",
+      interpretation: "profile_column refuses excluded columns and unknown tables. Main unmoved.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringExplorationPolicy(),
+    }),
+    sc({
+      id: "mcp/authoring-huge-schema",
+      category: "resources",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "discover_schema is pointed at hundreds of tables.",
+      interpretation: "Introspection completes without writing a pin or moving main.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runAuthoringHugeSchema(),
+    }),
+    sc({
+      id: "mcp/authoring-timelike-groupby",
+      category: "grain",
+      mode: "custom",
+      guessSeverity: "critical",
+      disposition: "REFUSE_SAFETY",
+      question: "Semi-additive group_by on ts bigint, period varchar, as_of text.",
+      interpretation: "Time-like columns stored as number/text must not pass the group_by filter.",
+      expectedSqlBehaviour: nA,
+      expectation: { kind: "refuse", reason: "temporal group_by", statuses: ["unsafe_query", "config_error"] },
+      custom: async () => runAuthoringTimeLikeGroupBy(),
+    }),
+    sc({
+      id: "mcp/authoring-demo-pg-grain",
+      category: "grain",
+      mode: "custom",
+      guessSeverity: "critical",
+      disposition: "REFUSE_SAFETY",
+      question: "Demo Postgres composite-PK, nullable UNIQUE, keyless, and partitioned tables.",
+      interpretation:
+        "Nullable UNIQUE is not grain. Composite and keyless tables are skipped. Partitioned single-PK stays.",
+      expectedSqlBehaviour: nA,
+      expectation: { kind: "refuse", reason: "false grain", statuses: ["config_error"] },
+      custom: async () => runAuthoringDemoGrain(),
     }),
   ];
 }

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
+  CRITICAL gate. Cases cover prompt injection in comments/samples, self-approve,
+  active YAML / pin writes, discovery outside the exploration policy, huge
+  schemas, time-like `group_by` (`ts` bigint, `period` varchar, `as_of` text),
+  nullable UNIQUE grain, demo Postgres composite-PK / keyless / partitioned
+  tables, and hostile slug/path arguments. Every authoring case asserts `main`
+  SHA and proposal parent are unchanged. The MCP byte-identical sweep and pin
+  tamper table live in the gauntlet; the sweep fails if a newly registered MCP
+  tool is not included. Rollback `approved_by` defaults to `git user.name`.
+  Pin restore after a failed audit write uses temp+rename.
 - **Review/approve/rollback CLI (V2-13).** `grane proposals list|diff|approve|reject|rollback`.
   Approve requires a human TTY or a merged GitHub PR and cannot be invoked
   from MCP (`src/mcp/**` must not import or call approve, rollback, reject,
