@@ -1,0 +1,170 @@
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
+import { warehouseTypeSchema } from "../config/schema.js";
+import { configError } from "../errors.js";
+
+/**
+ * Authoring-session documents live under `.grane/authoring/<id>.json`.
+ * They are runtime state for V2 onboarding/authoring, not project config:
+ * `loadConfig` only reads top-level YAML, and `SemanticModel` is built from
+ * the loaded config object. Neither path scans `.grane/`.
+ */
+
+export const AUTHORING_SESSION_VERSION = 1 as const;
+export const AUTHORING_DIR = ".grane/authoring";
+
+/** Secret-free pointer at the warehouse this session is authoring against. */
+export const warehouseRefSchema = z.object({
+  type: warehouseTypeSchema,
+  /** Host/database, file path, account, or other locator — never a password or token. */
+  locator: z.string().min(1),
+});
+export type WarehouseRef = z.infer<typeof warehouseRefSchema>;
+
+export const glossaryAnswerSchema = z.object({
+  term: z.string().min(1),
+  answer: z.string(),
+});
+export type GlossaryAnswer = z.infer<typeof glossaryAnswerSchema>;
+
+export const openAmbiguitySchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  question: z.string().min(1),
+  candidates: z.array(z.string()).default([]),
+});
+export type OpenAmbiguity = z.infer<typeof openAmbiguitySchema>;
+
+/**
+ * Versioned authoring session. Breaking field changes bump `version`;
+ * additive optional fields may stay on the current version.
+ */
+export const authoringSessionSchema = z.object({
+  version: z.literal(AUTHORING_SESSION_VERSION),
+  id: z.string().min(1),
+  created_at: z.string().min(1),
+  updated_at: z.string().min(1),
+  warehouse_ref: warehouseRefSchema,
+  discovered_snapshot_hash: z.string().nullable().default(null),
+  glossary_answers: z.array(glossaryAnswerSchema).default([]),
+  open_ambiguities: z.array(openAmbiguitySchema).default([]),
+  /** Draft YAML files keyed by project-relative path (`metrics.yml`, …). */
+  draft_yaml: z.record(z.string(), z.string()).default({}),
+});
+export type AuthoringSession = z.infer<typeof authoringSessionSchema>;
+
+export interface CreateSessionInput {
+  warehouse_ref: WarehouseRef;
+  id?: string;
+  created_at?: string;
+  updated_at?: string;
+  discovered_snapshot_hash?: string | null;
+  glossary_answers?: GlossaryAnswer[];
+  open_ambiguities?: OpenAmbiguity[];
+  draft_yaml?: Record<string, string>;
+}
+
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export function authoringDir(projectDir: string): string {
+  return join(projectDir, ".grane", "authoring");
+}
+
+export function sessionPath(projectDir: string, id: string): string {
+  return join(authoringDir(projectDir), `${assertSessionId(id)}.json`);
+}
+
+function assertSessionId(id: string): string {
+  if (!SESSION_ID.test(id)) {
+    throw configError(
+      `Invalid authoring session id "${id}". Use a UUID or letters, digits, dot, underscore, and hyphen.`,
+    );
+  }
+  return id;
+}
+
+function parseSession(raw: unknown, source: string): AuthoringSession {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw configError(`Authoring session ${source} must be a JSON object.`);
+  }
+  const version = (raw as { version?: unknown }).version;
+  if (version !== AUTHORING_SESSION_VERSION) {
+    throw configError(
+      `Unsupported authoring session version ${String(version)} in ${source}. This Grane build reads version ${AUTHORING_SESSION_VERSION}.`,
+    );
+  }
+  const parsed = authoringSessionSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => `  ${issue.path.join(".")}: ${issue.message}`).join("\n");
+    throw configError(`Invalid authoring session ${source}:\n${issues}`, parsed.error.issues);
+  }
+  return parsed.data;
+}
+
+function readSessionFile(path: string, id: string): AuthoringSession {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw configError(`No authoring session "${id}" at ${path}.`);
+    }
+    throw configError(`Failed to read authoring session "${id}": ${(err as Error).message}`);
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text) as unknown;
+  } catch (err) {
+    throw configError(`Authoring session "${id}" is not valid JSON: ${(err as Error).message}`);
+  }
+  const session = parseSession(raw, `"${id}"`);
+  if (session.id !== id) {
+    throw configError(`Authoring session file "${id}.json" has id "${session.id}".`);
+  }
+  return session;
+}
+
+/** Create a session document, persist it, and return the stored value. */
+export function createSession(projectDir: string, input: CreateSessionInput): AuthoringSession {
+  const now = new Date().toISOString();
+  const session = authoringSessionSchema.parse({
+    version: AUTHORING_SESSION_VERSION,
+    id: input.id ?? randomUUID(),
+    created_at: input.created_at ?? now,
+    updated_at: input.updated_at ?? now,
+    warehouse_ref: input.warehouse_ref,
+    discovered_snapshot_hash: input.discovered_snapshot_hash ?? null,
+    glossary_answers: input.glossary_answers ?? [],
+    open_ambiguities: input.open_ambiguities ?? [],
+    draft_yaml: input.draft_yaml ?? {},
+  });
+  return saveSession(projectDir, session);
+}
+
+/** Write `session` as `.grane/authoring/<id>.json`. Returns the validated document. */
+export function saveSession(projectDir: string, session: AuthoringSession): AuthoringSession {
+  const parsed = authoringSessionSchema.parse(session);
+  assertSessionId(parsed.id);
+  const dir = authoringDir(projectDir);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(sessionPath(projectDir, parsed.id), `${JSON.stringify(parsed, null, 2)}\n`);
+  return parsed;
+}
+
+export function loadSession(projectDir: string, id: string): AuthoringSession {
+  return readSessionFile(sessionPath(projectDir, assertSessionId(id)), id);
+}
+
+/** Sessions in `.grane/authoring/`, sorted by id. Missing directory → `[]`. */
+export function listSessions(projectDir: string): AuthoringSession[] {
+  const dir = authoringDir(projectDir);
+  if (!existsSync(dir)) return [];
+  const names = readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .filter((name) => statSync(join(dir, name)).isFile())
+    .sort();
+  return names.map((name) => loadSession(projectDir, name.slice(0, -".json".length)));
+}
