@@ -552,7 +552,7 @@ program
   )
   .option(
     "--authoring",
-    "enable V2 authoring MCP tools (also authoring.enabled in grane.yml)",
+    "enable authoring tools for this process (not the same as authoring.enabled in grane.yml)",
   )
   .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean; authoring?: boolean }) => {
     const kernel = loadServingKernel();

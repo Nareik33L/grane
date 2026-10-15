@@ -215,11 +215,10 @@ function printNextSteps(io: DemoIo, projectDir: string, demoMarkdown: string, se
   io.log("permitted raw payments.failure_code (trust: mixed). It must not write SQL.");
   io.log("");
   if (!serving) {
-    io.log("Connect a local agent (stdio):");
-    io.log(`  grane -p ${projectDir} mcp connect cursor`);
-    io.log(`  grane -p ${projectDir} mcp connect claude`);
-    io.log("");
-    io.log("  or: docker compose up");
+    io.log("Next:");
+    io.log(`  1. grane -p ${projectDir} mcp connect cursor`);
+    io.log("  2. Reload Cursor (Settings → MCP, or Developer: Reload Window) and start a new chat.");
+    io.log(`  3. Optional: grane -p ${projectDir} mcp connect claude`);
     io.log("");
   }
   io.log(`What you should see: ${demoMarkdown}`);

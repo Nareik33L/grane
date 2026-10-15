@@ -58,8 +58,11 @@ grane serve --authoring                  # HTTP; requires auth.agents
 grane setup --yes --path demo --postgres --authoring
 ```
 
-`authoring.enabled: true` in `grane.yml` also registers the tools. The CLI
-flag enables them for that process even when the YAML flag is off.
+`--authoring` enables authoring tools for **this process**.
+`authoring.enabled: true` in `grane.yml` enables them for the **project**
+(stdio; HTTP only when `authoring.mode` is `shared`). One does not set the
+other. Authoring tools only propose a GitHub PR. Nothing is live until a
+human merges and pins.
 
 The nine tools (and the **Set up Grane** prompt) are:
 

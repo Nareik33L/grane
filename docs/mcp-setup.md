@@ -1,24 +1,20 @@
 # MCP tool reference
 
-Grane exposes four MCP tools. `grane serve --authoring` (or
-`authoring.enabled` in `grane.yml`) adds the V2 draft tools; see
-[v2-authoring.md](v2-authoring.md). For the full agent connection guide
-(ChatGPT, Claude, Gemini, database setup, HTTPS vs stdio), see
-[connect-an-agent.md](connect-an-agent.md).
+Grane exposes four MCP tools: catalog, query, validate, explain.
+`--authoring` enables authoring tools for this process.
+`authoring.enabled` in `grane.yml` enables them for the project. One does
+not set the other. See [v2-authoring.md](v2-authoring.md). Full agent
+matrix: [connect-an-agent.md](connect-an-agent.md).
 
 ## Connect from the CLI
 
-```bash
-grane setup                  # first-run wizard (demo by default; --connect to register an agent)
-grane mcp doctor
-grane mcp connect claude     # also: cursor, gemini, vscode, chatgpt, windsurf, claude-code
-grane mcp print-config cursor
-grane mcp list
-```
+1. `grane mcp connect cursor` (or claude, gemini, vscode, chatgpt, windsurf, claude-code)
+2. Reload the client and start a new chat.
+3. Use catalog, query, validate, explain.
+4. Optional: `grane mcp doctor` then `grane mcp print-config cursor` / `grane mcp list`
 
-`connect` merges a Grane server entry into the client's config file (Claude
-Desktop, Cursor, Gemini CLI, VS Code, Windsurf, Claude Code, or a generic
-`.mcp.json`). ChatGPT has no file — the command prints HTTPS connector steps.
+`connect` merges a Grane server entry into the client's config file. ChatGPT
+has no file — the command prints HTTPS connector steps.
 
 ## Transports
 

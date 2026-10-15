@@ -82,8 +82,10 @@ audit:
   # stdout: true        # also emit JSON lines on stderr (container logs; MCP-safe)
   # fail_closed: true   # refuse the query if the audit append fails (regulated)
 
-# V2 authoring MCP tools (off by default). grane serve --authoring also
-# enables them. mode: local = stdio only; shared = HTTP too (authenticated agent).
+# V2 authoring MCP tools (off by default).
+# grane serve --authoring enables them for this process only.
+# authoring.enabled enables them for the project. One does not set the other.
+# mode: local = stdio only; shared = HTTP too (authenticated agent).
 # authoring:
 #   enabled: false
 #   mode: local               # or shared

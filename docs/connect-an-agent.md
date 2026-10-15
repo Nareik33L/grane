@@ -36,30 +36,20 @@ deterministic infrastructure in the middle.
 
 ## Fast path
 
-**First time?** One guided command (defaults to the local demo shop; pass `--connect cursor` to register an agent):
+**First time?**
 
-```bash
-npx grane-analytics setup
-# from a clone: npm install && npm run setup
-```
-
-`npx grane-analytics setup` requires `grane-analytics@0.7.0` on npm (publish pending).
-The wizard runs the demo (or your warehouse) for you. MCP registration is
-opt-in (`--connect` or `grane mcp connect` later). To do the steps by hand:
-`npm run demo` then `grane -p demo/analytics mcp connect cursor`.
-
-Ask: *Why did revenue fall last month?* Script: [demo/README.md](../demo/README.md).
-ChatGPT (HTTPS only) is not this path.
+1. `npm install && npm run setup` (or `npx grane-analytics setup` after 0.7.0). Default is the local demo shop; MCP is opt-in (`--connect` or `grane mcp connect` later). By hand: `npm run demo`, then `grane -p demo/analytics mcp connect cursor`.
+2. Reload Cursor (Settings → MCP, or Developer: Reload Window) and start a new chat.
+3. Ask: *Why did revenue fall last month?* Script: [demo/README.md](../demo/README.md). ChatGPT (HTTPS only) is not this path.
 
 After `grane validate` succeeds on your own project, register Grane with
 whichever MCP client you use. The command is the same shape for every agent;
 only the last-mile config file (or UI) changes.
 
-```bash
-grane mcp doctor                 # project + optional MCP handshake
-grane mcp clients                # claude, cursor, gemini, vscode, chatgpt, …
-grane mcp connect claude         # or cursor, gemini, vscode, chatgpt, windsurf, claude-code
-```
+1. `grane mcp clients` — claude, cursor, gemini, vscode, chatgpt, …
+2. `grane mcp connect claude` — or cursor, gemini, vscode, chatgpt, windsurf, claude-code
+3. Reload the client. Start a new chat.
+4. Optional: `grane mcp doctor`
 
 | Command | What it does |
 | --- | --- |
@@ -364,8 +354,9 @@ Claude Desktop.
 }
 ```
 
-Reload MCP in settings, then start a **new chat** so the agent picks up the
-tools.
+1. Reload Cursor: Settings → MCP, or Developer: Reload Window.
+2. Start a new chat.
+3. Use catalog, query, validate, explain.
 
 ---
 
