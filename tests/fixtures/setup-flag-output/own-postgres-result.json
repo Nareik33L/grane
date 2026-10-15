@@ -1,0 +1,11 @@
+{
+  "path": "own",
+  "warehouse": "postgres",
+  "client": null,
+  "question": "What can you see in the catalog?",
+  "validated": true,
+  "live": false,
+  "connect": null,
+  "demoEngine": null,
+  "demoYaml": null
+}

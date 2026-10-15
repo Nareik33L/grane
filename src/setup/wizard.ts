@@ -7,8 +7,15 @@ import {
   parseOwnDatabaseUrl,
   type ConnectionDraft,
 } from "./connection.js";
-import type { DemoEngine, DemoYaml, SetupIo, SetupPath } from "./types.js";
+import {
+  assertLocalGraneConfigWritable,
+  readSetupTone,
+  writeSetupTone,
+  type SetupTone,
+} from "./local-config.js";
+import type { DemoEngine, DemoYaml, SetupIo, SetupPath, StartChoice } from "./types.js";
 import { BACK, type Choice, type Prompter } from "./prompts.js";
+import { TONE_CHOICES, TONE_QUESTION, wizardCopy, type WizardCopy } from "./wizard-copy.js";
 
 export interface WizardAnswers {
   path: SetupPath;
@@ -17,20 +24,30 @@ export interface WizardAnswers {
   client: string | null;
   demoEngine?: DemoEngine;
   demoYaml?: DemoYaml;
+  tone: SetupTone;
 }
 
 export interface WizardOptions {
   io: SetupIo;
   prompt: Prompter;
   env: NodeJS.ProcessEnv;
+  homeDir?: string;
   skipConnect?: boolean;
   connect?: string;
+  /** Interactive `--path demo|own` skips the start question. */
+  forcedPath?: SetupPath;
+  /** Interactive `--postgres` starts on demo Postgres (YAML question unless `--authoring`). */
+  postgres?: boolean;
+  /** Interactive `--authoring` (requires `--postgres`) skips the YAML question. */
+  authoring?: boolean;
   resolveClientId: (name: string) => string;
   listClients: () => Array<{ id: string; label: string }>;
 }
 
+/** @deprecated Merged into PATH_CHOICES (V2-16). Kept so existing imports compile. */
 export const EXISTING_YAML_QUESTION = "Do you already have a Grane YAML?";
 
+/** @deprecated Merged into PATH_CHOICES (V2-16). */
 export const EXISTING_YAML_CHOICES: Choice<"yes" | "no">[] = [
   {
     value: "no",
@@ -45,6 +62,10 @@ export const EXISTING_YAML_CHOICES: Choice<"yes" | "no">[] = [
 ];
 
 export const PATH_QUESTION = "How do you want to start?";
+
+export const CONFIRM_QUESTION = "Does this look right?";
+
+export type { StartChoice };
 
 export const DEMO_ENGINE_QUESTION = "Which demo warehouse?";
 
@@ -66,29 +87,23 @@ export const DEMO_YAML_QUESTION = "How should Grane learn the demo shop?";
 export const DEMO_YAML_CHOICES: Choice<DemoYaml>[] = [
   {
     value: "shipped",
-    label: "Use the shipped demo YAML",
-    hint: "Same planted revenue-drop story as today's demo. No authoring.",
+    label: "Use the ready-made demo YAML (recommended)",
+    hint: "Same planted “why did revenue fall?” story. Authoring stays off. No pin.",
   },
   {
     value: "authoring",
-    label: "Build my own YAML against demo Postgres",
-    hint: "Discovery, authoring tools, Set up Grane prompt, YAML generator, then a proposal PR. No production writes or pin.",
+    label: "Build my own YAML against this demo (advanced)",
+    hint: "Turns on authoring tools so you can draft metrics, then open a proposal PR. Does not pin production.",
   },
 ];
 
-/** Demo/own copy frozen by tests/fixtures/setup-wizard-main.ts (captured from main). */
-export const PATH_CHOICES: Choice<"demo" | "own">[] = [
-  {
-    value: "demo",
-    label: "Try Grane's demo shop",
-    hint: "Local DuckDB. No database, no Docker. The planted revenue-drop story.",
-  },
-  {
-    value: "own",
-    label: "Connect my own data",
-    hint: "Any warehouse Grane already supports. We write grane.yml, validate, then connect an agent.",
-  },
-];
+/**
+ * Plain-English start choices (tone = plain). Technical wording lives in wizardCopy().
+ * Same values and defaults in both tones.
+ */
+export const PATH_CHOICES: Choice<StartChoice>[] = wizardCopy("plain").pathChoices;
+
+export { TONE_QUESTION, TONE_CHOICES };
 
 export function pathReviewLine(path: SetupPath): string {
   if (path === "demo") return "demo shop (DuckDB)";
@@ -104,10 +119,13 @@ export function demoReviewLine(demoEngine?: DemoEngine, demoYaml?: DemoYaml): st
   return pathReviewLine("demo");
 }
 
+type Step = "tone" | "start" | "demo_yaml" | "engine" | "fields" | "client" | "confirm";
+
 /**
- * Interactive existing-YAML? → path → (engine + fields) → MCP client → confirm.
- * Every step after the first accepts `b` / `back`.
- * Answering yes on the first step skips path/engine/fields/client (V2-05).
+ * Interactive tone → start → (engine + fields | demo YAML) → confirm.
+ * Tone changes wording only. Defaults, enforcement, and writes are identical.
+ * MCP is skipped unless `--connect` is set.
+ * `--yes` / `--import` never call this (no tone question on flag paths).
  */
 export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAnswers> {
   let path: SetupPath | undefined;
@@ -117,78 +135,80 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
   let demoEngine: DemoEngine | undefined;
   let demoYaml: DemoYaml | undefined;
   let fieldIndex = 0;
+  let tone: SetupTone = opts.homeDir ? (readSetupTone(opts.homeDir) ?? "technical") : "technical";
+  let copy: WizardCopy = wizardCopy(tone);
 
-  type Step = "existing" | "path" | "demo_engine" | "demo_yaml" | "engine" | "fields" | "client" | "confirm";
-  let step: Step = "existing";
+  applyForcedFlags(opts, (next) => {
+    path = next.path;
+    demoEngine = next.demoEngine;
+    demoYaml = next.demoYaml;
+  });
+
+  let step: Step = "tone";
 
   while (true) {
     switch (step) {
-      case "existing": {
-        const chosen = await opts.prompt.select<"yes" | "no">(
-          EXISTING_YAML_QUESTION,
-          EXISTING_YAML_CHOICES,
-          { defaultValue: "no", allowBack: false },
+      case "tone": {
+        if (opts.homeDir) assertLocalGraneConfigWritable(opts.homeDir);
+        const saved = opts.homeDir ? readSetupTone(opts.homeDir) : null;
+        const chosen = await opts.prompt.select<SetupTone>(
+          TONE_QUESTION,
+          TONE_CHOICES,
+          { defaultValue: saved ?? "technical", allowBack: false },
         );
         if (chosen === BACK) {
           throw new Error("This is the first step. Choose a number, or Ctrl-C to exit.");
         }
-        engine = undefined;
-        connection = undefined;
-        client = undefined;
-        demoEngine = undefined;
-        demoYaml = undefined;
-        fieldIndex = 0;
-        if (chosen === "yes") {
-          path = "import";
-          step = "confirm";
-        } else {
-          path = undefined;
-          step = "path";
-        }
+        tone = chosen;
+        copy = wizardCopy(tone);
+        step = stepAfterTone(opts);
         break;
       }
-      case "path": {
-        const chosen = await opts.prompt.select<"demo" | "own">(
-          PATH_QUESTION,
-          PATH_CHOICES,
+      case "start": {
+        const chosen = await opts.prompt.select<StartChoice>(
+          copy.pathQuestion,
+          copy.pathChoices,
           { defaultValue: "demo", allowBack: true },
         );
         if (chosen === BACK) {
-          step = "existing";
+          step = "tone";
           break;
         }
-        path = chosen;
         engine = undefined;
         connection = undefined;
-        demoEngine = undefined;
-        demoYaml = undefined;
+        client = undefined;
         fieldIndex = 0;
-        step = path === "own" ? "engine" : "demo_engine";
-        break;
-      }
-      case "demo_engine": {
-        const chosen = await opts.prompt.select<DemoEngine>(
-          DEMO_ENGINE_QUESTION,
-          DEMO_ENGINE_CHOICES,
-          { defaultValue: "duckdb", allowBack: true },
-        );
-        if (chosen === BACK) {
-          step = "path";
-          break;
+        if (chosen === "import") {
+          path = "import";
+          demoEngine = undefined;
+          demoYaml = undefined;
+          step = "confirm";
+        } else if (chosen === "own") {
+          path = "own";
+          demoEngine = undefined;
+          demoYaml = undefined;
+          step = "engine";
+        } else if (chosen === "demo_postgres") {
+          path = "demo";
+          demoEngine = "postgres";
+          demoYaml = undefined;
+          step = "demo_yaml";
+        } else {
+          path = "demo";
+          demoEngine = "duckdb";
+          demoYaml = undefined;
+          step = "client";
         }
-        demoEngine = chosen;
-        demoYaml = undefined;
-        step = chosen === "postgres" ? "demo_yaml" : "client";
         break;
       }
       case "demo_yaml": {
         const chosen = await opts.prompt.select<DemoYaml>(
-          DEMO_YAML_QUESTION,
-          DEMO_YAML_CHOICES,
+          copy.demoYamlQuestion,
+          copy.demoYamlChoices,
           { defaultValue: "shipped", allowBack: true },
         );
         if (chosen === BACK) {
-          step = "demo_engine";
+          step = opts.postgres ? "tone" : "start";
           break;
         }
         demoYaml = chosen;
@@ -197,19 +217,19 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
       }
       case "engine": {
         const chosen = await opts.prompt.select<WarehouseType>(
-          "Which warehouse?",
+          copy.engineQuestion,
           WAREHOUSE_TYPES.map((type) => {
             const entry = WAREHOUSE_CERTIFICATION[type];
             return {
               value: type,
               label: `${entry.label} (${type})`,
-              hint: engineHint(type),
+              hint: engineHint(type, tone),
             };
           }),
           { defaultValue: "postgres", allowBack: true },
         );
         if (chosen === BACK) {
-          step = "path";
+          step = opts.forcedPath === "own" ? "tone" : "start";
           break;
         }
         engine = chosen;
@@ -235,7 +255,7 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         }
         const field = fields[fieldIndex]!;
         const fromEnv = defaultFromEnv(field.key, opts.env);
-        const result = await opts.prompt.input(field.label, {
+        const result = await opts.prompt.input(copy.fieldLabel(field), {
           defaultValue: fromEnv ?? field.defaultValue,
           allowEmpty: !field.required,
           allowBack: true,
@@ -247,12 +267,13 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         const value = result.trim();
         connection = { ...(connection ?? { type: engine }), type: engine };
         if (!value) {
-          if (field.required && !fromEnv) {
-            throw new Error(`${field.label} is required (or type back).`);
+          if (fromEnv) connection[field.key] = fromEnv;
+          else if (field.defaultValue) connection[field.key] = field.defaultValue;
+          else if (field.required) {
+            throw new Error(`${copy.fieldLabel(field)} is required (or type back).`);
+          } else {
+            delete connection[field.key];
           }
-          if (field.defaultValue && !fromEnv) connection[field.key] = field.defaultValue;
-          else if (fromEnv) connection[field.key] = fromEnv;
-          else delete connection[field.key];
         } else if (field.key === "url") {
           const parsed = parseOwnDatabaseUrl(value, engine);
           connection.url = parsed.url;
@@ -265,63 +286,43 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         break;
       }
       case "client": {
-        if (opts.skipConnect) {
-          client = null;
-          step = "confirm";
-          break;
-        }
-        if (opts.connect) {
+        if (opts.connect && !opts.skipConnect) {
           client = opts.resolveClientId(opts.connect);
-          step = "confirm";
-          break;
+        } else {
+          client = null;
         }
-        const writable = opts.listClients().filter((c) => c.id !== "generic");
-        const chosen = await opts.prompt.select<string>(
-          "Which agent should Grane register with?",
-          [
-            ...writable.map((c) => ({
-              value: c.id,
-              label: c.label,
-              hint: c.id === "chatgpt" ? "No config file — prints HTTPS connector steps." : undefined,
-            })),
-            { value: "skip", label: "Skip for now", hint: "You can run grane mcp connect later." },
-          ],
-          { defaultValue: "cursor", allowBack: true },
-        );
-        if (chosen === BACK) {
-          if (path === "own") {
-            step = "fields";
-            if (engine) fieldIndex = Math.max(0, connectionFields(engine).length - 1);
-          } else if (path === "demo" && demoEngine === "postgres") {
-            step = "demo_yaml";
-          } else if (path === "demo") {
-            step = "demo_engine";
-          } else {
-            step = "path";
-          }
-          break;
-        }
-        client = chosen === "skip" ? null : opts.resolveClientId(chosen);
         step = "confirm";
         break;
       }
       case "confirm": {
         opts.io.log("");
-        opts.io.log("Review");
+        opts.io.log(copy.reviewHeading);
         opts.io.log(
           `  Path    ${path === "demo" ? demoReviewLine(demoEngine, demoYaml) : pathReviewLine(path ?? "own")}`,
         );
         if (path === "own" && engine && connection) {
           const cert = WAREHOUSE_CERTIFICATION[engine];
-          opts.io.log(`  Engine  ${cert.label} (${engine}) — ${engineHint(engine)}`);
+          opts.io.log(`  Engine  ${cert.label} (${engine}) — ${engineHint(engine, tone)}`);
           opts.io.log(`  Connect ${describeConnection(connection)}`);
         }
         if (path !== "import") {
           opts.io.log(`  MCP     ${client ?? "skip"}`);
         }
-        const ok = await opts.prompt.confirm("Proceed?", { defaultYes: true, allowBack: true });
+        const ok = await opts.prompt.confirm(copy.confirmQuestion, {
+          defaultYes: true,
+          allowBack: true,
+        });
         if (ok === BACK) {
-          step = path === "import" ? "existing" : "client";
+          if (path === "import") {
+            step = "start";
+          } else if (path === "own") {
+            step = "fields";
+            if (engine) fieldIndex = Math.max(0, connectionFields(engine).length - 1);
+          } else if (path === "demo" && demoEngine === "postgres") {
+            step = "demo_yaml";
+          } else {
+            step = opts.forcedPath === "demo" ? "tone" : "start";
+          }
           break;
         }
         if (ok === false) {
@@ -331,6 +332,7 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         if (path === "own" && (!engine || !connection)) {
           throw new Error("Warehouse connection is incomplete. Go back and fill the fields.");
         }
+        if (opts.homeDir) writeSetupTone(opts.homeDir, tone);
         return {
           path,
           engine,
@@ -339,9 +341,42 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
           demoEngine: path === "demo" ? (demoEngine ?? "duckdb") : undefined,
           demoYaml:
             path === "demo" && demoEngine === "postgres" ? (demoYaml ?? "shipped") : undefined,
+          tone,
         };
       }
     }
+  }
+}
+
+function stepAfterTone(opts: WizardOptions): Step {
+  if (opts.forcedPath === "own") return "engine";
+  if (opts.postgres) return opts.authoring ? "client" : "demo_yaml";
+  if (opts.forcedPath === "demo") return "client";
+  return "start";
+}
+
+function applyForcedFlags(
+  opts: WizardOptions,
+  assign: (next: {
+    path?: SetupPath;
+    demoEngine?: DemoEngine;
+    demoYaml?: DemoYaml;
+  }) => void,
+): void {
+  if (opts.forcedPath === "own") {
+    assign({ path: "own" });
+    return;
+  }
+  if (opts.postgres) {
+    assign({
+      path: "demo",
+      demoEngine: "postgres",
+      demoYaml: opts.authoring ? "authoring" : undefined,
+    });
+    return;
+  }
+  if (opts.forcedPath === "demo") {
+    assign({ path: "demo", demoEngine: "duckdb" });
   }
 }
 

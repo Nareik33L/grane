@@ -1,0 +1,46 @@
+# Governed metric definitions. First week: pick about five, then "grane validate".
+# Rename tables/columns to match "grane discover".
+
+metrics: {}
+# Example starter set:
+# metrics:
+#   revenue:
+#     description: Completed order revenue
+#     entity: order
+#     type: sum
+#     sql: ${orders.net_amount}
+#     time_dimension: ${orders.completed_at}
+#     unit: GBP
+#     status: approved
+#     synonyms:
+#       - sales
+#     filters:
+#       orders.status: completed
+#   orders:
+#     description: Completed order count
+#     entity: order
+#     type: count
+#     sql: ${orders.id}
+#     time_dimension: ${orders.completed_at}
+#     filters:
+#       orders.status: completed
+#   customers:
+#     description: Registered customers
+#     entity: customer
+#     type: count
+#     sql: ${customers.id}
+#     time_dimension: ${customers.created_at}
+#   average_order_value:
+#     description: Revenue per completed order
+#     entity: order
+#     type: ratio
+#     numerator: revenue
+#     denominator: orders
+#     synonyms:
+#       - aov
+#   refunded_amount:
+#     description: Refunded order value
+#     entity: order
+#     type: sum
+#     sql: ${refunds.amount}
+#     time_dimension: ${orders.completed_at}

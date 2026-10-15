@@ -1,0 +1,93 @@
+# Grane project configuration.
+# First week: https://github.com/Nareik33L/grane/blob/main/docs/first-week.md
+# Production: https://github.com/Nareik33L/grane/blob/main/docs/production.md
+
+project:
+  name: my-analytics
+  timezone: UTC
+  # week:
+  #   starts: monday   # or sunday; week grain honours this
+
+  # fiscal_year:
+  #   starts_month: april
+
+connection:
+  type: postgres
+  url: "postgres://ro@localhost:5432/app"
+
+# default_rows: execution cap when a query omits limit (not "all rows").
+# max_rows: hard safety bound. query.limit is semantic top-N.
+limits:
+  max_rows: 10000
+  default_rows: 1000
+  timeout_ms: 30000
+  # max_bytes_billed: 10737418240  # BigQuery maximumBytesBilled; default 10 GiB if omitted
+  # max_concurrency: 10       # default 2 × connection.pool_size; extra /mcp requests get 503
+  # rate_limit_rps: 20        # optional process-wide HTTP token bucket
+
+# Append-only query audit (JSONL). Queries, refusals, HTTP auth denials.
+# No row payloads, no agent tokens. HTTP events also carry request_id,
+# client_ip, and user_agent. Compiled SQL sent to the warehouse starts with
+# a comment: query_id and agent, so warehouse history correlates without
+# this file.
+# Relative path is resolved from this project directory. Override in Docker
+# with GRANE_AUDIT_PATH=/var/log/grane/audit.jsonl
+audit:
+  enabled: true
+  path: ${GRANE_AUDIT_PATH:-.grane/audit.jsonl}
+  # stdout: true        # also emit JSON lines on stderr (container logs; MCP-safe)
+  # fail_closed: true   # refuse the query if the audit append fails (regulated)
+
+# V2 authoring MCP tools (off by default). grane serve --authoring also
+# enables them. mode: local = stdio only; shared = HTTP too (authenticated agent).
+# authoring:
+#   enabled: false
+#   mode: local               # or shared
+#   sampling: true
+#   sample_rows: 20
+
+# HTTP MCP per-agent tokens. When set, /mcp requires Authorization: Bearer.
+# Required for production HTTP. stdio (local Cursor/Claude) stays trusted.
+# Prefer token_sha256 so this file never holds a secret if committed:
+#   printf '%s' "$FINANCE_AGENT_TOKEN" | sha256sum
+# auth:
+#   agents:
+#     - id: finance
+#       token_sha256: ${FINANCE_AGENT_TOKEN_SHA256}
+#       # token: ${FINANCE_AGENT_TOKEN}   # plaintext alternative; set exactly one
+#       metrics: [revenue, orders]
+#       exploration: false
+#       exploration_exclude:
+#         - customers.*
+
+# Controlled exploration: agents may query warehouse columns that are not
+# governed metrics or dimensions. Results are marked trust: mixed or exploratory.
+# exploration:
+#   enabled: false
+#   mode: denylist            # or allowlist (only include, minus exclude)
+#   schemas:
+#     - public
+#   include:
+#     - orders.*              # allowlist mode; ignored in denylist
+#     - payments.failure_code
+#   exclude:
+#     - users.password_hash
+#     - customers.ssn
+#     - "*.email"             # quote globs that start with *
+#     - "*_ssn"
+
+# Extra governed definitions you already maintain. Omit type to auto-detect.
+# providers:
+#   - path: ../jaffle_shop          # dbt, Cube, LookML, Ossie, …
+#   - type: dbt
+#     project: ../jaffle_shop
+
+entities: {}
+# Example:
+# entities:
+#   order:
+#     table: orders
+#     primary_key: id
+#   customer:
+#     table: customers
+#     primary_key: id

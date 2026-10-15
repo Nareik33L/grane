@@ -1,0 +1,10 @@
+# How tables relate. Cardinality is required for join-safety checks.
+# Tip: "grane discover --write-relationships" merges inferred FKs without clobbering keys.
+
+relationships: {}
+# Example:
+# relationships:
+#   orders_to_customers:
+#     from: orders.customer_id
+#     to: customers.id
+#     type: many_to_one

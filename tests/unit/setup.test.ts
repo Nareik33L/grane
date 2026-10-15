@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { ACTIVE_PIN_PATH, readActivePin } from "../../src/authoring/git.js";
 import { writeInitProject } from "../../src/cli/init-project.js";
@@ -18,6 +19,7 @@ import {
   parseOwnDatabaseUrl,
   persistOwnConnection,
 } from "../../src/setup/connection.js";
+import { DIMENSIONS_YML, METRICS_YML, RELATIONSHIPS_YML } from "../../src/cli/templates.js";
 import { OWN_QUESTION, SETUP_BANNER } from "../../src/setup/copy.js";
 import { BACK, scriptedPrompter, type Prompter } from "../../src/setup/prompts.js";
 import {
@@ -28,21 +30,19 @@ import {
   type SetupResult,
 } from "../../src/setup/run.js";
 import { DEMO_AUTHORING_QUESTION, assertNotExistingGitRepo } from "../../src/setup/demo-postgres.js";
+import { DEMO_AUTHORING_MARKER } from "../../src/authoring/demo-marker.js";
 import {
-  MAIN_WIZARD_DEMO_TRANSCRIPT,
-  MAIN_WIZARD_OWN_TRANSCRIPT,
-  MAIN_WIZARD_PATH_COPY,
-} from "../fixtures/setup-wizard-main.js";
-import {
-  DEMO_ENGINE_QUESTION,
+  CONFIRM_QUESTION,
   DEMO_YAML_QUESTION,
-  EXISTING_YAML_QUESTION,
-  PATH_CHOICES,
   PATH_QUESTION,
+  TONE_QUESTION,
   demoReviewLine,
-  pathReviewLine,
   promptSetupAnswers,
 } from "../../src/setup/wizard.js";
+import { localGraneConfigPath, readSetupTone } from "../../src/setup/local-config.js";
+import { wizardCopy } from "../../src/setup/wizard-copy.js";
+
+const FLAG_OUTPUT = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/setup-flag-output");
 
 const temps: string[] = [];
 
@@ -96,7 +96,7 @@ function snapshotYaml(dir: string): Record<string, string> {
 }
 
 function importRun(dir: string, extra: RunSetupOptions = {}): Promise<SetupResult> {
-  const prompt = extra.prompt ?? scriptedPrompter({ select: ["yes"], confirm: [true, true] });
+  const prompt = extra.prompt ?? scriptedPrompter({ select: ["plain", "import"], confirm: [true, true] });
   return runSetup({
     stdinIsTty: true,
     stdoutIsTty: true,
@@ -695,7 +695,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: { log: (line) => logs.push(line), error: () => undefined },
-      prompt: scriptedPrompter({ select: ["no", "demo", "duckdb", "skip"] }),
+      prompt: scriptedPrompter({ select: ["plain", "demo"] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -734,7 +734,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["no", "own", BACK, "demo", "duckdb", "skip"] }),
+      prompt: scriptedPrompter({ select: ["plain", "own", BACK, "demo"] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -754,7 +754,7 @@ audit:
       env: { ...process.env },
       io: { log: (line) => logs.push(line), error: () => undefined },
       prompt: scriptedPrompter({
-        select: ["no", "own", "mysql", "postgres"],
+        select: ["plain", "own", "mysql", "postgres"],
         input: ["back", "postgres://ro@localhost:5432/app", ""],
       }),
     });
@@ -764,19 +764,42 @@ audit:
     expect(logs.join("\n")).toMatch(/self_certifiable|certified/);
   });
 
-  it("goes back from the MCP step to change the client", async () => {
+  it("default demo path does not register an MCP client unless --connect is set", async () => {
     const demoDir = join(tempDir(), "shop");
     mkdirSync(demoDir);
+    const workspace = tempDir();
     const result = await runSetup({
       stdinIsTty: true,
       dir: demoDir,
       homeDir: tempDir(),
-      workspaceDir: tempDir(),
+      workspaceDir: workspace,
+      cwd: workspace,
       io: quiet,
-      prompt: scriptedPrompter({ select: ["no", "demo", "duckdb", "skip", "cursor"], confirm: [BACK, true] }),
+      prompt: scriptedPrompter({}),
+      runDemoFn: async () => stubDemo(demoDir),
+    });
+    expect(result.client).toBeNull();
+    expect(result.connect).toBeNull();
+    expect(existsSync(join(workspace, ".cursor", "mcp.json"))).toBe(false);
+  });
+
+  it("--connect still registers Cursor when the wizard is interactive", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    const workspace = tempDir();
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir: demoDir,
+      connect: "cursor",
+      homeDir: tempDir(),
+      workspaceDir: workspace,
+      cwd: workspace,
+      io: quiet,
+      prompt: scriptedPrompter({}),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.client).toBe("cursor");
+    expect(existsSync(join(workspace, ".cursor", "mcp.json"))).toBe(true);
   });
 
   it("interactive own path configures MySQL from a URL", async () => {
@@ -791,7 +814,7 @@ audit:
       env: { ...process.env },
       io: quiet,
       prompt: scriptedPrompter({
-        select: ["no", "own", "mysql"],
+        select: ["plain", "own", "mysql"],
         input: ["mysql://ro:x@localhost:3306/shop", "shop"],
       }),
     });
@@ -799,6 +822,25 @@ audit:
     const yaml = readFileSync(join(dir, "grane.yml"), "utf8");
     expect(yaml).toMatch(/type:\s*mysql/);
     expect(yaml).toContain("mysql://ro:x@localhost:3306/shop");
+  });
+
+  it("interactive own DuckDB path defaults the file to warehouse.duckdb", async () => {
+    const dir = tempDir();
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir,
+      skipConnect: true,
+      offline: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      env: { ...process.env },
+      io: quiet,
+      prompt: scriptedPrompter({
+        select: ["plain", "own", "duckdb"],
+      }),
+    });
+    expect(result.warehouse).toBe("duckdb");
+    expect(readFileSync(join(dir, "grane.yml"), "utf8")).toContain('path: "warehouse.duckdb"');
   });
 
   it("interactive own path configures Snowflake fields and says self_certifiable", async () => {
@@ -814,7 +856,7 @@ audit:
       env: { ...process.env },
       io: { log: (line) => logs.push(line), error: () => undefined },
       prompt: scriptedPrompter({
-        select: ["no", "own", "snowflake"],
+        select: ["plain", "own", "snowflake"],
         input: ["xy12345", "ro", "s3cret", "COMPUTE_WH", "ANALYTICS", "PUBLIC", "GRANE_READONLY"],
       }),
     });
@@ -865,7 +907,7 @@ audit:
     const head = git(dir, ["rev-parse", "HEAD"]);
     const logs: string[] = [];
     const confirms: string[] = [];
-    const inner = scriptedPrompter({ select: ["yes"], confirm: [true, true] });
+    const inner = scriptedPrompter({ select: ["plain", "import"], confirm: [true, true] });
     const result = await importRun(dir, {
       io: { log: (line) => logs.push(line), error: () => undefined },
       prompt: {
@@ -969,7 +1011,7 @@ audit:
     const dir = initImportRepo();
     const before = snapshotYaml(dir);
     await expect(
-      importRun(dir, { prompt: scriptedPrompter({ select: ["yes"], confirm: [true, false] }) }),
+      importRun(dir, { prompt: scriptedPrompter({ select: ["plain", "import"], confirm: [true, false] }) }),
     ).rejects.toThrow(/Activation declined/);
     expect(readActivePin(dir)).toBeNull();
     expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
@@ -1040,7 +1082,7 @@ audit:
     expect(git(dir, ["show", "HEAD:metrics.yml"])).toBe(committed);
   });
 
-  it("goes back from the path step to the existing-YAML question", async () => {
+  it("goes back from own-data to import, which does not write YAML", async () => {
     const demoDir = join(tempDir(), "shop");
     mkdirSync(demoDir);
     await expect(
@@ -1051,7 +1093,7 @@ audit:
         homeDir: tempDir(),
         workspaceDir: tempDir(),
         io: quiet,
-        prompt: scriptedPrompter({ select: ["no", BACK, "yes"] }),
+        prompt: scriptedPrompter({ select: ["plain", "own", BACK, "import"] }),
         runDemoFn: async () => {
           throw new Error("runDemo must not run on the import path");
         },
@@ -1070,7 +1112,7 @@ audit:
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: quiet,
-      prompt: scriptedPrompter({ select: ["yes", "no", "demo", "duckdb"], confirm: [BACK, true] }),
+      prompt: scriptedPrompter({ select: ["plain", "import", "demo"], confirm: [BACK, true] }),
       runDemoFn: async () => stubDemo(demoDir),
     });
     expect(result.path).toBe("demo");
@@ -1116,69 +1158,109 @@ describe("SetupResult.warehouse null handling", () => {
   });
 });
 
-describe("wizard existing-YAML fork", () => {
-  it("freezes demo/own path copy as byte-identical to main", () => {
-    expect({
-      PATH_QUESTION,
-      PATH_CHOICES,
-      demoReview: pathReviewLine("demo"),
-      ownReview: pathReviewLine("own"),
-    }).toEqual(MAIN_WIZARD_PATH_COPY);
+describe("explicit flag output is byte-identical to pre-V2-16", () => {
+  it("--yes --path own --skip-connect --offline writes the frozen YAML, result, and logs", async () => {
+    const dir = tempDir();
+    const logs: string[] = [];
+    const result = await runSetup({
+      yes: true,
+      path: "own",
+      dir,
+      url: "postgres://ro@localhost:5432/app",
+      skipConnect: true,
+      offline: true,
+      stdinIsTty: false,
+      env: { ...process.env },
+      io: { log: (line) => logs.push(line), error: (line) => logs.push(line) },
+    });
+    for (const name of ["grane.yml", "metrics.yml", "dimensions.yml", "relationships.yml"] as const) {
+      expect(readFileSync(join(dir, name), "utf8"), name).toBe(
+        readFileSync(join(FLAG_OUTPUT, "own-postgres", name), "utf8"),
+      );
+    }
+    expect(flagResultShape(result)).toEqual(
+      JSON.parse(readFileSync(join(FLAG_OUTPUT, "own-postgres-result.json"), "utf8")),
+    );
+    expect(normalizeSetupLog(logs, dir)).toBe(
+      readFileSync(join(FLAG_OUTPUT, "own-postgres-logs.txt"), "utf8"),
+    );
   });
 
-  it("demo path after answering no matches main plus a defaulted warehouse question", async () => {
-    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["no", "demo"] }));
+  it("--yes --path demo --skip-connect keeps the frozen SetupResult and logs", async () => {
+    const demoDir = join(tempDir(), "shop");
+    mkdirSync(demoDir);
+    const logs: string[] = [];
+    const result = await runSetup({
+      yes: true,
+      path: "demo",
+      dir: demoDir,
+      skipConnect: true,
+      stdinIsTty: false,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      io: { log: (line) => logs.push(line), error: (line) => logs.push(line) },
+      runDemoFn: async () => stubDemo(demoDir),
+    });
+    expect(flagResultShape(result)).toEqual(
+      JSON.parse(readFileSync(join(FLAG_OUTPUT, "yes-demo-result.json"), "utf8")),
+    );
+    expect(normalizeSetupLog(logs, demoDir)).toBe(
+      readFileSync(join(FLAG_OUTPUT, "yes-demo-logs.txt"), "utf8"),
+    );
+  });
+});
+
+describe("wizard defaults and prompt count (V2-16)", () => {
+  it("plain demo path asks tone + start + confirm and never enables authoring", async () => {
+    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["plain"] }));
     const answers = await promptSetupAnswers(wizardOpts(prompt, io));
     expect(answers.path).toBe("demo");
     expect(answers.demoEngine).toBe("duckdb");
-    expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
-    const afterExisting = transcript.slice(1);
-    const [pathStep, warehouseStep, ...rest] = afterExisting;
-    expect(pathStep).toEqual(MAIN_WIZARD_DEMO_TRANSCRIPT[0]);
-    expect(warehouseStep).toMatchObject({
+    expect(answers.demoYaml).toBeUndefined();
+    expect(answers.client).toBeNull();
+    expect(answers.tone).toBe("plain");
+    const asked = transcript.filter((e) => e.kind === "select" || e.kind === "input" || e.kind === "confirm");
+    expect(asked).toHaveLength(3);
+    expect(asked[0]).toMatchObject({
       kind: "select",
-      question: DEMO_ENGINE_QUESTION,
-      defaultValue: "duckdb",
+      question: TONE_QUESTION,
+      allowBack: false,
     });
-    expect(rest).toEqual(MAIN_WIZARD_DEMO_TRANSCRIPT.slice(1));
+    expect(asked[1]).toMatchObject({
+      kind: "select",
+      question: PATH_QUESTION,
+      defaultValue: "demo",
+    });
+    expect(asked[2]).toMatchObject({
+      kind: "confirm",
+      question: CONFIRM_QUESTION,
+      defaultYes: true,
+    });
+    expect(asked.some((e) => String(e.question) === DEMO_YAML_QUESTION)).toBe(false);
+    expect(asked.some((e) => String(e.question).includes("agent"))).toBe(false);
   });
 
-  it("own path after answering no matches the main fixture transcript", async () => {
-    const { prompt, io, transcript } = recordingPrompter(
-      scriptedPrompter({
-        select: ["no", "own", "postgres"],
-        input: ["postgres://ro@localhost:5432/app", ""],
-      }),
-    );
-    const answers = await promptSetupAnswers(wizardOpts(prompt, io));
-    expect(answers.path).toBe("own");
-    expect(answers.engine).toBe("postgres");
-    expect(transcript[0]).toMatchObject({ kind: "select", question: EXISTING_YAML_QUESTION });
-    expect(transcript.slice(1)).toEqual(MAIN_WIZARD_OWN_TRANSCRIPT);
-  });
-
-  it("answering yes never enters path, warehouse, or client steps", async () => {
-    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["yes"] }));
+  it("choosing import never enters warehouse, client, or demo-YAML steps", async () => {
+    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["plain", "import"] }));
     const answers = await promptSetupAnswers(wizardOpts(prompt, io));
     expect(answers.path).toBe("import");
     expect(answers.engine).toBeUndefined();
     expect(answers.connection).toBeUndefined();
     expect(answers.client).toBeNull();
+    expect(answers.demoYaml).toBeUndefined();
     const questions = transcript
       .filter((e) => e.kind === "select" || e.kind === "input")
       .map((e) => String(e.question));
-    expect(questions).toEqual([EXISTING_YAML_QUESTION]);
-    expect(questions).not.toContain(PATH_QUESTION);
-    expect(questions).not.toContain("Which warehouse?");
+    expect(questions).toEqual([TONE_QUESTION, PATH_QUESTION]);
+    expect(questions.some((q) => q.includes("Warehouse engine"))).toBe(false);
     expect(questions).not.toContain("Which agent should Grane register with?");
-    expect(questions).not.toContain(DEMO_ENGINE_QUESTION);
     expect(questions).not.toContain(DEMO_YAML_QUESTION);
   });
 
-  it("demo Postgres path offers shipped YAML or authoring, with back-nav", async () => {
+  it("demo Postgres YAML defaults to shipped, with back-nav, and authoring is not the default", async () => {
     const { prompt, io, transcript } = recordingPrompter(
       scriptedPrompter({
-        select: ["no", "demo", "postgres", BACK, "postgres", "shipped"],
+        select: ["plain", "demo_postgres", BACK, "demo_postgres"],
       }),
     );
     const answers = await promptSetupAnswers(wizardOpts(prompt, io));
@@ -1186,30 +1268,242 @@ describe("wizard existing-YAML fork", () => {
     expect(answers.demoEngine).toBe("postgres");
     expect(answers.demoYaml).toBe("shipped");
     expect(demoReviewLine(answers.demoEngine, answers.demoYaml)).toBe("demo Postgres (shipped YAML)");
-    const questions = transcript
-      .filter((e) => e.kind === "select")
-      .map((e) => String(e.question));
-    expect(questions).toContain(DEMO_ENGINE_QUESTION);
-    expect(questions).toContain(DEMO_YAML_QUESTION);
-    expect(questions.filter((q) => q === DEMO_YAML_QUESTION).length).toBeGreaterThanOrEqual(1);
+    const yamlSteps = transcript.filter((e) => e.kind === "select" && e.question === DEMO_YAML_QUESTION);
+    expect(yamlSteps.length).toBeGreaterThanOrEqual(1);
+    expect(yamlSteps[0]).toMatchObject({ defaultValue: "shipped" });
   });
 
-  it("demo Postgres authoring path is a distinct review line", async () => {
+  it("demo Postgres authoring is a distinct review line and only happens when chosen", async () => {
     const { prompt, io } = recordingPrompter(
-      scriptedPrompter({ select: ["no", "demo", "postgres", "authoring"] }),
+      scriptedPrompter({ select: ["plain", "demo_postgres", "authoring"] }),
     );
     const answers = await promptSetupAnswers(wizardOpts(prompt, io));
     expect(answers.demoEngine).toBe("postgres");
     expect(answers.demoYaml).toBe("authoring");
     expect(demoReviewLine("postgres", "authoring")).toBe("demo Postgres (author YAML)");
   });
+
+  it("interactive --path demo still asks tone, then confirm", async () => {
+    const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: ["plain"] }));
+    const answers = await promptSetupAnswers({ ...wizardOpts(prompt, io), forcedPath: "demo" });
+    expect(answers.path).toBe("demo");
+    expect(answers.demoEngine).toBe("duckdb");
+    expect(answers.tone).toBe("plain");
+    const asked = transcript.filter((e) => e.kind === "select" || e.kind === "confirm");
+    expect(asked).toHaveLength(2);
+    expect(asked[0]).toMatchObject({ kind: "select", question: TONE_QUESTION });
+    expect(asked[1]).toMatchObject({ kind: "confirm", question: CONFIRM_QUESTION });
+  });
 });
+
+describe("new defaults never silently author, pin, or copy demo YAML onto own data", () => {
+  it("interactive own path writes init templates, not the demo shop, and does not pin or enable authoring", async () => {
+    const dir = tempDir();
+    const result = await runSetup({
+      stdinIsTty: true,
+      dir,
+      skipConnect: true,
+      offline: true,
+      homeDir: tempDir(),
+      workspaceDir: tempDir(),
+      env: { ...process.env },
+      io: quiet,
+      prompt: scriptedPrompter({
+        select: ["plain", "own", "postgres"],
+        input: ["postgres://ro@localhost:5432/app", ""],
+      }),
+      runDemoFn: async () => {
+        throw new Error("runDemo must not run on the own path");
+      },
+    });
+    expect(result.path).toBe("own");
+    expect(result.demoEngine).toBeUndefined();
+    expect(result.demoYaml).toBeUndefined();
+    expect(readActivePin(dir)).toBeNull();
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(existsSync(join(dir, DEMO_AUTHORING_MARKER))).toBe(false);
+    const yaml = readFileSync(join(dir, "grane.yml"), "utf8");
+    expect(yaml).not.toMatch(/^authoring:\n\s+enabled:\s*true/m);
+    expect(yaml).toContain("#   enabled: false");
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).toBe(METRICS_YML);
+    expect(readFileSync(join(dir, "dimensions.yml"), "utf8")).toBe(DIMENSIONS_YML);
+    expect(readFileSync(join(dir, "relationships.yml"), "utf8")).toBe(RELATIONSHIPS_YML);
+    const demoShopMetrics = readFileSync(join(process.cwd(), "demo/analytics/metrics.yml"), "utf8");
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).not.toBe(demoShopMetrics);
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).not.toContain("Net revenue from completed orders");
+  });
+
+  it("technical and plain tones write identical own-path YAML and take the same actions", async () => {
+    async function ownWithTone(tone: "technical" | "plain") {
+      const dir = tempDir();
+      const home = tempDir();
+      const recorded = recordingPrompter(
+        scriptedPrompter({
+          select: [tone, "own", "postgres"],
+          input: ["postgres://ro@localhost:5432/app", ""],
+        }),
+      );
+      const result = await runSetup({
+        stdinIsTty: true,
+        dir,
+        skipConnect: true,
+        offline: true,
+        homeDir: home,
+        workspaceDir: tempDir(),
+        env: { ...process.env },
+        io: quiet,
+        prompt: recorded.prompt,
+      });
+      return { dir, home, result, transcript: recorded.transcript };
+    }
+    const technical = await ownWithTone("technical");
+    const plain = await ownWithTone("plain");
+    expect(snapshotYaml(technical.dir)).toEqual(snapshotYaml(plain.dir));
+    expect(flagResultShape(technical.result)).toEqual(flagResultShape(plain.result));
+    expect(technical.result.path).toBe("own");
+    expect(readActivePin(technical.dir)).toBeNull();
+    expect(readActivePin(plain.dir)).toBeNull();
+    expect(existsSync(join(technical.dir, DEMO_AUTHORING_MARKER))).toBe(false);
+    expect(existsSync(join(plain.dir, DEMO_AUTHORING_MARKER))).toBe(false);
+    expect(readFileSync(join(technical.dir, "grane.yml"), "utf8")).not.toMatch(/^authoring:\n\s+enabled:\s*true/m);
+    expect(readFileSync(join(plain.dir, "grane.yml"), "utf8")).not.toMatch(/^authoring:\n\s+enabled:\s*true/m);
+    expect(readSetupTone(technical.home)).toBe("technical");
+    expect(readSetupTone(plain.home)).toBe("plain");
+    expect(readFileSync(join(technical.dir, "grane.yml"), "utf8")).not.toMatch(/setup_tone/);
+    expect(existsSync(join(technical.dir, ".grane", "config.json"))).toBe(false);
+    expect(existsSync(join(plain.dir, ".grane", "config.json"))).toBe(false);
+    const techQs = technical.transcript.map((e) => e.question).filter(Boolean);
+    const plainQs = plain.transcript.map((e) => e.question).filter(Boolean);
+    expect(techQs).toContain(wizardCopy("technical").pathQuestion);
+    expect(plainQs).toContain(PATH_QUESTION);
+    expect(techQs).not.toContain(PATH_QUESTION);
+    expect(plainQs).not.toContain(wizardCopy("technical").pathQuestion);
+    const techDefaults = technical.transcript
+      .filter((e) => e.kind === "select" || e.kind === "input" || e.kind === "confirm")
+      .filter((e) => e.question !== TONE_QUESTION)
+      .map((e) => ({ kind: e.kind, defaultValue: e.defaultValue, defaultYes: e.defaultYes, allowEmpty: e.allowEmpty }));
+    const plainDefaults = plain.transcript
+      .filter((e) => e.kind === "select" || e.kind === "input" || e.kind === "confirm")
+      .filter((e) => e.question !== TONE_QUESTION)
+      .map((e) => ({ kind: e.kind, defaultValue: e.defaultValue, defaultYes: e.defaultYes, allowEmpty: e.allowEmpty }));
+    expect(techDefaults).toEqual(plainDefaults);
+  });
+
+  it("both tones default the demo path to the same answers", async () => {
+    async function demoAnswers(tone: "technical" | "plain") {
+      const { prompt, io, transcript } = recordingPrompter(scriptedPrompter({ select: [tone] }));
+      const answers = await promptSetupAnswers(wizardOpts(prompt, io));
+      return { answers, transcript };
+    }
+    const technical = await demoAnswers("technical");
+    const plain = await demoAnswers("plain");
+    const { tone: _t, ...technicalRest } = technical.answers;
+    const { tone: _p, ...plainRest } = plain.answers;
+    expect(technicalRest).toEqual(plainRest);
+    expect(technical.answers.path).toBe("demo");
+    expect(technical.answers.demoEngine).toBe("duckdb");
+    expect(technical.answers.demoYaml).toBeUndefined();
+    expect(technical.answers.client).toBeNull();
+    expect(technical.answers.tone).toBe("technical");
+    expect(plain.answers.tone).toBe("plain");
+    expect(technical.transcript.some((e) => e.question === wizardCopy("technical").pathQuestion)).toBe(true);
+    expect(plain.transcript.some((e) => e.question === PATH_QUESTION)).toBe(true);
+  });
+
+  it("does not write setup_tone if you cancel at confirm", async () => {
+    const home = tempDir();
+    await expect(
+      promptSetupAnswers({
+        ...wizardOpts(scriptedPrompter({ select: ["plain"], confirm: [false] }), quiet),
+        homeDir: home,
+      }),
+    ).rejects.toThrow(/Setup cancelled/);
+    expect(existsSync(localGraneConfigPath(home))).toBe(false);
+    expect(readSetupTone(home)).toBeNull();
+  });
+
+  it("refuses invalid user-local JSON before asking tone and leaves the file", async () => {
+    const home = tempDir();
+    mkdirSync(join(home, ".grane"));
+    const file = localGraneConfigPath(home);
+    writeFileSync(file, "{nope");
+    const recorded = recordingPrompter(scriptedPrompter({ select: ["plain"] }));
+    await expect(
+      promptSetupAnswers({
+        ...wizardOpts(recorded.prompt, recorded.io),
+        homeDir: home,
+      }),
+    ).rejects.toThrow(/not valid JSON/);
+    expect(recorded.transcript.filter((e) => e.kind === "select")).toEqual([]);
+    expect(readFileSync(file, "utf8")).toBe("{nope");
+  });
+
+  it("--yes does not ask the tone question or write user-local config", async () => {
+    const home = tempDir();
+    const dir = tempDir();
+    const recorded = recordingPrompter(scriptedPrompter({ select: ["plain"] }));
+    await runSetup({
+      yes: true,
+      path: "own",
+      dir,
+      url: "postgres://ro@localhost:5432/app",
+      skipConnect: true,
+      offline: true,
+      stdinIsTty: false,
+      homeDir: home,
+      env: { ...process.env },
+      io: quiet,
+      prompt: recorded.prompt,
+    });
+    expect(recorded.transcript.filter((e) => e.kind === "select")).toEqual([]);
+    expect(existsSync(localGraneConfigPath(home))).toBe(false);
+    expect(readSetupTone(home)).toBeNull();
+  });
+  it("--yes --path own does not write a pin, authoring block, or demo-authoring marker", async () => {
+    const dir = tempDir();
+    await runSetup({
+      yes: true,
+      path: "own",
+      dir,
+      url: "postgres://ro@localhost:5432/app",
+      skipConnect: true,
+      offline: true,
+      stdinIsTty: false,
+      env: { ...process.env },
+      io: quiet,
+    });
+    expect(readActivePin(dir)).toBeNull();
+    expect(existsSync(join(dir, DEMO_AUTHORING_MARKER))).toBe(false);
+    expect(readFileSync(join(dir, "grane.yml"), "utf8")).not.toMatch(/^authoring:\n\s+enabled:\s*true/m);
+    expect(readFileSync(join(dir, "metrics.yml"), "utf8")).toBe(METRICS_YML);
+  });
+});
+
+function flagResultShape(result: SetupResult): Record<string, unknown> {
+  return {
+    path: result.path,
+    warehouse: result.warehouse,
+    client: result.client,
+    question: result.question,
+    validated: result.validated,
+    live: result.live,
+    connect: result.connect,
+    demoEngine: result.demoEngine ?? null,
+    demoYaml: result.demoYaml ?? null,
+  };
+}
+
+function normalizeSetupLog(logs: string[], projectDir: string): string {
+  const text = logs.join("\n").split(projectDir).join("<PROJECT>");
+  return text.endsWith("\n") ? text : `${text}\n`;
+}
 
 function wizardOpts(prompt: Prompter, io: { log: (line: string) => void; error: (line: string) => void }) {
   return {
     io,
     prompt,
     env: {},
+    homeDir: tempDir(),
     skipConnect: true,
     resolveClientId: (name: string) => name,
     listClients: () => [

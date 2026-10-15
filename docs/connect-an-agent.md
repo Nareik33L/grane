@@ -36,7 +36,7 @@ deterministic infrastructure in the middle.
 
 ## Fast path
 
-**First time?** One guided command (demo shop or your warehouse, then MCP):
+**First time?** One guided command (defaults to the local demo shop; pass `--connect cursor` to register an agent):
 
 ```bash
 npx grane-analytics setup
@@ -44,8 +44,9 @@ npx grane-analytics setup
 ```
 
 `npx grane-analytics setup` requires `grane-analytics@0.7.0` on npm (publish pending).
-The wizard calls `grane demo` / `grane mcp connect` for you. To do those steps
-by hand: `npm run demo` then `grane -p demo/analytics mcp connect cursor`.
+The wizard runs the demo (or your warehouse) for you. MCP registration is
+opt-in (`--connect` or `grane mcp connect` later). To do the steps by hand:
+`npm run demo` then `grane -p demo/analytics mcp connect cursor`.
 
 Ask: *Why did revenue fall last month?* Script: [demo/README.md](../demo/README.md).
 ChatGPT (HTTPS only) is not this path.

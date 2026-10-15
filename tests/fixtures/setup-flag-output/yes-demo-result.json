@@ -1,0 +1,11 @@
+{
+  "path": "demo",
+  "warehouse": "duckdb",
+  "client": null,
+  "question": "Why did revenue fall last month?",
+  "validated": true,
+  "live": true,
+  "demoEngine": "duckdb",
+  "demoYaml": null,
+  "connect": null
+}

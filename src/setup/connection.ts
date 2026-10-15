@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { WAREHOUSE_TYPES, type WarehouseType } from "../connectors/dialect.js";
 import { WAREHOUSE_CERTIFICATION } from "../connectors/certification.js";
+import type { SetupTone } from "./local-config.js";
 
 export type SetupWarehouse = WarehouseType;
 
@@ -76,9 +77,14 @@ export function connectionFields(type: WarehouseType): ConnectionField[] {
       ];
     case "duckdb":
       return [
-        { key: "path", label: "DuckDB path (file, :memory:, or md:…)", required: true },
+        {
+          key: "path",
+          label: "DuckDB file (on this computer; :memory: or md:… also work)",
+          required: true,
+          defaultValue: "warehouse.duckdb",
+        },
         { key: "schema", label: "Schema", required: false, defaultValue: "main" },
-        { key: "token", label: "MotherDuck token", required: false, secret: true },
+        { key: "token", label: "MotherDuck token (only if this file is MotherDuck)", required: false, secret: true },
       ];
     case "snowflake":
       return [
@@ -218,12 +224,14 @@ export function describeConnection(draft: ConnectionDraft): string {
   return draft.type;
 }
 
-export function engineHint(type: WarehouseType): string {
+export function engineHint(type: WarehouseType, tone: SetupTone = "plain"): string {
   const entry = WAREHOUSE_CERTIFICATION[type];
   if (entry.certification === "certified") {
-    return `certified in CI (${entry.certified_version})`;
+    const core = `certified in CI (${entry.certified_version})`;
+    return tone === "plain" ? `${core} — Grane tests this warehouse in every release.` : core;
   }
-  return `${entry.certification} — not CI-certified`;
+  const core = `${entry.certification} — not CI-certified`;
+  return tone === "plain" ? `${core}. You can run it; Grane does not test this warehouse in CI.` : core;
 }
 
 export function isGraneSourceTree(dir: string): boolean {

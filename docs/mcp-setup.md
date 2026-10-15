@@ -9,7 +9,7 @@ Grane exposes four MCP tools. `grane serve --authoring` (or
 ## Connect from the CLI
 
 ```bash
-grane setup                  # first-run wizard: demo or your DB, then this connect step
+grane setup                  # first-run wizard (demo by default; --connect to register an agent)
 grane mcp doctor
 grane mcp connect claude     # also: cursor, gemini, vscode, chatgpt, windsurf, claude-code
 grane mcp print-config cursor

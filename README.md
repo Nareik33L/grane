@@ -33,7 +33,13 @@ npm install
 npm run setup
 ```
 
-That walks you through: demo shop **or** your own warehouse (any connector Grane already supports) → write/validate project config → register Cursor / Claude / another MCP client → a question to ask the agent. Type `back` to return to the previous step. Prompts are the default. CI / scripts can skip them:
+That first asks whether you want concise technical wording or a hand-held
+plain-English path (stored in `~/.grane/config.json`, not your project YAML),
+then how you want to start (default: the local demo shop, no database to
+install), then a short review. Type `back` to return to the previous step.
+Connecting Cursor / Claude is opt-in (`--connect`); it is not written unless
+you ask. Prompts are the default. CI / scripts can skip them (`--yes` does
+not ask the wording question):
 
 ```bash
 npm run setup -- --yes --path demo --connect cursor
