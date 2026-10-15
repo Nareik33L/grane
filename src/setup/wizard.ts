@@ -7,7 +7,12 @@ import {
   parseOwnDatabaseUrl,
   type ConnectionDraft,
 } from "./connection.js";
-import { readSetupTone, writeSetupTone, type SetupTone } from "./local-config.js";
+import {
+  assertLocalGraneConfigWritable,
+  readSetupTone,
+  writeSetupTone,
+  type SetupTone,
+} from "./local-config.js";
 import type { DemoEngine, DemoYaml, SetupIo, SetupPath, StartChoice } from "./types.js";
 import { BACK, type Choice, type Prompter } from "./prompts.js";
 import { TONE_CHOICES, TONE_QUESTION, wizardCopy, type WizardCopy } from "./wizard-copy.js";
@@ -144,6 +149,7 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
   while (true) {
     switch (step) {
       case "tone": {
+        if (opts.homeDir) assertLocalGraneConfigWritable(opts.homeDir);
         const saved = opts.homeDir ? readSetupTone(opts.homeDir) : null;
         const chosen = await opts.prompt.select<SetupTone>(
           TONE_QUESTION,
@@ -155,7 +161,6 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         }
         tone = chosen;
         copy = wizardCopy(tone);
-        if (opts.homeDir) writeSetupTone(opts.homeDir, tone);
         step = stepAfterTone(opts);
         break;
       }
@@ -327,6 +332,7 @@ export async function promptSetupAnswers(opts: WizardOptions): Promise<WizardAns
         if (path === "own" && (!engine || !connection)) {
           throw new Error("Warehouse connection is incomplete. Go back and fill the fields.");
         }
+        if (opts.homeDir) writeSetupTone(opts.homeDir, tone);
         return {
           path,
           engine,

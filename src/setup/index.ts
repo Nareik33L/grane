@@ -37,6 +37,7 @@ export {
   readSetupTone,
   writeSetupTone,
   readLocalGraneConfig,
+  assertLocalGraneConfigWritable,
   localGraneConfigPath,
   LOCAL_GRANE_CONFIG_REL,
 } from "./local-config.js";

@@ -15,10 +15,14 @@
   existing YAML are explicit choices. MCP registration is skipped unless
   `--connect` is set. Authoring, auto-pin, and demo-shop YAML are never
   implied by a default. `--yes` / `--import` skip the tone question and do
-  not write the user-local config. `--yes --path demo|own`, `--import`,
-  `--postgres`, and `--postgres --authoring` keep the same YAML, banners,
-  and ready lines as before. Warehouse hints still say `certified` vs
-  `self_certifiable`. DuckDB own-path file defaults to `warehouse.duckdb`.
+  not write the user-local config. Tone is saved only after confirm (so
+  “nothing is written until you say yes” is true). Writes to
+  `~/.grane/config.json` refuse a symlink (file or `~/.grane/` dir), use
+  temp-file + rename at mode `0600`, and will not overwrite invalid JSON
+  (fix or delete the file, then run setup again). `--yes --path demo|own`,
+  `--import`, `--postgres`, and `--postgres --authoring` keep the same YAML,
+  banners, and ready lines as before. Warehouse hints still say `certified`
+  vs `self_certifiable`. DuckDB own-path file defaults to `warehouse.duckdb`.
 - **Docs + compat cert (V2-15).** [docs/v2-authoring.md](docs/v2-authoring.md)
   is the operator guide: proposals-as-PRs, experimental vs governed,
   `--authoring`, local vs shared, read-only discovery with sampling caps,

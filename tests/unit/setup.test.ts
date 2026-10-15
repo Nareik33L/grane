@@ -1410,6 +1410,34 @@ describe("new defaults never silently author, pin, or copy demo YAML onto own da
     expect(plain.transcript.some((e) => e.question === PATH_QUESTION)).toBe(true);
   });
 
+  it("does not write setup_tone if you cancel at confirm", async () => {
+    const home = tempDir();
+    await expect(
+      promptSetupAnswers({
+        ...wizardOpts(scriptedPrompter({ select: ["plain"], confirm: [false] }), quiet),
+        homeDir: home,
+      }),
+    ).rejects.toThrow(/Setup cancelled/);
+    expect(existsSync(localGraneConfigPath(home))).toBe(false);
+    expect(readSetupTone(home)).toBeNull();
+  });
+
+  it("refuses invalid user-local JSON before asking tone and leaves the file", async () => {
+    const home = tempDir();
+    mkdirSync(join(home, ".grane"));
+    const file = localGraneConfigPath(home);
+    writeFileSync(file, "{nope");
+    const recorded = recordingPrompter(scriptedPrompter({ select: ["plain"] }));
+    await expect(
+      promptSetupAnswers({
+        ...wizardOpts(recorded.prompt, recorded.io),
+        homeDir: home,
+      }),
+    ).rejects.toThrow(/not valid JSON/);
+    expect(recorded.transcript.filter((e) => e.kind === "select")).toEqual([]);
+    expect(readFileSync(file, "utf8")).toBe("{nope");
+  });
+
   it("--yes does not ask the tone question or write user-local config", async () => {
     const home = tempDir();
     const dir = tempDir();
