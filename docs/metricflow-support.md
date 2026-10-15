@@ -48,7 +48,10 @@ MetricFlow import covers only simple cases. The pinned Apache-2.0
 (`tests/fixtures/metricflow-simple` @ `fe4b8c1ccb72a8ca77494b345777eff20a714119`)
 imports **2 of 112** metrics: `largest_listing` and `smallest_listing` (`max` /
 `min` of a plain `capacity` column on a model with a column-backed primary
-entity). The other 110 are skipped with a reason.
+entity). The other 110 are skipped with a reason, snapshotted in
+`tests/fixtures/metricflow-simple/skipped-metrics.json`. A "measure was
+not found on any imported semantic model" skip names the root cause when
+that measure lived on a model with no column-backed primary entity.
 
 Main unsupported constructs (see the matrix): semantic models with
 `primary_entity` but no column-backed primary entity (most fact models in

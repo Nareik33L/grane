@@ -43,7 +43,9 @@
   symlink or `/dev/null`. Gate-7 cases (including these) are wired into
   `traps.ts`. Pinned public projects: `dbt-labs/jaffle_shop` (classic) and
   `dbt-labs/metricflow` `simple_manifest` @ `fe4b8c1c` (Apache-2.0; imports
-  2 of 112 metrics, names asserted). A declared time dimension whose expr
+  2 of 112 metrics, names asserted; 110 skip reasons snapshotted). A
+  "measure not found" skip names the missing column-backed primary entity.
+  A declared time dimension whose expr
   is `cast(... as DATE)` skips the metric as an unsupported expression, not
   as "not a declared time dimension". A develop-only repo with no
   `origin/HEAD` is refused even if HEAD commits `base_branch`. When

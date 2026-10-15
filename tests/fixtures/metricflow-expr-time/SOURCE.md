@@ -1,8 +1,9 @@
 # MetricFlow expression time-dimension skip fixture
 
 Apache-2.0 derivative of [dbt-labs/metricflow](https://github.com/dbt-labs/metricflow)
-`simple_manifest` `semantic_models/listings_latest.yaml` plus the
-`largest_listing` metric from `metrics.yaml`, pinned at
+`simple_manifest` `semantic_models/listings_latest.yaml` plus three
+metrics from `metrics.yaml` (`largest_listing`, `smallest_listing`,
+`listings`), pinned at
 `fe4b8c1ccb72a8ca77494b345777eff20a714119`. License: Apache-2.0 (see
 `LICENSE`). Copyright: dbt Labs.
 

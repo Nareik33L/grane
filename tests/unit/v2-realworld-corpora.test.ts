@@ -59,6 +59,9 @@ describe("representative real-world corpora", () => {
     expect(docs).toContain("tests/fixtures/metricflow-simple-import");
     expect(docs).toMatch(/2 of 112/);
     expect(docs).not.toMatch(/jaffle-sl-template/);
+    const firstWeek = readFileSync(join(ROOT, "docs/first-week.md"), "utf8");
+    expect(firstWeek).toMatch(/MetricFlow import currently\s+covers simple cases only/);
+    expect(firstWeek).toContain("metricflow-support.md");
     for (const corpus of CORPORA) {
       expect(docs, corpus.rel).toContain(corpus.rel);
       expect(docs, `${corpus.rel} source`).toMatch(corpus.source);
@@ -155,6 +158,27 @@ describe("representative real-world corpora", () => {
     expect(Object.keys(loaded.config.metrics).sort()).toEqual(["largest_listing", "smallest_listing"]);
     const report = validateModel(new SemanticModel(loaded.config));
     expect(report.ok).toBe(true);
+  });
+
+  it("snapshots all 110 simple_manifest skip reasons", () => {
+    const fixture = join(ROOT, "tests/fixtures/metricflow-simple");
+    const expected = JSON.parse(readFileSync(join(fixture, "skipped-metrics.json"), "utf8")) as Record<
+      string,
+      string
+    >;
+    expect(Object.keys(expected)).toHaveLength(110);
+    const graph = parseDbtYamlFiles(fixture);
+    const contribution = loadAutoProvider({ path: fixture }, { projectDir: fixture });
+    const imported = new Set(Object.keys(contribution.metrics));
+    expect([...imported].sort()).toEqual(["largest_listing", "smallest_listing"]);
+    const skipped: Record<string, string> = {};
+    for (const metric of graph.metrics) {
+      if (imported.has(metric.name)) continue;
+      const reason = contribution.unsupported.find((u) => u.kind === "metric" && u.name === metric.name)?.reason;
+      expect(reason, metric.name).toBeDefined();
+      skipped[metric.name] = reason!;
+    }
+    expect(skipped).toEqual(expected);
   });
 
   it("compiles imported largest_listing to the expected SQL", () => {

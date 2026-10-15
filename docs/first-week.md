@@ -90,7 +90,9 @@ show this set. Add two or three dimensions (`country`, `channel`, a status).
 
 If the company already defines these in dbt, Cube, Looker, Ossie, or Malloy,
 skip this step: `grane init --provider ../that_project` (or add `providers:` to
-`grane.yml`) imports them instead of copying YAML. See
+`grane.yml`) imports them instead of copying YAML. MetricFlow import currently
+covers simple cases only; see the support matrix in
+[metricflow-support.md](metricflow-support.md). See also
 [providers.md](providers.md).
 
 ## 5. Validate

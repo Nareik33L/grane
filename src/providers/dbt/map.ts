@@ -40,6 +40,8 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
   // ---- Entities: a primary entity backed by a plain column is required ----
   const models: MfSemanticModel[] = [];
   const dimensionCandidates: DimensionCandidate[] = [];
+  /** Measures on models that never imported, keyed by measure name → skip reason. */
+  const skippedMeasureReason = new Map<string, string>();
   for (const model of graph.models) {
     const primary = model.entities.find((e) => e.type === "primary");
     if (!primary?.column) {
@@ -50,6 +52,7 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
           `Grane needs an explicit primary key and will not assume one.`;
       skip("entity", model.primaryEntity ?? model.name, reason, model.sourcePath);
       for (const measure of model.measures) {
+        skippedMeasureReason.set(measure.name, reason);
         if (measure.createMetric) skip("metric", measure.name, reason, model.sourcePath);
       }
       for (const metric of model.metrics) skip("metric", metric.name, reason, model.sourcePath);
@@ -267,7 +270,7 @@ export function mapMetricFlowGraph(graph: MetricFlowGraph, provider = "dbt"): Se
     }
   }
 
-  const ctx: MapContext = { out, provider, models, measureIndex, skip };
+  const ctx: MapContext = { out, provider, models, measureIndex, skippedMeasureReason, skip };
 
   // ---- Simple metrics first (measures with create_metric, embedded, top-level) ----
   const pending: { metric: MfMetric; model: MfSemanticModel | undefined }[] = [];
@@ -312,6 +315,7 @@ interface MapContext {
   provider: string;
   models: MfSemanticModel[];
   measureIndex: Map<string, { model: MfSemanticModel; measure: MfMeasure }>;
+  skippedMeasureReason: Map<string, string>;
   skip: (kind: "metric" | "dimension" | "entity" | "relationship", name: string, reason: string, path: string) => void;
 }
 
@@ -561,7 +565,12 @@ function addSimpleMetric(ctx: MapContext, metric: MfMetric, model: MfSemanticMod
   if (metric.measure) {
     const found = ctx.measureIndex.get(metric.measure.name);
     if (!found) {
-      return fail(`measure "${metric.measure.name}" was not found on any imported semantic model.`);
+      const root = ctx.skippedMeasureReason.get(metric.measure.name);
+      return fail(
+        root
+          ? `measure "${metric.measure.name}" was not found on any imported semantic model because ${root.replace(/\.$/, "")}.`
+          : `measure "${metric.measure.name}" was not found on any imported semantic model.`,
+      );
     }
     const unsupportedInput = describeInput(metric.measure, true);
     if (unsupportedInput) return fail(`measure input uses ${unsupportedInput}, which Grane does not model.`);

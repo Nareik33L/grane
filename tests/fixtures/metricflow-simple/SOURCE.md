@@ -3,7 +3,8 @@
 Pinned public MetricFlow YAML (Apache-2.0) so import/validate can assert
 exact metric, entity, and dimension names. Import currently covers only
 simple cases: this tree imports 2 of 112 metrics (`largest_listing`,
-`smallest_listing`).
+`smallest_listing`). The other 110 skip reasons are snapshotted in
+`skipped-metrics.json`.
 
 - Upstream: https://github.com/dbt-labs/metricflow
 - Path: `metricflow_semantics/test_helpers/semantic_manifest_yamls/simple_manifest`
