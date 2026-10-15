@@ -83,9 +83,9 @@ audit:
   # fail_closed: true   # refuse the query if the audit append fails (regulated)
 
 # V2 authoring MCP tools (off by default).
-# grane serve --authoring enables them for this process only.
-# authoring.enabled enables them for the project. One does not set the other.
-# mode: local = stdio only; shared = HTTP too (authenticated agent).
+# Put --authoring in the client config args to enable them for this process.
+# authoring.enabled: true advertises all 9 tools on stdio.
+# HTTP also needs authoring.mode: shared and auth.agents.
 # authoring:
 #   enabled: false
 #   mode: local               # or shared

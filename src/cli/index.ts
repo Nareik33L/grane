@@ -552,7 +552,7 @@ program
   )
   .option(
     "--authoring",
-    "enable authoring tools for this process (not the same as authoring.enabled in grane.yml)",
+    "enable authoring tools for this process (on stdio, authoring.enabled in grane.yml also advertises them)",
   )
   .action(async (options: { stdio?: boolean; port: string; host: string; allowAnonymous?: boolean; authoring?: boolean }) => {
     const kernel = loadServingKernel();

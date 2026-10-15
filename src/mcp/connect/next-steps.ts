@@ -20,16 +20,17 @@ export function withConfigStep(steps: string[], configPath: string | null): stri
 }
 
 /**
- * Honest authoring footnote. `--authoring` is this process; `authoring.enabled`
- * is the project. Neither silently sets the other. Tools only propose.
+ * Default serve is four tools and no prompts. `--authoring` in the client
+ * config args enables them for this process. On stdio, `authoring.enabled`
+ * also advertises all nine tools. HTTP needs `auth.agents`.
  */
 export const AUTHORING_SWITCH_STEPS = [
-  "`grane serve --stdio --authoring` enables authoring tools for this process.",
-  "`authoring.enabled: true` in grane.yml enables them for the project (stdio; HTTP only when authoring.mode is shared). One does not set the other.",
+  "To enable authoring for this process, put `--authoring` in the client config args (`serve --stdio --authoring`).",
+  "`authoring.enabled: true` in grane.yml advertises all 9 authoring tools on stdio. HTTP also needs `authoring.mode: shared` and `auth.agents`.",
 ] as const;
 
 export const AUTHORING_PROPOSE_STEP =
-  `Open the “${SETUP_GRANE_PROMPT_TITLE}” prompt. Authoring tools only propose a GitHub PR. Nothing is live until a human merges and pins.`;
+  `If authoring is on, open the “${SETUP_GRANE_PROMPT_TITLE}” prompt. Authoring tools only propose a GitHub PR. Nothing is live until a human merges and pins.`;
 
 export const AUTHORING_CONNECT_STEPS = [...AUTHORING_SWITCH_STEPS, AUTHORING_PROPOSE_STEP];
 

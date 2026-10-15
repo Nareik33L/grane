@@ -11,8 +11,9 @@ connection  postgres  postgres://ro@localhost:5432/app
 validate    0/0 metrics  |  offline
 
 Skipped MCP registration.
-  grane -p <PROJECT> mcp connect cursor
-  grane -p <PROJECT> mcp doctor
+1. grane -p <PROJECT> mcp connect cursor
+2. Reload Cursor and start a new chat.
+3. Optional: grane -p <PROJECT> mcp doctor
 
 ────────────────────────────────────────
 You're ready.
@@ -23,10 +24,7 @@ Next:
   1. grane discover --write-relationships
   2. Add about five metrics in metrics.yml (comments show a starter set)
   3. grane validate
-
-Ask your agent:
-
-  What can you see in the catalog?
+  4. Ask: What can you see in the catalog?
 
 Project  <PROJECT>
 Docs     https://github.com/Nareik33L/grane/blob/main/docs/first-week.md

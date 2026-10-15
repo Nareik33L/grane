@@ -10,7 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   localGraneConfigPath,
@@ -18,6 +19,7 @@ import {
   writeSetupTone,
 } from "../../src/setup/local-config.js";
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const temps: string[] = [];
 
 function tempDir(): string {
@@ -48,6 +50,7 @@ describe("writeSetupTone", () => {
     expect(lstatSync(file).mode & 0o777).toBe(0o600);
     expect(statSync(file).isFile()).toBe(true);
     expect(readdirSync(join(home, ".grane")).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+    expect(readFileSync(join(ROOT, "src/setup/local-config.ts"), "utf8")).toMatch(/flag:\s*"wx"/);
   });
 
   it("refuses a symlinked config.json and leaves the target untouched", () => {

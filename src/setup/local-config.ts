@@ -128,7 +128,7 @@ export function writeSetupTone(homeDir: string, tone: SetupTone): void {
     `.config-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json.tmp`,
   );
   try {
-    writeFileSync(tmp, body, { encoding: "utf8", mode: 0o600 });
+    writeFileSync(tmp, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
     renameSync(tmp, file);
   } catch (err) {
     rmSync(tmp, { force: true });

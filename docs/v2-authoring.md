@@ -59,9 +59,9 @@ grane setup --yes --path demo --postgres --authoring
 ```
 
 `--authoring` enables authoring tools for **this process**.
-`authoring.enabled: true` in `grane.yml` enables them for the **project**
-(stdio; HTTP only when `authoring.mode` is `shared`). One does not set the
-other. Authoring tools only propose a GitHub PR. Nothing is live until a
+On stdio, `authoring.enabled: true` in `grane.yml` also advertises all 9 tools
+(and the Set up Grane prompt). HTTP needs `authoring.mode: shared` and
+`auth.agents`. Authoring tools only propose a GitHub PR. Nothing is live until a
 human merges and pins.
 
 The nine tools (and the **Set up Grane** prompt) are:

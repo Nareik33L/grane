@@ -119,22 +119,25 @@ describe("MCP setup steps match server behaviour", () => {
     );
   });
 
-  it("authoring steps name both switches and do not treat them as substitutes", () => {
+  it("authoring steps put --authoring in client args, name stdio YAML, and gate the prompt", () => {
     const text = AUTHORING_CONNECT_STEPS.join("\n");
-    expect(text).toContain("grane serve --stdio --authoring");
+    expect(text).toMatch(/client config args/);
+    expect(text).toContain("serve --stdio --authoring");
     expect(text).toContain("authoring.enabled");
-    expect(text).toMatch(/this process/);
-    expect(text).toMatch(/project/);
-    expect(text).toMatch(/One does not set the other/);
+    expect(text).toMatch(/all 9 authoring tools on stdio/);
+    expect(text).toContain("auth.agents");
+    expect(text).toMatch(/If authoring is on/);
     expect(text).toContain(SETUP_GRANE_PROMPT_TITLE);
     expect(text).toMatch(/only propose/);
     expect(text).toMatch(/merges and pins/);
     const cursor = resolveClient("cursor")
       .nextSteps({ transport: "stdio", configPath: "/tmp/mcp.json", written: true })
       .join("\n");
+    expect(cursor).toMatch(/If authoring is on/);
     expect(cursor).toContain(SETUP_GRANE_PROMPT_TITLE);
-    expect(cursor).toContain("grane serve --stdio --authoring");
+    expect(cursor).toMatch(/client config args/);
     expect(cursor).toContain("authoring.enabled");
+    expect(cursor).toContain("auth.agents");
   });
 
   it("skip-connect hint commands are the real CLI shape", () => {
@@ -163,10 +166,13 @@ describe("MCP setup steps match server behaviour", () => {
     expect(blob).toContain(coreToolsPhrase());
     expect(blob).toContain("grane serve --stdio --authoring");
     expect(blob).toContain("authoring.enabled");
-    expect(blob).toMatch(/not a substitute|One does not set the other|not the same as/);
+    expect(blob).toMatch(/advertises all 9/);
+    expect(blob).toContain("auth.agents");
+    expect(blob).toMatch(/If authoring is on/);
     expect(blob).toMatch(/propose/);
     expect(blob).toMatch(/merge/);
     expect(blob).toMatch(/pin/);
-    expect(blob).not.toMatch(/`--authoring` \(or `authoring\.enabled`/);
+    expect(blob).not.toMatch(/not a substitute/);
+    expect(blob).not.toMatch(/One does not set the other/);
   });
 });

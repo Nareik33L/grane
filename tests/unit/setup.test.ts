@@ -1158,7 +1158,7 @@ describe("SetupResult.warehouse null handling", () => {
   });
 });
 
-describe("explicit flag output is byte-identical to pre-V2-16", () => {
+describe("explicit flag output is frozen", () => {
   it("--yes --path own --skip-connect --offline writes the frozen YAML, result, and logs", async () => {
     const dir = tempDir();
     const logs: string[] = [];

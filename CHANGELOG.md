@@ -8,9 +8,11 @@
   `-p <project> serve --stdio`, Cursor `.cursor/mcp.json`, HTTP bind
   `127.0.0.1:8080` at `/mcp`, connect HTTP default `http://localhost:8080/mcp`.
   Default serve is four tools and no prompts; the Set up Grane prompt is listed
-  only if authoring is on. On stdio, `authoring.enabled` advertises all nine
-  tools. HTTP authoring needs `auth.agents`. Authoring tools only propose; a
-  human merges and pins. No enforcement change.
+  only if authoring is on. Put `--authoring` in the client config args for this
+  process. On stdio, `authoring.enabled` advertises all nine tools. HTTP
+  authoring needs `auth.agents`. Authoring tools only propose; a human merges
+  and pins. User-local `setup_tone` temp writes use flag `wx`. No enforcement
+  change.
 - **Setup wizard for non-technical users (V2-16).** The first interactive
   question is a tone/skill check: (1) “Connect a warehouse, import my
   existing semantic YAML and configure governance” vs (2) “I have no idea
