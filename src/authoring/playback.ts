@@ -6,6 +6,7 @@ export interface PlaybackMetric {
   calculation: string;
   filters: string;
   grain: string;
+  description: string;
 }
 
 /**
@@ -30,6 +31,7 @@ export function proposalPlaybackMetrics(draftYaml: Record<string, string>): Play
         calculation: String(def.type ?? ""),
         filters: def.filters == null ? "none" : JSON.stringify(def.filters),
         grain: groupBy != null ? JSON.stringify(groupBy) : String(def.entity ?? ""),
+        description: def.description == null || def.description === "" ? "none" : String(def.description),
       };
     });
 }
@@ -40,7 +42,7 @@ export function formatProposalPlayback(draftYaml: Record<string, string>): strin
   return rows
     .map(
       (row) =>
-        `${row.name}: table/column ${row.sql}; calculation ${row.calculation}; filters ${row.filters}; grain ${row.grain}`,
+        `${row.name}: table/column ${row.sql}; calculation ${row.calculation}; filters ${row.filters}; grain ${row.grain}; description ${row.description}`,
     )
     .join("\n");
 }

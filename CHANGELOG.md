@@ -7,7 +7,10 @@
   you?”). The agent suggests plain-English meanings from discovered columns;
   the user confirms via multiple choice. Suggested meanings stay unconfirmed
   until the user picks one. `propose_definitions` returns a play-back
-  summary derived from the draft YAML — it must match the proposal. MCP
+  summary derived from the draft YAML (including `description`) — it must
+  match the proposal. `submit_proposal` refuses a stale draft when the
+  session changed after `propose_definitions` (resolve, `record_term`, or
+  any edit); call `propose_definitions` again. MCP
   **only reads** `setup_tone` from `~/.grane/config.json`, with the same
   symlink / invalid-JSON refusal as the writer; tone changes wording only,
   never YAML or the proposal. Missing config defaults to `technical`.

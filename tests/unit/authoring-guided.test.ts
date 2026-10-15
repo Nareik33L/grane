@@ -52,6 +52,17 @@ const SCHEMA: DatabaseSchema = {
       columns: [
         { name: "id", dataType: "integer", nullable: false },
         { name: "net_amount", dataType: "numeric", nullable: true },
+        { name: "created_at", dataType: "timestamp", nullable: true },
+        { name: "completed_at", dataType: "timestamp", nullable: true },
+      ],
+    },
+    {
+      schema: "public",
+      name: "invoices",
+      primaryKey: "id",
+      primaryKeyColumns: ["id"],
+      columns: [
+        { name: "id", dataType: "integer", nullable: false },
         { name: "gross_amount", dataType: "numeric", nullable: true },
         { name: "completed_at", dataType: "timestamp", nullable: true },
       ],
@@ -140,7 +151,9 @@ describe("suggested meanings stay unconfirmed until the user picks", () => {
     const listed = listAmbiguities(k, sessionId);
     const revenue = listed.find((item) => item.kind === "revenue_like_columns");
     expect(revenue).toBeTruthy();
-    expect(revenue!.candidates).toEqual(expect.arrayContaining(["orders.net_amount", "orders.gross_amount"]));
+    expect(revenue!.candidates).toEqual(
+      expect.arrayContaining(["orders.net_amount", "invoices.gross_amount"]),
+    );
     expect(revenue!.candidates.length).toBeGreaterThanOrEqual(2);
 
     const before = loadSession(dir, sessionId);
@@ -184,9 +197,78 @@ describe("suggested meanings stay unconfirmed until the user picks", () => {
       expect(proposed.playback).toContain(`calculation ${row.calculation}`);
       expect(proposed.playback).toContain(`filters ${row.filters}`);
       expect(proposed.playback).toContain(`grain ${row.grain}`);
+      expect(proposed.playback).toContain(`description ${row.description}`);
     }
+    expect(proposed.playback).toContain("description Completed order revenue.");
     const preview = previewYaml(k, sessionId);
     expect(formatProposalPlayback(preview.files)).toBe(proposed.playback);
+  });
+});
+
+describe("stale draft after propose_definitions", () => {
+  it("resolve-after-propose then submit refuses (does not commit invoices.gross_amount)", async () => {
+    const dir = initRepo();
+    const k = kernelFor(dir);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    recordTerm(k, sessionId, "revenue", "Completed order revenue.");
+    const listed = listAmbiguities(k, sessionId);
+    const revenue = listed.find((item) => item.kind === "revenue_like_columns");
+    expect(revenue).toBeTruthy();
+    expect(revenue!.candidates).toEqual(
+      expect.arrayContaining(["orders.net_amount", "invoices.gross_amount"]),
+    );
+    await resolveAmbiguity(k, sessionId, revenue!.id, "orders.net_amount");
+    const proposed = await proposeDefinitions(k, sessionId);
+    expect(proposed.unresolved).toBe(true);
+    expect(proposed.draft_yaml["metrics.yml"]).toMatch(/net_amount/);
+    expect(proposed.draft_yaml["metrics.yml"]).not.toMatch(/gross_amount/);
+
+    await resolveAll(k, sessionId);
+    expect(listAmbiguities(k, sessionId)).toEqual([]);
+    try {
+      submitProposal(k, sessionId, "stale-resolve");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/Session changed after propose_definitions/);
+      expect((err as GraneError).message).toMatch(/Call propose_definitions again/);
+    }
+    expect(git(dir, ["branch", "--list", "grane/proposal/*"]).trim()).toBe("");
+    expect(loadSession(dir, sessionId).draft_yaml["metrics.yml"]).not.toMatch(/gross_amount/);
+  });
+
+  it("record_term-after-propose then submit refuses", async () => {
+    const dir = initRepo();
+    const k = kernelFor(dir);
+    const sessionId = authoringStart(k).session.id;
+    await discoverSchema(k, sessionId);
+    recordTerm(k, sessionId, "revenue", "Completed order revenue.");
+    await resolveAll(k, sessionId);
+    const proposed = await proposeDefinitions(k, sessionId);
+    expect(proposed.unresolved).toBe(false);
+    expect(proposed.playback).toContain("description Completed order revenue.");
+
+    recordTerm(k, sessionId, "revenue", "Net after refunds.");
+    try {
+      submitProposal(k, sessionId, "stale-term");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(GraneError);
+      expect((err as GraneError).message).toMatch(/Session changed after propose_definitions/);
+    }
+    expect(git(dir, ["branch", "--list", "grane/proposal/*"]).trim()).toBe("");
+    expect(loadSession(dir, sessionId).draft_yaml["metrics.yml"]).toMatch(/Completed order revenue/);
+    expect(loadSession(dir, sessionId).draft_yaml["metrics.yml"]).not.toMatch(/Net after refunds/);
+
+    const rebuilt = await proposeDefinitions(k, sessionId);
+    expect(rebuilt.playback).toContain("description Net after refunds.");
+    expect(rebuilt.draft_yaml["metrics.yml"]).toMatch(/Net after refunds/);
+    const submitted = submitProposal(k, sessionId, "fresh-term");
+    expect(submitted.proposal.branch).toMatch(/^grane\/proposal\//);
+    const blob = git(dir, ["show", `${submitted.proposal.branch}:metrics.yml`]);
+    expect(blob).toMatch(/Net after refunds/);
+    expect(blob).not.toMatch(/Completed order revenue/);
   });
 });
 
@@ -228,22 +310,40 @@ describe("setup_tone changes wording only", () => {
 });
 
 describe("example transcript", () => {
-  it("is labelled abridged and contains real propose_definitions output", async () => {
+  it("labels spoken lines abridged and embeds verbatim tool payloads", async () => {
     const fixture = readFileSync(TRANSCRIPT, "utf8");
-    expect(fixture).toMatch(/abridged/i);
-    expect(fixture).toMatch(/real/i);
+    expect(fixture).toMatch(/Spoken lines below are \*\*abridged\*\*/);
+    expect(fixture).toMatch(/Tool request\/response payloads are \*\*verbatim\*\*/);
 
     const dir = initRepo();
     const k = kernelFor(dir);
     const sessionId = authoringStart(k).session.id;
-    await discoverSchema(k, sessionId);
-    recordTerm(k, sessionId, "revenue", "Completed order revenue.");
+    const discovered = await discoverSchema(k, sessionId);
+    const recorded = recordTerm(k, sessionId, "revenue", "Completed order revenue.");
     await resolveAll(k, sessionId);
     const proposed = await proposeDefinitions(k, sessionId);
+
     expect(fixture).toContain(proposed.playback);
     expect(fixture).toContain(proposed.draft_yaml["metrics.yml"]!.trim());
-    expect(fixture).toMatch(/authoring_start/);
-    expect(fixture).toMatch(/submit_proposal/);
+    expect(discovered).toMatchObject({
+      session_id: sessionId,
+      schema: expect.any(Object),
+      relationships: expect.any(Object),
+    });
+    expect(fixture).toContain('"schema"');
+    expect(fixture).toContain('"relationships"');
+    expect(fixture).toContain('"snapshot_hash"');
+    expect(fixture).toContain('"open_ambiguities"');
+    expect(fixture).toContain('"glossary_answers"');
+    expect(Object.keys(recorded).sort().join(" ")).toMatch(/glossary_answers/);
+    expect(fixture).toMatch(/exploration_disabled/);
+    expect(fixture).toContain('"commit"');
+    expect(fixture).toContain('"base_branch"');
+    expect(fixture).toContain('"base_commit"');
+    expect(fixture).toContain('"title"');
+    expect(fixture).toContain('"head"');
+    expect(fixture).toContain('"repo"');
     expect(fixture).not.toMatch(/your metrics are live/i);
+    expect(fixture).not.toMatch(/samples_omitted/);
   });
 });

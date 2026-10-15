@@ -83,8 +83,12 @@ agent inspects discovered columns and suggests plain-English meanings
 (table/column, calculation, filters, grain). The user confirms or adjusts by
 multiple choice. Suggested meanings stay **unconfirmed until the user picks
 one** — nothing ambiguous is settled silently. After `propose_definitions`,
-the play-back summary is derived from the draft YAML and must match the
-proposal exactly.
+the play-back summary is derived from the draft YAML (name, table/column,
+calculation, filters, grain, and description) and must match the proposal
+exactly. If the session changes after `propose_definitions` (a later
+`resolve_ambiguity`, `record_term`, or any other edit), `submit_proposal`
+refuses until you call `propose_definitions` again — it will not commit a
+stale draft.
 
 Wording comes from `setup_tone` in `~/.grane/config.json` (the V2-16 wizard
 choice). The MCP server **only reads** that file, with the same refusal of

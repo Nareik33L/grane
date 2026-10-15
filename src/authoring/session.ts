@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -59,6 +59,11 @@ export const authoringSessionSchema = z.object({
   resolved_ambiguities: z.array(resolvedAmbiguitySchema).default([]),
   /** Draft YAML files keyed by project-relative path (`metrics.yml`, …). */
   draft_yaml: z.record(z.string(), z.string()).default({}),
+  /**
+   * Hash of glossary / ambiguities / discovery at the last `propose_definitions`.
+   * `submit_proposal` refuses when the session has moved on (stale draft).
+   */
+  draft_source_hash: z.string().nullable().default(null),
 });
 export type AuthoringSession = z.infer<typeof authoringSessionSchema>;
 
@@ -72,6 +77,7 @@ export interface CreateSessionInput {
   open_ambiguities?: OpenAmbiguity[];
   resolved_ambiguities?: ResolvedAmbiguity[];
   draft_yaml?: Record<string, string>;
+  draft_source_hash?: string | null;
 }
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -91,6 +97,25 @@ function assertSessionId(id: string): string {
     );
   }
   return id;
+}
+
+/** Inputs that must match the stored draft. Order-sensitive; excludes `draft_yaml`. */
+export function sessionDraftSourceHash(
+  session: Pick<
+    AuthoringSession,
+    "glossary_answers" | "open_ambiguities" | "resolved_ambiguities" | "discovered_snapshot_hash"
+  >,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        discovered_snapshot_hash: session.discovered_snapshot_hash,
+        glossary_answers: session.glossary_answers,
+        open_ambiguities: session.open_ambiguities,
+        resolved_ambiguities: session.resolved_ambiguities,
+      }),
+    )
+    .digest("hex");
 }
 
 function parseSession(raw: unknown, source: string): AuthoringSession {
@@ -138,7 +163,7 @@ function readSessionFile(path: string, id: string): AuthoringSession {
 /** Create a session document, persist it, and return the stored value. */
 export function createSession(projectDir: string, input: CreateSessionInput): AuthoringSession {
   const now = new Date().toISOString();
-  const session = authoringSessionSchema.parse({
+  let session = authoringSessionSchema.parse({
     version: AUTHORING_SESSION_VERSION,
     id: input.id ?? randomUUID(),
     created_at: input.created_at ?? now,
@@ -149,7 +174,11 @@ export function createSession(projectDir: string, input: CreateSessionInput): Au
     open_ambiguities: input.open_ambiguities ?? [],
     resolved_ambiguities: input.resolved_ambiguities ?? [],
     draft_yaml: input.draft_yaml ?? {},
+    draft_source_hash: input.draft_source_hash ?? null,
   });
+  if (session.draft_source_hash == null && Object.keys(session.draft_yaml).length > 0) {
+    session = { ...session, draft_source_hash: sessionDraftSourceHash(session) };
+  }
   return saveSession(projectDir, session);
 }
 
@@ -157,17 +186,32 @@ export function createSession(projectDir: string, input: CreateSessionInput): Au
 export function updateSession(
   projectDir: string,
   id: string,
-  patch: Partial<Pick<AuthoringSession, "warehouse_ref" | "discovered_snapshot_hash" | "glossary_answers" | "open_ambiguities" | "resolved_ambiguities" | "draft_yaml">>,
+  patch: Partial<
+    Pick<
+      AuthoringSession,
+      | "warehouse_ref"
+      | "discovered_snapshot_hash"
+      | "glossary_answers"
+      | "open_ambiguities"
+      | "resolved_ambiguities"
+      | "draft_yaml"
+      | "draft_source_hash"
+    >
+  >,
 ): AuthoringSession {
   const current = loadSession(projectDir, id);
-  return saveSession(projectDir, {
+  const next: AuthoringSession = {
     ...current,
     ...patch,
     id: current.id,
     version: current.version,
     created_at: current.created_at,
     updated_at: new Date().toISOString(),
-  });
+  };
+  if (patch.draft_yaml !== undefined && patch.draft_source_hash === undefined) {
+    next.draft_source_hash = sessionDraftSourceHash(next);
+  }
+  return saveSession(projectDir, next);
 }
 
 /** Secret-free warehouse locator for session state. Never includes password or token. */
