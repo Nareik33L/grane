@@ -1,24 +1,14 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type {
-  ClientAdapter,
-  ClientId,
-  ClientPaths,
-  ConfigScope,
-  Transport,
-} from "./types.js";
+import {
+  AUTHORING_CONNECT_STEPS,
+  coreToolsPhrase,
+  numbered,
+  reloadAndChatSteps,
+  withConfigStep,
+} from "./next-steps.js";
+import type { ClientAdapter, ClientPaths, ConfigScope } from "./types.js";
 import { CLIENT_IDS } from "./types.js";
-
-function restartChat(app: string): string[] {
-  return [
-    `Fully restart ${app} so it reloads MCP config.`,
-    "Start a new chat. Grane tools: catalog, query, validate, explain.",
-  ];
-}
-
-function withConfig(lines: string[], configPath: string | null): string[] {
-  return configPath ? [...lines, `Config: ${configPath}`] : lines;
-}
 
 export const CLIENTS: ClientAdapter[] = [
   {
@@ -36,21 +26,23 @@ export const CLIENTS: ClientAdapter[] = [
     configPath: (paths) => claudeDesktopConfigPath(paths),
     nextSteps: ({ configPath, transport, url }) => {
       if (transport === "http") {
-        return withConfig(
+        return withConfigStep(
           [
-            "In Claude Desktop: Settings → Connectors → Add custom connector.",
-            `Enter the MCP URL: ${url ?? "https://your-host/mcp"}`,
-            "Or add the HTTP entry below, then fully restart Claude Desktop.",
-            "Start a new chat so Grane tools appear.",
-            "If authoring is enabled, open the “Set up Grane” prompt to define metrics in plain English.",
+            "Settings → Connectors → Add custom connector (or fully restart Claude Desktop).",
+            `MCP URL: ${url ?? "https://your-host/mcp"}`,
+            "Start a new chat.",
+            `Use ${coreToolsPhrase()}.`,
+            ...AUTHORING_CONNECT_STEPS,
           ],
           configPath,
         );
       }
-      return withConfig(
+      return withConfigStep(
         [
-          ...restartChat("Claude Desktop"),
-          "If authoring is enabled, open the “Set up Grane” prompt to define metrics in plain English.",
+          "Fully restart Claude Desktop.",
+          "Start a new chat.",
+          `Use ${coreToolsPhrase()}.`,
+          ...AUTHORING_CONNECT_STEPS,
         ],
         configPath,
       );
@@ -73,11 +65,12 @@ export const CLIENTS: ClientAdapter[] = [
         ? join(paths.homeDir, ".cursor", "mcp.json")
         : join(paths.workspaceDir, ".cursor", "mcp.json"),
     nextSteps: ({ configPath }) =>
-      withConfig(
+      withConfigStep(
         [
-          "Reload MCP in Cursor Settings → MCP, or run Developer: Reload Window.",
-          "Start a new chat so the agent picks up Grane's tools.",
-          "If authoring is enabled, open the “Set up Grane” prompt to define metrics in plain English.",
+          "Reload Cursor: Settings → MCP, or Developer: Reload Window.",
+          "Start a new chat.",
+          `Use ${coreToolsPhrase()}.`,
+          ...AUTHORING_CONNECT_STEPS,
         ],
         configPath,
       ),
@@ -99,10 +92,11 @@ export const CLIENTS: ClientAdapter[] = [
         ? join(paths.homeDir, ".gemini", "settings.json")
         : join(paths.workspaceDir, ".gemini", "settings.json"),
     nextSteps: ({ configPath }) =>
-      withConfig(
+      withConfigStep(
         [
           "Restart Gemini CLI.",
           "Run /mcp list (or `gemini mcp list`) and confirm grane is connected.",
+          `Use ${coreToolsPhrase()}.`,
         ],
         configPath,
       ),
@@ -122,8 +116,8 @@ export const CLIENTS: ClientAdapter[] = [
     configPath: (paths, scope) =>
       scope === "global" ? vscodeUserMcpPath(paths) : join(paths.workspaceDir, ".vscode", "mcp.json"),
     nextSteps: ({ configPath }) =>
-      withConfig(
-        ["Reload the VS Code window.", "Open the MCP view and confirm Grane is listed."],
+      withConfigStep(
+        ["Reload the VS Code window.", "Open the MCP view and confirm Grane is listed.", `Use ${coreToolsPhrase()}.`],
         configPath,
       ),
   },
@@ -140,13 +134,14 @@ export const CLIENTS: ClientAdapter[] = [
     serversKey: "mcpServers",
     vscodeStyle: false,
     configPath: () => null,
-    nextSteps: ({ url }) => [
-      "ChatGPT only accepts remote HTTPS MCP (not stdio, not localhost).",
-      "1. Deploy Grane behind HTTPS. Endpoint: https://your-host/mcp",
-      `2. Connector URL: ${url && url.startsWith("https://") ? url : "https://your-host/mcp"}`,
-      "3. ChatGPT → Settings → Apps & Connectors → enable Developer Mode.",
-      "4. Create a connector named Grane with that URL, then enable it in a new chat.",
-    ],
+    nextSteps: ({ url }) =>
+      numbered([
+        "ChatGPT needs public HTTPS MCP (not stdio, not localhost).",
+        `Deploy Grane. Endpoint: /mcp. Connector URL: ${url && url.startsWith("https://") ? url : "https://your-host/mcp"}`,
+        "Settings → Apps & Connectors → enable Developer Mode.",
+        "Create a connector named Grane with that URL, then enable it in a new chat.",
+        `Use ${coreToolsPhrase()}.`,
+      ]),
   },
   {
     id: "windsurf",
@@ -164,7 +159,7 @@ export const CLIENTS: ClientAdapter[] = [
       scope === "global"
         ? join(paths.homeDir, ".codeium", "windsurf", "mcp_config.json")
         : join(paths.workspaceDir, ".windsurf", "mcp.json"),
-    nextSteps: ({ configPath }) => withConfig(restartChat("Windsurf"), configPath),
+    nextSteps: ({ configPath }) => withConfigStep(reloadAndChatSteps("Windsurf"), configPath),
   },
   {
     id: "claude-code",
@@ -181,16 +176,18 @@ export const CLIENTS: ClientAdapter[] = [
     configPath: (paths, scope) =>
       scope === "global" ? join(paths.homeDir, ".claude.json") : join(paths.workspaceDir, ".mcp.json"),
     nextSteps: ({ configPath, transport, url }) =>
-      withConfig(
+      withConfigStep(
         transport === "http"
           ? [
               "Restart Claude Code (or run `claude mcp list`).",
               `Remote MCP URL: ${url ?? "https://your-host/mcp"}`,
-              "Start a new session so tools load.",
+              "Start a new session.",
+              `Use ${coreToolsPhrase()}.`,
             ]
           : [
               "Restart Claude Code or run `claude mcp list`.",
-              "Start a new session so Grane tools load.",
+              "Start a new session.",
+              `Use ${coreToolsPhrase()}.`,
             ],
         configPath,
       ),
@@ -210,10 +207,11 @@ export const CLIENTS: ClientAdapter[] = [
     configPath: (paths, scope) =>
       scope === "global" ? join(paths.homeDir, ".mcp.json") : join(paths.workspaceDir, ".mcp.json"),
     nextSteps: ({ configPath }) =>
-      withConfig(
+      withConfigStep(
         [
           "Copy this JSON into your agent's MCP config if it uses a different file.",
           "Reload the agent and start a new chat.",
+          `Use ${coreToolsPhrase()}.`,
         ],
         configPath,
       ),

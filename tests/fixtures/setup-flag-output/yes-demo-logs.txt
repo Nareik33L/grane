@@ -7,8 +7,9 @@ Type back (or b) at any later prompt to return to the previous step.
 Building the demo shop and running the investigation…
 
 Skipped MCP registration.
-  grane -p <PROJECT> mcp connect cursor
-  grane -p <PROJECT> mcp doctor
+1. grane -p <PROJECT> mcp connect cursor
+2. Reload Cursor and start a new chat.
+3. Optional: grane -p <PROJECT> mcp doctor
 
 ────────────────────────────────────────
 You're ready.

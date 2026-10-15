@@ -1,5 +1,10 @@
 import { DEMO_QUESTION } from "../demo/run.js";
+import { AUTHORING_SWITCH_STEPS, numbered } from "../mcp/connect/next-steps.js";
 import { DEMO_AUTHORING_QUESTION } from "./demo-postgres.js";
+
+function reloadChatAsk(clientLabel: string, question: string): string[] {
+  return numbered([`Reload ${clientLabel}.`, "Start a new chat.", `Ask: ${question}`]);
+}
 
 export { DEMO_QUESTION };
 
@@ -63,7 +68,8 @@ export function demoReadyLines(opts: { projectDir: string; clientLabel: string |
   ];
   if (opts.clientLabel) {
     lines.push("");
-    lines.push(`Reload ${opts.clientLabel} so it picks up Grane, then start a new chat.`);
+    lines.push("Next:");
+    for (const step of reloadChatAsk(opts.clientLabel, DEMO_QUESTION)) lines.push(`  ${step}`);
   }
   lines.push("");
   lines.push(`Project  ${opts.projectDir}`);
@@ -84,18 +90,15 @@ export function ownReadyLines(opts: {
       : "Project files are written. Live schema checks were skipped (--offline).",
     "",
     "Next:",
-    "  1. grane discover --write-relationships",
-    "  2. Add about five metrics in metrics.yml (comments show a starter set)",
-    "  3. grane validate",
-    "",
-    "Ask your agent:",
-    "",
-    `  ${OWN_QUESTION}`,
   ];
-  if (opts.clientLabel) {
-    lines.push("");
-    lines.push(`Reload ${opts.clientLabel} so it picks up Grane, then start a new chat.`);
-  }
+  const steps = [
+    "grane discover --write-relationships",
+    "Add about five metrics in metrics.yml (comments show a starter set)",
+    "grane validate",
+    ...(opts.clientLabel ? [`Reload ${opts.clientLabel}.`, "Start a new chat."] : []),
+    `Ask: ${OWN_QUESTION}`,
+  ];
+  for (const step of numbered(steps)) lines.push(`  ${step}`);
   lines.push("");
   lines.push(`Project  ${opts.projectDir}`);
   lines.push("Docs     https://github.com/Nareik33L/grane/blob/main/docs/first-week.md");
@@ -111,19 +114,16 @@ export function demoAuthoringReadyLines(opts: {
     "You're ready.",
     "",
     "Demo Postgres is connected. No production YAML or pin was written.",
-    "Open the Set up Grane prompt in your agent. It drives discovery, glossary,",
-    "ambiguities, the YAML generator, and a proposal pull request — the same",
-    "authoring path as your own warehouse. There are no shortcuts.",
     "",
-    `  ${DEMO_AUTHORING_QUESTION}`,
-    "",
-    "submit_proposal opens a GitHub PR on a proposal branch.",
-    "Do not pin .grane/active.json. Do not merge the PR from the agent.",
+    "Next:",
   ];
-  if (opts.clientLabel) {
-    lines.push("");
-    lines.push(`Reload ${opts.clientLabel} so it picks up Grane, then start a new chat.`);
-  }
+  const steps = [
+    ...(opts.clientLabel ? [`Reload ${opts.clientLabel}.`, "Start a new chat."] : []),
+    `Open the Set up Grane prompt. Ask: ${DEMO_AUTHORING_QUESTION}`,
+    ...AUTHORING_SWITCH_STEPS,
+    "Authoring tools only propose a GitHub PR. Nothing is live until a human merges and pins.",
+  ];
+  for (const step of numbered(steps)) lines.push(`  ${step}`);
   lines.push("");
   lines.push(`Project  ${opts.projectDir}`);
   return lines;
@@ -132,7 +132,10 @@ export function demoAuthoringReadyLines(opts: {
 export function skipConnectHint(projectDir: string): string[] {
   return [
     "Skipped MCP registration.",
-    `  grane -p ${projectDir} mcp connect cursor`,
-    `  grane -p ${projectDir} mcp doctor`,
+    ...numbered([
+      `grane -p ${projectDir} mcp connect cursor`,
+      "Reload Cursor and start a new chat.",
+      `Optional: grane -p ${projectDir} mcp doctor`,
+    ]),
   ];
 }

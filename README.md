@@ -96,14 +96,22 @@ grane validate --production
 grane proposals list
 grane certify --engine postgres
 grane mcp connect cursor
-# optional: draft new metrics as a GitHub PR (off by default)
-grane serve --stdio --authoring
 ```
 
-Authoring (V2) is a proposal-as-PR flow: discovery is read-only, drafts stay
-`experimental` until a teammate merges the PR, and only `grane serve` honours
-`.grane/active.json`. Existing `example/` and `demo/` YAML do not change.
-Guide: [docs/v2-authoring.md](docs/v2-authoring.md).
+Connect an agent:
+
+1. `grane mcp connect cursor`
+2. Reload Cursor: Settings → MCP, or Developer: Reload Window. Start a new chat.
+3. Use catalog, query, validate, explain.
+
+Authoring is off until you turn it on:
+
+1. This process: put `--authoring` in the client config args (`grane serve --stdio --authoring`)
+2. This project: `authoring.enabled: true` in `grane.yml` advertises all 9 tools on stdio (HTTP needs `authoring.mode: shared` and `auth.agents`)
+3. If authoring is on, open the Set up Grane prompt. Tools only propose a PR. A human merges, then pins.
+
+Guide: [docs/v2-authoring.md](docs/v2-authoring.md). Existing `example/` and
+`demo/` YAML do not change. Only `grane serve` honours `.grane/active.json`.
 
 Use a **read-only database user** — that role is the real control. Grane refuses write-headed SQL on every warehouse and honours `limits.timeout_ms`. Postgres and Redshift wrap each query in a `READ ONLY` transaction with `statement_timeout`. DuckDB file connections open with `access_mode: READ_ONLY`. MySQL sets `SESSION TRANSACTION READ ONLY`. ClickHouse sends `readonly=1`. Snowflake, BigQuery, and Databricks rely on the warehouse role plus the write-keyword guard.
 

@@ -116,13 +116,13 @@ came from an approved definition.
 
 ## 6. Connect an agent (local)
 
-```bash
-grane mcp doctor
-grane mcp connect cursor    # also: claude, gemini, vscode, …
-```
+1. `grane mcp connect cursor` (also: claude, gemini, vscode, …)
+2. Reload Cursor: Settings → MCP, or Developer: Reload Window. Start a new chat.
+3. Use catalog, query, validate, explain.
+4. Optional: `grane mcp doctor`
 
-Desktop clients use **stdio**. Cursor should launch `grane serve --stdio`, not
-an HTTP URL on `:8080`.
+Desktop clients use **stdio**. Cursor launches `grane serve --stdio` (args
+`-p <project> serve --stdio`), not an HTTP URL on `:8080`.
 
 Full agent matrix: [connect-an-agent.md](connect-an-agent.md).
 

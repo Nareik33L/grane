@@ -6,9 +6,10 @@ import { loadConfig } from "../../config/load.js";
 import { GraneKernel, GRANE_VERSION } from "../../kernel.js";
 import { MysqlConnector } from "../../connectors/mysql.js";
 import type { DoctorCheck, DoctorResult, ResolvedLaunch } from "./types.js";
+import { CORE_MCP_TOOLS } from "../authoring.js";
 import { childEnv, stdioArgs } from "./launch.js";
 
-const EXPECTED_TOOLS = ["catalog", "explain", "query", "validate"];
+const EXPECTED_TOOLS = [...CORE_MCP_TOOLS];
 
 export interface DoctorOptions {
   projectDir: string;
