@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Setup wizard for non-technical users (V2-16).** The first interactive
+  question is a tone/skill check: (1) “Connect a warehouse, import my
+  existing semantic YAML and configure governance” vs (2) “I have no idea
+  what the above means”. Option 1 keeps concise data-engineering wording;
+  option 2 is fully plain English and hand-held. The choice is stored in
+  `~/.grane/config.json` (`setup_tone`), not in project YAML or the active
+  pin, so later setup steps and MCP authoring (V2-18) can read it. Wording
+  only: defaults, enforcement, and writes are identical on both paths.
+  After tone, `grane setup` asks one start question (default: local demo
+  shop on DuckDB), then a confirm. Demo Postgres, own warehouse, and
+  existing YAML are explicit choices. MCP registration is skipped unless
+  `--connect` is set. Authoring, auto-pin, and demo-shop YAML are never
+  implied by a default. `--yes` / `--import` skip the tone question and do
+  not write the user-local config. `--yes --path demo|own`, `--import`,
+  `--postgres`, and `--postgres --authoring` keep the same YAML, banners,
+  and ready lines as before. Warehouse hints still say `certified` vs
+  `self_certifiable`. DuckDB own-path file defaults to `warehouse.duckdb`.
 - **Docs + compat cert (V2-15).** [docs/v2-authoring.md](docs/v2-authoring.md)
   is the operator guide: proposals-as-PRs, experimental vs governed,
   `--authoring`, local vs shared, read-only discovery with sampling caps,

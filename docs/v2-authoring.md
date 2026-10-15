@@ -220,23 +220,36 @@ today: the only extra validate finding V2 is allowed to add is this warning.
 
 ## Demo Postgres: ready-made vs build-your-own
 
-`grane setup` (or `npm run setup`) first asks if you already have Grane YAML.
+`grane setup` (or `npm run setup`) first asks a tone/skill check:
 
-**No — set one up**
+1. **Connect a warehouse, import my existing semantic YAML and configure governance**
+   — concise data-engineering wording for the rest of the flow.
+2. **I have no idea what the above means** — everyday words and hand-held steps.
 
-1. **Try Grane's demo shop**
-   - **Local DuckDB** — shipped YAML, no Docker. Same planted revenue-drop story.
-   - **Demo Postgres** (`localhost:5433`) — then:
-     - **Use the shipped demo YAML** — today's `grane demo --postgres`.
-     - **Build my own YAML against demo Postgres** — discovery, authoring
-       tools, Set up Grane prompt, YAML generator, then a proposal PR. No
-       production writes and no pin. Uses `GRANE_DEMO_DATABASE_URL` only
-       (ignores `DATABASE_URL`).
-2. **Connect my own data** — any shipped warehouse. Writes `grane.yml`,
-   validates, connects an agent.
+That choice is stored in `~/.grane/config.json` (`setup_tone`), not in project
+YAML and not in `.grane/active.json`. Later setup steps and the MCP Set up
+Grane prompt (V2-18) can read the same tone. It changes wording only: defaults,
+enforcement, and writes are the same on both paths. `--yes` and `--import`
+skip the question.
 
-**Yes — use the YAML I already have** — load, validate, inspect, then activate.
-No AI authoring (`grane setup --import <dir>`).
+Then it asks **one** start question. The default is the local demo shop
+(DuckDB, no database to install). Type `back` to return to the previous step.
+MCP registration is skipped unless you pass `--connect`.
+
+1. **Try the demo shop (recommended)** — files on this computer. Same planted
+   revenue-drop story. Authoring stays off.
+2. **Demo with Postgres (Docker)** (`localhost:5433`) — then:
+   - **Use the ready-made demo YAML (recommended)** — today's
+     `grane demo --postgres`. Authoring stays off. No pin.
+   - **Build my own YAML against this demo (advanced)** — discovery, authoring
+     tools, Set up Grane prompt, YAML generator, then a proposal PR. No
+     production writes and no pin. Uses `GRANE_DEMO_DATABASE_URL` only
+     (ignores `DATABASE_URL`).
+3. **Connect my own data** — any shipped warehouse. Writes starter
+   `grane.yml` (the `grane init` templates, not the demo shop). Authoring
+   stays off. No pin.
+4. **I already have Grane YAML** — load, check, then activate on a terminal.
+   No AI authoring (`grane setup --import <dir>` never pins).
 
 ```bash
 npm run setup -- --yes --path demo --connect cursor
@@ -245,8 +258,9 @@ npm run setup -- --yes --path demo --postgres --authoring
 npm run setup -- --import ./analytics --offline
 ```
 
-`--dir` that is already a git repository is refused. DuckDB demo and own-data
-paths stay byte-identical to the pre-V2 wizard fixture.
+`--dir` that is already a git repository is refused on the demo-authoring
+path. `--yes --path demo|own` and `--import` keep the same project YAML and
+ready lines as before this wizard change.
 
 ## Importers (unchanged)
 

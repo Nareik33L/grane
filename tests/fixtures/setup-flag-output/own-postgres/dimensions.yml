@@ -1,0 +1,11 @@
+# Approved dimensions for breaking down and filtering metrics.
+
+dimensions: {}
+# Example:
+# dimensions:
+#   country:
+#     entity: customer
+#     sql: ${customers.country}
+#   channel:
+#     entity: order
+#     sql: ${orders.channel}

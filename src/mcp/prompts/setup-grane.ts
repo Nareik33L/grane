@@ -10,6 +10,7 @@ export const AUTHORING_MCP_PROMPTS = [SETUP_GRANE_PROMPT_NAME] as const;
 /**
  * User-role script the MCP client injects. Drives V2-08 authoring tools only.
  * Keep this text in lockstep with tests/fixtures/setup-grane.prompt.txt.
+ * V2-18 should branch wording on `readSetupTone(homeDir)` from `~/.grane/config.json`.
  */
 export const SETUP_GRANE_SCRIPT = `You are helping a non-technical teammate set up Grane — a way to agree on business numbers (like revenue) so everyone, including AI, uses the same definition.
 

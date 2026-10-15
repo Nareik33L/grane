@@ -139,5 +139,14 @@ export {
   type AmbiguityKind,
 } from "./authoring/ambiguity.js";
 export { generateDraftYaml } from "./authoring/generate.js";
+export {
+  readSetupTone,
+  writeSetupTone,
+  readLocalGraneConfig,
+  localGraneConfigPath,
+  LOCAL_GRANE_CONFIG_REL,
+  type SetupTone,
+  type LocalGraneConfig,
+} from "./setup/local-config.js";
 export { loadConfiguredProviders, SUPPORTED_PROVIDER_TYPES, detectConnectorKinds } from "./providers/registry.js";
 export type { SemanticContribution, SemanticProviderLoader } from "./providers/types.js";

@@ -81,7 +81,7 @@ function fail(err: unknown): never {
 program
   .command("setup")
   .alias("onboard")
-  .description("Guided setup: demo shop or your warehouse, then connect an MCP client")
+  .description("Guided setup: demo shop (default) or your warehouse; --connect to register an MCP client")
   .option("--yes", "non-interactive; requires --path demo|own, or use --import")
   .option("--non-interactive", "alias for --yes")
   .option("--path <kind>", "demo | own")

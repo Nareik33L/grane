@@ -1,7 +1,7 @@
 /**
- * Wizard demo/own copy captured from main (V2-11, 455ab00).
- * Existing demo/own paths must stay byte-identical to this fixture — do not
- * regenerate it from this branch's snapshots.
+ * Pre-V2-16 interactive wizard copy captured from main (V2-11, 455ab00).
+ * Kept as the "before" transcript. V2-16 no longer freezes prompt text;
+ * `--yes` / `--import` flag output is frozen in tests/fixtures/setup-flag-output/.
  */
 export const MAIN_WIZARD_PATH_COPY = {
   PATH_QUESTION: "How do you want to start?",

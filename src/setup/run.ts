@@ -181,7 +181,7 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
   if (yes && !options.path) {
     throw new Error("Non-interactive setup requires --path demo or --path own, or --import <dir>.");
   }
-  if (options.authoring && !options.postgres && options.path === "demo") {
+  if (options.authoring && !options.postgres) {
     throw new Error("Demo authoring requires demo Postgres. Pass --postgres with --authoring.");
   }
 
@@ -199,6 +199,10 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
       env,
       skipConnect,
       connect: options.connect,
+      forcedPath: options.path,
+      postgres: options.postgres,
+      authoring: options.authoring,
+      homeDir: options.homeDir ?? homedir(),
       resolveClientId: (name) => resolveClient(name).id,
       listClients: () => listClients().map((c) => ({ id: c.id, label: c.label })),
     });
