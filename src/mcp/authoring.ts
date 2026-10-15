@@ -24,6 +24,8 @@ export interface BuildMcpServerOptions {
   /** CLI `grane serve --authoring`. */
   authoring?: boolean;
   transport?: McpTransport;
+  /** User home for `~/.grane/config.json` (`setup_tone`). Tests inject this. */
+  homeDir?: string;
 }
 
 export const CORE_MCP_TOOLS = ["catalog", "explain", "query", "validate"] as const;

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { generateDraftYaml } from "./generate.js";
+import { formatProposalPlayback } from "./playback.js";
 import type { GraneKernel } from "../kernel.js";
 import { createDiscovery, hashDiscoverySnapshot } from "./discover.js";
 import { configError } from "../errors.js";
@@ -258,6 +259,7 @@ export async function proposeDefinitions(
     unresolved: boolean;
     warning?: string;
     skipped_tables: string[];
+    playback: string;
   }
 > {
   const projectDir = requireProjectDir(kernel);
@@ -293,6 +295,7 @@ export async function proposeDefinitions(
     ...updated,
     ...flag,
     skipped_tables,
+    playback: formatProposalPlayback(draft_yaml),
     ...(warning ? { warning } : {}),
   };
 }

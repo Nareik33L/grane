@@ -101,7 +101,7 @@ export async function runAuthoringActivateGauntlet(options?: {
       }),
       { projectDir: dir, connector: recordingConnector() },
     );
-    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
+    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio", homeDir: dir });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "grane-gauntlet-activate", version: "0.0.1" });
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

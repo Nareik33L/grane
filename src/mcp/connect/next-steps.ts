@@ -19,20 +19,39 @@ export function withConfigStep(steps: string[], configPath: string | null): stri
   return numbered(configPath ? [...steps, `Config file: ${configPath}`] : steps);
 }
 
+export type AuthoringConnectTransport = "stdio" | "http";
+
+const YAML_AUTHORING_STEP =
+  "`authoring.enabled: true` in grane.yml advertises all 9 authoring tools on stdio. HTTP also needs `authoring.mode: shared` and `auth.agents`.";
+
 /**
- * Default serve is four tools and no prompts. `--authoring` in the client
- * config args enables them for this process. On stdio, `authoring.enabled`
- * also advertises all nine tools. HTTP needs `auth.agents`.
+ * Default serve is four tools and no prompts. `--authoring` enables them for
+ * this process. Stdio: put it in the client config args. HTTP: pass it to
+ * `grane serve` — do not print stdio args on the HTTP path.
  */
-export const AUTHORING_SWITCH_STEPS = [
-  "To enable authoring for this process, put `--authoring` in the client config args (`serve --stdio --authoring`).",
-  "`authoring.enabled: true` in grane.yml advertises all 9 authoring tools on stdio. HTTP also needs `authoring.mode: shared` and `auth.agents`.",
-] as const;
+export function authoringSwitchSteps(transport: AuthoringConnectTransport = "stdio"): readonly string[] {
+  if (transport === "http") {
+    return [
+      "To enable authoring for this process, pass `--authoring` to `grane serve`.",
+      YAML_AUTHORING_STEP,
+    ];
+  }
+  return [
+    "To enable authoring for this process, put `--authoring` in the client config args (`serve --stdio --authoring`).",
+    YAML_AUTHORING_STEP,
+  ];
+}
+
+export const AUTHORING_SWITCH_STEPS = authoringSwitchSteps("stdio");
 
 export const AUTHORING_PROPOSE_STEP =
   `If authoring is on, open the “${SETUP_GRANE_PROMPT_TITLE}” prompt. Authoring tools only propose a GitHub PR. Nothing is live until a human merges and pins.`;
 
-export const AUTHORING_CONNECT_STEPS = [...AUTHORING_SWITCH_STEPS, AUTHORING_PROPOSE_STEP];
+export function authoringConnectSteps(transport: AuthoringConnectTransport = "stdio"): string[] {
+  return [...authoringSwitchSteps(transport), AUTHORING_PROPOSE_STEP];
+}
+
+export const AUTHORING_CONNECT_STEPS = authoringConnectSteps("stdio");
 
 export function reloadAndChatSteps(app: string): string[] {
   return [

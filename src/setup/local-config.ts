@@ -61,12 +61,12 @@ function parseExistingLocalConfig(file: string): LocalGraneConfig {
     raw = JSON.parse(readFileSync(file, "utf8")) as unknown;
   } catch {
     throw configError(
-      `Refusing to overwrite ${file}: it is not valid JSON. Fix that file or delete it, then run setup again.`,
+      `Refusing ${file}: it is not valid JSON. Fix that file or delete it, then try again.`,
     );
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw configError(
-      `Refusing to overwrite ${file}: expected a JSON object. Fix that file or delete it, then run setup again.`,
+      `Refusing ${file}: expected a JSON object. Fix that file or delete it, then try again.`,
     );
   }
   const parsed = raw as Record<string, unknown>;
@@ -109,6 +109,19 @@ export function readSetupTone(homeDir: string): SetupTone | null {
 }
 
 /**
+ * Strict read for MCP. Same symlink / invalid-JSON refusal as the writer.
+ * Missing file → `null`. Never writes.
+ */
+export function readSetupToneStrict(homeDir: string): SetupTone | null {
+  const file = localGraneConfigPath(homeDir);
+  const dir = dirname(file);
+  assertRegularUserGraneDir(dir);
+  assertRegularUserConfigFile(file);
+  if (!lstatOrNull(file)) return null;
+  return parseExistingLocalConfig(file).setup_tone ?? null;
+}
+
+/**
  * Merge `setup_tone` into the user-local config. Never writes project YAML
  * or the active pin. Safe to call from setup and from MCP authoring (V2-18).
  * Refuses a symlinked `~/.grane` or `config.json`, and will not overwrite
@@ -123,15 +136,31 @@ export function writeSetupTone(homeDir: string, tone: SetupTone): void {
   assertRegularUserConfigFile(file);
   const next: LocalGraneConfig = { ...parseExistingLocalConfig(file), setup_tone: tone };
   const body = `${JSON.stringify(next, null, 2)}\n`;
-  const tmp = join(
-    dir,
+  atomicWriteExclusive(file, body);
+}
+
+/** Temp-file + rename. `wx` so a planted tmp symlink is not followed. */
+export function atomicWriteExclusive(file: string, body: string): void {
+  const primary = `${file}.tmp`;
+  try {
+    writeFileSync(primary, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(primary, file);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+      rmSync(primary, { force: true });
+      throw err;
+    }
+  }
+  const fallback = join(
+    dirname(file),
     `.config-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json.tmp`,
   );
   try {
-    writeFileSync(tmp, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    renameSync(tmp, file);
+    writeFileSync(fallback, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(fallback, file);
   } catch (err) {
-    rmSync(tmp, { force: true });
+    rmSync(fallback, { force: true });
     throw err;
   }
 }

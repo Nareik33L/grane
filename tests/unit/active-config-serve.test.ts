@@ -347,7 +347,7 @@ describe("MCP and authoring cannot write the pin", () => {
     const dir = initRepo();
     const loaded = loadServingConfig(dir);
     const kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir, activePin: loaded.pin });
-    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
+    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio", homeDir: dir });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "grane-pin-test", version: "0.0.1" });
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

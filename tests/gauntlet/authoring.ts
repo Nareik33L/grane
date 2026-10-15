@@ -46,6 +46,9 @@ export const BANNED_MCP_TOOLS = [
   "proposals_approve",
   "proposals_rollback",
   "proposals_reject",
+  "skip_review",
+  "skipReview",
+  "mark_live",
 ] as const;
 
 export const SHOP_SCHEMA: DatabaseSchema = {
@@ -220,6 +223,8 @@ export async function withAuthoringMcp<T>(input: {
   dir: string;
   connector: WarehouseConnector;
   config?: GraneConfig;
+  /** Isolate `~/.grane/config.json` (`setup_tone`) from the real home. */
+  homeDir?: string;
   fn: (client: Client, kernel: GraneKernel) => Promise<T>;
 }): Promise<T> {
   const kernel = new GraneKernel(
@@ -231,7 +236,11 @@ export async function withAuthoringMcp<T>(input: {
       }),
     { projectDir: input.dir, connector: input.connector },
   );
-  const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
+  const server = buildMcpServer(kernel, {
+    authoring: true,
+    transport: "stdio",
+    homeDir: input.homeDir ?? input.dir,
+  });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "grane-gauntlet-authoring", version: "0.0.1" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

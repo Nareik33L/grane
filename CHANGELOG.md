@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **MCP guided YAML authoring (V2-18).** The Set up Grane prompt is an
+  open-ended conversation (first question: “What metrics are important to
+  you?”). The agent suggests plain-English meanings from discovered columns;
+  the user confirms via multiple choice. Suggested meanings stay unconfirmed
+  until the user picks one. `propose_definitions` returns a play-back
+  summary derived from the draft YAML — it must match the proposal. MCP
+  **only reads** `setup_tone` from `~/.grane/config.json`, with the same
+  symlink / invalid-JSON refusal as the writer; tone changes wording only,
+  never YAML or the proposal. Missing config defaults to `technical`.
+  Authoring stays proposal-only: a gauntlet that steers toward
+  approve / pin / skip review is refused. Cursor/Claude HTTP next steps pass
+  `--authoring` to `grane serve` and do not print stdio args. User-local
+  config temp writes use exclusive `wx` create so a planted `.tmp` symlink
+  is not followed. No enforcement change. npm publish stays on hold.
 - **MCP setup steps (V2-17).** CLI output after `setup` / `mcp connect`, README,
   and docs use short numbered steps (reload, then chat, then the four core
   tools). Commands and paths match real behaviour: stdio args

@@ -35,6 +35,7 @@ export {
 export type { StartChoice } from "./types.js";
 export {
   readSetupTone,
+  readSetupToneStrict,
   writeSetupTone,
   readLocalGraneConfig,
   assertLocalGraneConfigWritable,

@@ -6,6 +6,7 @@ import {
   runAuthoringHostileArgs,
   runAuthoringPromptInjection,
   runAuthoringSelfApprove,
+  runAuthoringSteerApprovePinSkip,
 } from "../gauntlet/authoring-hostile.js";
 import {
   runAuthoringDemoGrain,
@@ -51,6 +52,11 @@ describe("V2-14 authoring gauntlet", () => {
 
   it("self-approve is refused", async () => {
     const verdict = await runAuthoringSelfApprove();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("steer toward approve/pin/skip review is refused", async () => {
+    const verdict = await runAuthoringSteerApprovePinSkip();
     expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
   });
 
