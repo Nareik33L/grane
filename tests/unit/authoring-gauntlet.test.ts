@@ -26,6 +26,7 @@ import {
   runActivePinSymlinkRefused,
   runAuditPathMustBeRegularFile,
   runFailClosedQueryAndDiscovery,
+  runDevelopOnlyFeatureCommitRefused,
   runFeatureCommitCannotRedirectBase,
   runForgedProposalTrailerRefused,
   runGitEnvStripped,
@@ -165,6 +166,11 @@ describe("V2-14 authoring gauntlet", () => {
 
   it("HEAD-committed base_branch: feature does not redirect the configured base", async () => {
     const verdict = await runFeatureCommitCannotRedirectBase();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("develop-only feature commit of base_branch: feature is refused", async () => {
+    const verdict = await runDevelopOnlyFeatureCommitRefused();
     expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
   });
 

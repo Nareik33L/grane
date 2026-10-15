@@ -448,6 +448,50 @@ entities:
 }
 
 /**
+ * Item 1 (develop-only): no main, no master, no origin/HEAD. A feature
+ * commit of `base_branch: feature` must be refused — not adopted as the
+ * base. Restoring a HEAD-tree fallback must score SECURITY CRITICAL.
+ */
+export async function runDevelopOnlyFeatureCommitRefused(): Promise<Verdict> {
+  const repo = initAuthoringRepo({ branch: "develop" });
+  try {
+    git(repo.dir, ["checkout", "-b", "feature"]);
+    writeFileSync(
+      join(repo.dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC, base_branch: feature }
+connection: { type: postgres, schema: public }
+audit: { enabled: true, fail_closed: true, path: .grane/audit.jsonl }
+entities:
+  order: { table: orders, primary_key: id }
+`,
+    );
+    git(repo.dir, ["add", "grane.yml"]);
+    git(repo.dir, ["commit", "-m", "claim feature is the base"]);
+    try {
+      const resolved = configuredBaseBranch(repo.dir);
+      return securityCritical(
+        `develop-only HEAD-committed base_branch redirected the configured base to ${resolved}`,
+      );
+    } catch (err) {
+      const refuse = mustRefuse(
+        err,
+        /established base|grane setup|HEAD or a feature branch/i,
+        "develop-only feature base",
+      );
+      if (refuse) return refuse;
+    }
+    return {
+      code: "PASS — POLICY",
+      detail: "develop-only feature commit of base_branch: feature is refused (no HEAD-tree fallback)",
+    };
+  } catch (err) {
+    return thrownSecurity(err, "develop-only feature base_branch");
+  } finally {
+    repo.cleanup();
+  }
+}
+
+/**
  * Item 2: with no committed base_branch, origin/HEAD disagreeing with local
  * main/master is refused.
  */

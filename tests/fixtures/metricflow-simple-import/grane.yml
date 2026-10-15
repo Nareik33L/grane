@@ -1,0 +1,10 @@
+# Wrapper so the pinned MetricFlow simple_manifest can be loadConfig'd /
+# validated. Not part of upstream metricflow.
+project:
+  name: metricflow-simple-import
+  timezone: UTC
+connection:
+  type: duckdb
+  path: ":memory:"
+providers:
+  - path: ../metricflow-simple

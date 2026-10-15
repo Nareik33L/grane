@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ACTIVE_PIN_PATH,
   PROPOSAL_BRANCH_PREFIX,
+  configuredBaseBranch,
   createProposal,
   diffProposal,
   githubPrPlan,
@@ -464,5 +465,58 @@ describe("git proposal library", () => {
     expect(src).not.toMatch(/["']merge["']/);
     expect(src).not.toMatch(/checkout/);
     expect(src).not.toMatch(/git reset/);
+  });
+
+  it("sets GIT_NO_REPLACE_OBJECTS=1 so replace cannot fake ancestry", () => {
+    const src = readFileSync(new URL("../../src/authoring/git.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/env\.GIT_NO_REPLACE_OBJECTS = "1"/);
+    expect(src).toMatch(/if \(key === "GIT_NO_REPLACE_OBJECTS"\) continue/);
+
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    const proposal = createProposal(dir, {
+      slug: "replace-env",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT_METRICS },
+    });
+    const tree = git(dir, ["rev-parse", `${main}^{tree}`]);
+    const fake = git(dir, ["commit-tree", tree, "-p", main, "-p", proposal.commit, "-m", "replace"]);
+    git(dir, ["replace", main, fake]);
+
+    const follow = spawnSync("git", ["merge-base", "--is-ancestor", proposal.commit, main], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(follow.status, follow.stderr || follow.stdout).toBe(0);
+
+    const blocked = spawnSync("git", ["merge-base", "--is-ancestor", proposal.commit, main], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, GIT_NO_REPLACE_OBJECTS: "1" },
+    });
+    expect(blocked.status).not.toBe(0);
+
+    expect(() => configuredBaseBranch(dir)).toThrow(/refs\/replace|git replace/);
+  });
+
+  it("when origin/<base> exists, a local-only merge is not merged against the base", () => {
+    const dir = initRepo();
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    git(dir, ["remote", "add", "origin", "git@github.com:Nareik33L/grane.git"]);
+    git(dir, ["update-ref", "refs/remotes/origin/main", main]);
+    const proposal = createProposal(dir, {
+      slug: "origin-base",
+      at: new Date("2026-10-14T00:00:00.000Z"),
+      files: { "metrics.yml": DRAFT_METRICS },
+    });
+    git(dir, [
+      "merge",
+      "--no-ff",
+      "-m",
+      `Merge pull request #1 from ${proposal.branch}\n\nGrane-Proposal: ${proposal.id}`,
+      proposal.branch,
+    ]);
+    expect(readMergedApproval(dir, proposal.id).merged).toBe(true);
+    expect(readMergedApproval(dir, proposal.id, { against: "base" }).merged).toBe(false);
   });
 });

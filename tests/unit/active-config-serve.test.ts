@@ -527,6 +527,29 @@ entities:
     expect(loadServingConfig(dir).pin?.ref).toBe("develop");
   });
 
+  it("refuses a develop-only feature commit of base_branch: feature", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "develop"]);
+    git(dir, ["config", "user.email", "test@grane.dev"]);
+    git(dir, ["config", "user.name", "Grane Test"]);
+    writeFileSync(join(dir, ".gitignore"), ".grane/\n");
+    writeProject(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial on develop"]);
+    git(dir, ["checkout", "-b", "feature"]);
+    writeFileSync(
+      join(dir, "grane.yml"),
+      `project: { name: shop, timezone: UTC, base_branch: feature }
+connection: { type: postgres, schema: public }
+entities:
+  order: { table: orders, primary_key: id }
+`,
+    );
+    git(dir, ["add", "grane.yml"]);
+    git(dir, ["commit", "-m", "claim feature is the base"]);
+    expect(() => configuredBaseBranch(dir)).toThrow(/established base|grane setup|HEAD or a feature branch/);
+  });
+
   it("does not read base_branch from a feature branch's committed tree", () => {
     const dir = initRepo();
     git(dir, ["checkout", "-b", "feature"]);

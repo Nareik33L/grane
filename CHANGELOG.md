@@ -19,8 +19,10 @@
   warehouse is runtime-certified. Before/after compile evidence vs pre-V2
   `7a7ffc6` is committed (`docs/v2-compat-evidence.md`). Import/validate never
   pin or overwrite originals. Unsupported YAML is rejected with a How-to-fix
-  error. Hand-built dbt/Cube/LookML/Malloy/Ossie fixtures plus a pinned
-  public `dbt-labs/jaffle_shop` (jaffle-shop-classic, Apache-2.0) are documented.
+  error. Hand-built dbt/Cube/LookML/Malloy/Ossie fixtures plus pinned
+  public `dbt-labs/jaffle_shop` (classic, Apache-2.0) and
+  `dbt-labs/jaffle-sl-template` (MetricFlow, Apache-2.0 attribution) are
+  documented.
   [docs/release-checklist.md](docs/release-checklist.md) lists credentialed
   `certify-cloud` on the exact RC commit and QA's independent RC cert — do
   not run those from this PR. npm publish stays on hold.
@@ -38,8 +40,10 @@
   Approve requires the proposal commit reachable from base (forged
   `Grane-Proposal` trailers are refused). fail_closed audit refuses a
   symlink or `/dev/null`. Gate-7 cases (including these) are wired into
-  `traps.ts`. One pinned public project (`dbt-labs/jaffle_shop` /
-  jaffle-shop-classic @ `fd7bfaca`, Apache-2.0) is imported/validated.
+  `traps.ts`. Pinned public projects: `dbt-labs/jaffle_shop` (classic) and
+  `dbt-labs/jaffle-sl-template` @ `c54c8fb8` (MetricFlow names asserted).
+  A develop-only repo with no `origin/HEAD` is refused even if HEAD commits
+  `base_branch`. When `origin/<base>` exists, merge detection uses that tip.
 - **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
   CRITICAL gate. Unexpected errors inside a security scenario score
   `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection

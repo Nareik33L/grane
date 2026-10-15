@@ -35,6 +35,16 @@ const CORPORA: Array<{
     kind: "dbt",
     source: /dbt-labs\/jaffle|jaffle-shop-classic|Apache-2\.0|fd7bfaca/i,
   },
+  {
+    rel: "tests/fixtures/jaffle-sl-template",
+    kind: "dbt",
+    source: /jaffle-sl-template|c54c8fb8|Apache-2\.0/i,
+  },
+  {
+    rel: "tests/fixtures/metricflow-simple",
+    kind: "dbt",
+    source: /dbt-labs\/metricflow|fe4b8c1c|Apache-2\.0|simple_manifest/i,
+  },
 ];
 
 describe("representative real-world corpora", () => {
@@ -44,6 +54,7 @@ describe("representative real-world corpora", () => {
     expect(docs).toMatch(/Hand-built representative shapes/);
     expect(docs).toMatch(/Pinned public project/);
     expect(docs).toContain("tests/fixtures/jaffle_shop-import");
+    expect(docs).toContain("tests/fixtures/metricflow-simple-import");
     for (const corpus of CORPORA) {
       expect(docs, corpus.rel).toContain(corpus.rel);
       expect(docs, `${corpus.rel} source`).toMatch(corpus.source);
@@ -84,6 +95,87 @@ describe("representative real-world corpora", () => {
       const names = Object.keys(contribution.metrics);
       expect(names.length, `${rel} imported no metrics`).toBeGreaterThan(0);
     }
+  });
+
+  it("pins dbt-labs/jaffle-sl-template and asserts exact imported names", () => {
+    const fixture = join(ROOT, "tests/fixtures/jaffle-sl-template");
+    const source = readFileSync(join(fixture, "SOURCE.md"), "utf8");
+    expect(source).toMatch(/c54c8fb8bea86c0c4d3d5c588d55f8de9de57ade/);
+    expect(readFileSync(join(fixture, "LICENSE"), "utf8")).toMatch(/Apache License/);
+    expect(detectConnectorKinds(fixture)).toContain("dbt");
+    const contribution = loadAutoProvider({ path: fixture }, { projectDir: fixture });
+    expect(Object.keys(contribution.metrics).sort()).toEqual([]);
+    expect(Object.keys(contribution.entities).sort()).toEqual([
+      "customer",
+      "location",
+      "order_id",
+      "order_item",
+      "product",
+    ]);
+    expect(Object.keys(contribution.dimensions).sort()).toEqual([
+      "customer_name",
+      "customer_type",
+      "is_drink_order",
+      "is_food_order",
+      "last_ordered_at",
+      "location_name",
+      "opened_at",
+      "order_item__is_drink_item",
+      "order_item__is_food_item",
+      "order_total_dim",
+      "ordered_at_test",
+      "product__is_drink_item",
+      "product__is_food_item",
+      "product_description",
+      "product_name",
+      "product_price",
+      "product_type",
+    ]);
+  });
+
+  it("pins dbt-labs/metricflow simple_manifest (Apache-2.0) and asserts exact imported names", () => {
+    const fixture = join(ROOT, "tests/fixtures/metricflow-simple");
+    const source = readFileSync(join(fixture, "SOURCE.md"), "utf8");
+    expect(source).toMatch(/fe4b8c1ccb72a8ca77494b345777eff20a714119/);
+    expect(source).toMatch(/Apache-2\.0/);
+    expect(readFileSync(join(fixture, "LICENSE"), "utf8")).toMatch(/Apache License/);
+    expect(detectConnectorKinds(fixture)).toContain("dbt");
+    const contribution = loadAutoProvider({ path: fixture }, { projectDir: fixture });
+    expect(Object.keys(contribution.metrics).sort()).toEqual(["largest_listing", "smallest_listing"]);
+    expect(Object.keys(contribution.entities).sort()).toEqual([
+      "company",
+      "listing",
+      "lux_listing_mapping",
+      "user",
+      "users_latest",
+      "verification",
+    ]);
+    expect(Object.keys(contribution.dimensions).sort()).toEqual([
+      "archived_at",
+      "bio_added_ts",
+      "capacity_latest",
+      "company_name",
+      "country_latest",
+      "ds_latest",
+      "home_state",
+      "home_state_latest",
+      "is_lux_latest",
+      "last_login_ts",
+      "last_profile_edit_ts",
+      "listing__created_at",
+      "listing__ds",
+      "user__created_at",
+      "user__ds",
+      "user__ds_partitioned",
+      "verification__ds",
+      "verification__ds_partitioned",
+      "verification_type",
+    ]);
+    const loaded = loadConfig(join(ROOT, "tests/fixtures/metricflow-simple-import"));
+    expect(loaded.config.providers[0]?.path).toMatch(/metricflow-simple/);
+    expect(Object.keys(loaded.config.metrics).sort()).toEqual(["largest_listing", "smallest_listing"]);
+    const report = validateModel(new SemanticModel(loaded.config));
+    expect(report.ok).toBe(true);
   });
 
   it("pins dbt-labs/jaffle_shop (Apache-2.0) and runs detect/import/validate", () => {

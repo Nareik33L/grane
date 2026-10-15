@@ -1155,6 +1155,16 @@ function isAncestor(root: string, ancestor: string, descendant: string): boolean
   return runGit(root, ["merge-base", "--is-ancestor", ancestor, descendant], { allowFail: true }).status === 0;
 }
 
+/** When origin/<base> exists, merge detection uses that tip — not a local-only rewrite. */
+function originBaseTip(root: string, base_branch: string): string | null {
+  const probe = runGit(root, ["rev-parse", "--verify", `refs/remotes/origin/${base_branch}^{commit}`], {
+    allowFail: true,
+  });
+  if (probe.status !== 0) return null;
+  const sha = probe.stdout.trim();
+  return sha || null;
+}
+
 function escapeExtendedRegexp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -1187,7 +1197,7 @@ export function readMergedApproval(
   const base_branch = against === "base" ? configuredBaseBranch(projectDir) : resolveActiveRef(projectDir).branch;
   const tip =
     against === "base"
-      ? git(root, ["rev-parse", `refs/heads/${base_branch}`]).trim()
+      ? originBaseTip(root, base_branch) ?? git(root, ["rev-parse", `refs/heads/${base_branch}`]).trim()
       : resolveActiveRef(projectDir).commit;
   const ancestor = isAncestor(root, proposal_commit, tip);
   // Trailer-only "merges" (forged Grane-Proposal on an empty commit) are not

@@ -170,9 +170,13 @@ The configured base comes only from an **already-established** trusted source:
 A valid pin's `ref` must equal that base; the pin is not used to *discover*
 the base (a hand-edit of `ref` cannot redirect it). Checking out a feature
 branch that commits `base_branch: feature` does **not** make `feature` the
-base. If no base is established (no `origin/HEAD`, no local `main`/`master`),
-Grane **refuses** and asks you to create that ref or run `grane setup` after
-it exists.
+base. A develop-only repo with no `origin/HEAD` and no local `main`/`master`
+is **refused**, even if HEAD (or a feature branch) commits `project.base_branch`
+— that value is not read from HEAD. Create `origin/HEAD` or `main`/`master`,
+or run `grane setup` after that ref exists.
+
+When `refs/remotes/origin/<base>` exists, approve/merge detection uses that
+tip, not a local-only rewrite of `refs/heads/<base>`.
 
 When committed `project.base_branch` is set, it wins. If `origin/HEAD` names a
 different branch, Grane refuses. When `base_branch` is unset, `origin/HEAD`
@@ -309,6 +313,8 @@ MetricFlow/Cube/LookML/Malloy/Ossie parser coverage):
 | Tree | Kind | Source |
 | --- | --- | --- |
 | `tests/fixtures/jaffle_shop`, `tests/fixtures/jaffle_shop-import` | dbt | [dbt-labs/jaffle-shop-classic](https://github.com/dbt-labs/jaffle-shop-classic) `@ fd7bfacae4f497ff044a6a0275268676bf1b64c3` (Apache-2.0). Historical URL: `dbt-labs/jaffle_shop`. Classic jaffle has no MetricFlow `semantic_models`; import detects `dbt` and yields the empty-graph warning. The Grane wrapper at `jaffle_shop-import` loads that path via `providers:` and `validate` stays clean. |
+| `tests/fixtures/jaffle-sl-template` | dbt / MetricFlow | [dbt-labs/jaffle-sl-template](https://github.com/dbt-labs/jaffle-sl-template) `@ c54c8fb8bea86c0c4d3d5c588d55f8de9de57ade`. Semantic models + metrics. The template repo ships no LICENSE file; dbt Labs' MetricFlow stack is [Apache-2.0](https://github.com/dbt-labs/metricflow/blob/main/LICENSE) (that text is vendored as `LICENSE`). Tests assert the exact imported metric, entity, and dimension names. |
+| `tests/fixtures/metricflow-simple`, `tests/fixtures/metricflow-simple-import` | dbt / MetricFlow | [dbt-labs/metricflow](https://github.com/dbt-labs/metricflow) `simple_manifest` `@ fe4b8c1ccb72a8ca77494b345777eff20a714119` (Apache-2.0). Tests assert the exact imported metric, entity, and dimension names (`largest_listing`, `smallest_listing`, …). |
 
 ## Warehouse categories
 

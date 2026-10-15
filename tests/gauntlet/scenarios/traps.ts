@@ -32,6 +32,7 @@ import {
   runActivePinSymlinkRefused,
   runAuditPathMustBeRegularFile,
   runFailClosedQueryAndDiscovery,
+  runDevelopOnlyFeatureCommitRefused,
   runFeatureCommitCannotRedirectBase,
   runForgedProposalTrailerRefused,
   runGitEnvStripped,
@@ -1062,7 +1063,7 @@ function authoringV214Traps(): Scenario[] {
       disposition: "REFUSE_POLICY",
       question: "First pin on develop+feature, configured base, and HEAD that is not the base.",
       interpretation:
-        "Without origin/HEAD/main/master, project.base_branch is required. First pin is that base, never HEAD.",
+        "Without origin/HEAD/main/master, Grane refuses (HEAD-committed base_branch is not enough). With origin/HEAD, first pin is that base, never HEAD.",
       expectedSqlBehaviour: nA,
       expectation: refuse,
       custom: async () => runAuthoringBaseBranchPin(),
@@ -1196,6 +1197,20 @@ function authoringGate7Traps(): Scenario[] {
       expectedSqlBehaviour: nA,
       expectation: refuse,
       custom: async () => runFeatureCommitCannotRedirectBase(),
+    }),
+    sc({
+      id: "mcp/authoring-gate7-develop-only-feature-base",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question:
+        "A develop-only repo (no main, no master, no origin/HEAD) checks out a feature branch that commits base_branch: feature.",
+      interpretation:
+        "There is no established base. Grane refuses; it does not read base_branch from HEAD. Restoring a HEAD-tree fallback is SECURITY CRITICAL.",
+      expectedSqlBehaviour: nA,
+      expectation: refuse,
+      custom: async () => runDevelopOnlyFeatureCommitRefused(),
     }),
     sc({
       id: "mcp/authoring-gate7-origin-head-vs-local-main",

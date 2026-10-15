@@ -24,6 +24,8 @@ function looksOssie(doc: unknown): boolean {
 function looksDbtYaml(doc: unknown): boolean {
   if (!isRecord(doc)) return false;
   if (asArray(doc.semantic_models).length > 0) return true;
+  if (isRecord(doc.semantic_model) && str(doc.semantic_model.name)) return true;
+  if (isRecord(doc.metric) && str(doc.metric.name)) return true;
   return asArray(doc.models).some(
     (model) => isRecord(model) && model.semantic_model !== undefined,
   );
