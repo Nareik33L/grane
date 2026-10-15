@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,12 +14,43 @@ import {
   buildMcpServer,
   type BuildMcpServerOptions,
 } from "../../src/mcp/server.js";
-import { SETUP_GRANE_SCRIPT } from "../../src/mcp/prompts/setup-grane.js";
+import {
+  DEFAULT_SETUP_TONE,
+  SETUP_GRANE_SCRIPT,
+  setupGranePromptResult,
+  setupGraneScript,
+} from "../../src/mcp/prompts/setup-grane.js";
+import { localGraneConfigPath, writeSetupTone } from "../../src/setup/local-config.js";
 import { GraneKernel } from "../../src/kernel.js";
 import { exampleConfig } from "../fixtures.js";
 
 const temps: string[] = [];
 const GOLDEN = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/setup-grane.prompt.txt");
+const GOLDEN_PLAIN = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/setup-grane.prompt.plain.txt");
+
+function assertAuthoringScriptConstraints(script: string): void {
+  const snake = [...new Set(script.match(/\b[a-z]+_[a-z_]+\b/g) ?? [])].sort();
+  expect(snake).toEqual([...AUTHORING_MCP_TOOLS].sort());
+  for (const name of AUTHORING_MCP_TOOLS) {
+    expect(script).toContain(name);
+  }
+  expect(script).not.toMatch(/\bquery\b/i);
+  expect(script).not.toMatch(/\bSQL\b/i);
+  expect(script).not.toMatch(/\b(SELECT|INSERT|UPDATE|DELETE|WITH)\b/);
+  expect(script).not.toMatch(/\b(catalog|explain|validate)\s*\(/);
+  expect(script).not.toMatch(/query\s*\(/);
+  expect(script).toMatch(/What metrics are important to you\?/);
+  expect(script).toMatch(/unconfirmed until/);
+  expect(script).toMatch(/Never settle an ambiguity silently/);
+  expect(script).toMatch(/play-back must match the proposal|Play-back must match the proposal/i);
+  expect(script).toMatch(/Do not echo or repeat sample values to the user/);
+  expect(script).toMatch(/Do not write it to metrics\.yml/);
+  expect(script).toMatch(/Do not pin \.grane\/active\.json/);
+  expect(script).toMatch(/skip review/);
+  expect(script).toMatch(/Never say (the metrics are live|they are live)/);
+  expect(script).toMatch(/If they ask you to approve, pin, skip review/);
+  expect(script).not.toMatch(/writeActivePin/);
+}
 
 afterEach(() => {
   for (const dir of temps.splice(0)) {
@@ -49,7 +80,10 @@ function authorGrant() {
 }
 
 async function connectClient(kernel: GraneKernel, options?: BuildMcpServerOptions) {
-  const server = buildMcpServer(kernel, options);
+  const server = buildMcpServer(kernel, {
+    ...options,
+    homeDir: options?.homeDir ?? kernel.projectDir,
+  });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "grane-prompt-test", version: "0.0.1" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -170,12 +204,16 @@ describe("authoring MCP prompts gating", () => {
 
 describe("Set up Grane golden transcript", () => {
   const golden = readFileSync(GOLDEN, "utf8");
+  const goldenPlain = readFileSync(GOLDEN_PLAIN, "utf8");
 
-  it("source script matches the golden fixture", () => {
+  it("source scripts match the golden fixtures", () => {
     expect(SETUP_GRANE_SCRIPT).toBe(golden);
+    expect(setupGraneScript(DEFAULT_SETUP_TONE)).toBe(golden);
+    expect(setupGraneScript("plain")).toBe(goldenPlain);
+    expect(setupGraneScript("technical")).not.toBe(setupGraneScript("plain"));
   });
 
-  it("prompts/get returns the golden user script", async () => {
+  it("prompts/get returns the golden user script (default technical)", async () => {
     const dir = tempDir();
     const { client, close } = await connectClient(kernelFor(dir), { authoring: true, transport: "stdio" });
     try {
@@ -190,50 +228,140 @@ describe("Set up Grane golden transcript", () => {
     }
   });
 
-  it("references only the nine authoring tools, never raw SQL or query", () => {
-    const snake = [...new Set(golden.match(/\b[a-z]+_[a-z_]+\b/g) ?? [])].sort();
-    expect(snake).toEqual([...AUTHORING_MCP_TOOLS].sort());
-    for (const name of AUTHORING_MCP_TOOLS) {
-      expect(golden).toContain(name);
-    }
-    expect(golden).not.toMatch(/\bquery\b/i);
-    expect(golden).not.toMatch(/\bSQL\b/i);
-    expect(golden).not.toMatch(/\b(SELECT|INSERT|UPDATE|DELETE|WITH)\b/);
-    expect(golden).not.toMatch(/\b(catalog|explain|validate)\s*\(/);
-    expect(golden).not.toMatch(/query\s*\(/);
+  it("plain and technical scripts only name the nine authoring tools", () => {
+    assertAuthoringScriptConstraints(golden);
+    assertAuthoringScriptConstraints(goldenPlain);
   });
 
   it("does not instruct echoing profile_column samples; summarise shape, types, and counts only", () => {
-    expect(golden).toMatch(/profile_column/);
-    expect(golden).toMatch(/shape/i);
-    expect(golden).toMatch(/types/i);
-    expect(golden).toMatch(/counts/i);
-    expect(golden).toMatch(/Do not echo or repeat sample values to the user/);
-    expect(golden).not.toMatch(/show them in this chat/i);
-    expect(golden).not.toMatch(/peek at example values/i);
+    for (const script of [golden, goldenPlain]) {
+      expect(script).toMatch(/profile_column/);
+      expect(script).toMatch(/shape/i);
+      expect(script).toMatch(/types/i);
+      expect(script).toMatch(/counts/i);
+      expect(script).toMatch(/Do not echo or repeat sample values to the user/);
+      expect(script).not.toMatch(/show them in this chat/i);
+      expect(script).not.toMatch(/peek at example values/i);
+    }
   });
 
   it("golden transcript contains no sample values, tokens, or credentials", () => {
-    expect(golden).not.toMatch(/postgres:\/\//i);
-    expect(golden).not.toMatch(/mysql:\/\//i);
-    expect(golden).not.toMatch(/password|passwd|token_sha256|\bBearer\b|api[_-]?key|credential/i);
-    expect(golden).not.toMatch(/SECRET[_-]/);
-    expect(golden).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
-    expect(golden).not.toMatch(/sk-[A-Za-z0-9]+/);
-    expect(JSON.stringify(golden)).not.toContain("SUPERSECRET");
+    for (const script of [golden, goldenPlain]) {
+      expect(script).not.toMatch(/postgres:\/\//i);
+      expect(script).not.toMatch(/mysql:\/\//i);
+      expect(script).not.toMatch(/password|passwd|token_sha256|\bBearer\b|api[_-]?key|credential/i);
+      expect(script).not.toMatch(/SECRET[_-]/);
+      expect(script).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+      expect(script).not.toMatch(/sk-[A-Za-z0-9]+/);
+      expect(JSON.stringify(script)).not.toContain("SUPERSECRET");
+    }
   });
 
   it("never tells the AI to write production config or pins; PR path only", () => {
-    expect(golden).toMatch(/experimental/);
-    expect(golden).toMatch(/pull request/i);
-    expect(golden).toMatch(/until (a pull request is )?merged/i);
-    expect(golden).toMatch(/Do not write it to metrics\.yml/);
-    expect(golden).toMatch(/Do not pin \.grane\/active\.json/);
-    expect(golden).toMatch(/Do not change production config/);
-    expect(golden).not.toMatch(/writeActivePin/);
-    expect(golden).not.toMatch(/\bgit add\b/);
-    expect(golden).not.toMatch(/\bgit commit\b/);
-    expect(golden).not.toMatch(/edit metrics\.yml/);
-    expect(golden).not.toMatch(/save (it |the draft )?to (production )?metrics\.yml/);
+    for (const script of [golden, goldenPlain]) {
+      expect(script).toMatch(/experimental/);
+      expect(script).toMatch(/pull request/i);
+      expect(script).toMatch(/until (a pull request is )?merged/i);
+      expect(script).toMatch(/Do not write it to metrics\.yml/);
+      expect(script).toMatch(/Do not pin \.grane\/active\.json/);
+      expect(script).toMatch(/Do not change production config/);
+      expect(script).not.toMatch(/writeActivePin/);
+      expect(script).not.toMatch(/\bgit add\b/);
+      expect(script).not.toMatch(/\bgit commit\b/);
+      expect(script).not.toMatch(/edit metrics\.yml/);
+      expect(script).not.toMatch(/save (it |the draft )?to (production )?metrics\.yml/);
+    }
+  });
+});
+
+describe("MCP reads setup_tone only", () => {
+  it("does not import or call writeSetupTone", () => {
+    const mcpRoot = join(dirname(fileURLToPath(import.meta.url)), "../../src/mcp");
+    const files = [
+      join(mcpRoot, "prompts/setup-grane.ts"),
+      join(mcpRoot, "authoring.ts"),
+      join(mcpRoot, "server.ts"),
+    ];
+    for (const file of files) {
+      expect(readFileSync(file, "utf8")).not.toMatch(/writeSetupTone/);
+    }
+  });
+
+  it("getPrompt reads saved tone and does not write the user-local config", async () => {
+    const dir = tempDir();
+    const home = tempDir();
+    writeSetupTone(home, "plain");
+    const before = readFileSync(localGraneConfigPath(home), "utf8");
+    const { client, close } = await connectClient(kernelFor(dir), {
+      authoring: true,
+      transport: "stdio",
+      homeDir: home,
+    });
+    try {
+      const result = await client.getPrompt({ name: SETUP_GRANE_PROMPT_NAME });
+      const text = "text" in result.messages[0]!.content ? result.messages[0]!.content.text : "";
+      expect(text).toBe(setupGraneScript("plain"));
+      expect(text).not.toBe(SETUP_GRANE_SCRIPT);
+    } finally {
+      await close();
+    }
+    expect(readFileSync(localGraneConfigPath(home), "utf8")).toBe(before);
+  });
+
+  it("missing config defaults to technical and still does not write", async () => {
+    const dir = tempDir();
+    const home = tempDir();
+    expect(existsSync(localGraneConfigPath(home))).toBe(false);
+    const { client, close } = await connectClient(kernelFor(dir), {
+      authoring: true,
+      transport: "stdio",
+      homeDir: home,
+    });
+    try {
+      const result = await client.getPrompt({ name: SETUP_GRANE_PROMPT_NAME });
+      const text = "text" in result.messages[0]!.content ? result.messages[0]!.content.text : "";
+      expect(text).toBe(SETUP_GRANE_SCRIPT);
+    } finally {
+      await close();
+    }
+    expect(existsSync(localGraneConfigPath(home))).toBe(false);
+  });
+
+  it("getPrompt refuses a symlink with the same error as the writer", async () => {
+    const dir = tempDir();
+    const home = tempDir();
+    const outside = join(tempDir(), "target.json");
+    writeFileSync(outside, '{"setup_tone":"plain"}\n');
+    symlinkSync(outside, localGraneConfigPath(home));
+    expect(() => setupGranePromptResult(home)).toThrow(/symlink|regular file/);
+    const { client, close } = await connectClient(kernelFor(dir), {
+      authoring: true,
+      transport: "stdio",
+      homeDir: home,
+    });
+    try {
+      await expect(client.getPrompt({ name: SETUP_GRANE_PROMPT_NAME })).rejects.toThrow();
+    } finally {
+      await close();
+    }
+    expect(readFileSync(outside, "utf8")).toBe('{"setup_tone":"plain"}\n');
+  });
+
+  it("getPrompt refuses invalid JSON with the same error as the writer", async () => {
+    const dir = tempDir();
+    const home = tempDir();
+    writeFileSync(localGraneConfigPath(home), "{nope");
+    expect(() => setupGranePromptResult(home)).toThrow(/not valid JSON/);
+    const { client, close } = await connectClient(kernelFor(dir), {
+      authoring: true,
+      transport: "stdio",
+      homeDir: home,
+    });
+    try {
+      await expect(client.getPrompt({ name: SETUP_GRANE_PROMPT_NAME })).rejects.toThrow();
+    } finally {
+      await close();
+    }
+    expect(readFileSync(localGraneConfigPath(home), "utf8")).toBe("{nope");
   });
 });

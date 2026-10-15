@@ -194,7 +194,7 @@ export function buildMcpServer(kernel: GraneKernel, options: BuildMcpServerOptio
 
   if (authoringOn) {
     registerAuthoringTools(server, kernel, options);
-    registerAuthoringPrompts(server);
+    registerAuthoringPrompts(server, options.homeDir);
   }
 
   return server;

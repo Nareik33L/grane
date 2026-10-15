@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  AUTHORING_CONNECT_STEPS,
+  authoringConnectSteps,
   coreToolsPhrase,
   numbered,
   reloadAndChatSteps,
@@ -32,7 +32,7 @@ export const CLIENTS: ClientAdapter[] = [
             `MCP URL: ${url ?? "https://your-host/mcp"}`,
             "Start a new chat.",
             `Use ${coreToolsPhrase()}.`,
-            ...AUTHORING_CONNECT_STEPS,
+            ...authoringConnectSteps("http"),
           ],
           configPath,
         );
@@ -42,7 +42,7 @@ export const CLIENTS: ClientAdapter[] = [
           "Fully restart Claude Desktop.",
           "Start a new chat.",
           `Use ${coreToolsPhrase()}.`,
-          ...AUTHORING_CONNECT_STEPS,
+          ...authoringConnectSteps("stdio"),
         ],
         configPath,
       );
@@ -64,13 +64,13 @@ export const CLIENTS: ClientAdapter[] = [
       scope === "global"
         ? join(paths.homeDir, ".cursor", "mcp.json")
         : join(paths.workspaceDir, ".cursor", "mcp.json"),
-    nextSteps: ({ configPath }) =>
+    nextSteps: ({ configPath, transport }) =>
       withConfigStep(
         [
           "Reload Cursor: Settings → MCP, or Developer: Reload Window.",
           "Start a new chat.",
           `Use ${coreToolsPhrase()}.`,
-          ...AUTHORING_CONNECT_STEPS,
+          ...authoringConnectSteps(transport),
         ],
         configPath,
       ),

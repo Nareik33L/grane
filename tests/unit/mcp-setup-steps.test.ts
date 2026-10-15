@@ -18,6 +18,7 @@ import { EXPECTED_TOOLS } from "../../src/mcp/connect/doctor.js";
 import {
   AUTHORING_CONNECT_STEPS,
   CORE_MCP_TOOLS_DISPLAY,
+  authoringConnectSteps,
   coreToolsMatchServer,
   coreToolsPhrase,
 } from "../../src/mcp/connect/next-steps.js";
@@ -138,6 +139,29 @@ describe("MCP setup steps match server behaviour", () => {
     expect(cursor).toMatch(/client config args/);
     expect(cursor).toContain("authoring.enabled");
     expect(cursor).toContain("auth.agents");
+  });
+
+  it("Cursor and Claude HTTP next steps do not print stdio args advice", () => {
+    const httpText = authoringConnectSteps("http").join("\n");
+    expect(httpText).not.toContain("serve --stdio --authoring");
+    expect(httpText).not.toMatch(/client config args/);
+    expect(httpText).toContain("grane serve");
+    expect(httpText).toContain("--authoring");
+    expect(httpText).toContain("auth.agents");
+    expect(httpText).toMatch(/If authoring is on/);
+    for (const id of ["cursor", "claude"] as const) {
+      const steps = resolveClient(id)
+        .nextSteps({
+          transport: "http",
+          url: "https://grane.example/mcp",
+          configPath: "/tmp/mcp.json",
+          written: true,
+        })
+        .join("\n");
+      expect(steps, id).not.toContain("serve --stdio --authoring");
+      expect(steps, id).toContain("--authoring");
+      expect(steps, id).toContain(SETUP_GRANE_PROMPT_TITLE);
+    }
   });
 
   it("skip-connect hint commands are the real CLI shape", () => {

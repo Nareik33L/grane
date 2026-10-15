@@ -427,7 +427,7 @@ describe("authoring fail-closed preflight", () => {
         } satisfies WarehouseConnector,
       },
     );
-    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio" });
+    const server = buildMcpServer(kernel, { authoring: true, transport: "stdio", homeDir: dir });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "grane-fail-closed", version: "0.0.1" });
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

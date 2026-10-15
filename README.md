@@ -108,7 +108,8 @@ Authoring is off until you turn it on:
 
 1. This process: put `--authoring` in the client config args (`grane serve --stdio --authoring`)
 2. This project: `authoring.enabled: true` in `grane.yml` advertises all 9 tools on stdio (HTTP needs `authoring.mode: shared` and `auth.agents`)
-3. If authoring is on, open the Set up Grane prompt. Tools only propose a PR. A human merges, then pins.
+3. If authoring is on, open the Set up Grane prompt. Ask what metrics matter;
+   confirm suggested meanings; tools only propose a PR. A human merges, then pins.
 
 Guide: [docs/v2-authoring.md](docs/v2-authoring.md). Existing `example/` and
 `demo/` YAML do not change. Only `grane serve` honours `.grane/active.json`.

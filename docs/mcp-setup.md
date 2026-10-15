@@ -1,7 +1,9 @@
 # MCP tool reference
 
 Grane exposes four MCP tools: catalog, query, validate, explain.
-`--authoring` enables authoring tools for this process. On stdio,
+`--authoring` enables authoring tools for this process. On stdio, put it in
+the client config args (`grane serve --stdio --authoring`). On HTTP, pass
+`--authoring` to `grane serve` (not stdio args). On stdio,
 `authoring.enabled: true` in `grane.yml` also advertises all 9 tools
 (and the Set up Grane prompt). HTTP authoring needs `authoring.mode: shared`
 and `auth.agents`. See [v2-authoring.md](v2-authoring.md). Full agent

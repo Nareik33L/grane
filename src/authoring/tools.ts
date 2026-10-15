@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { generateDraftYaml } from "./generate.js";
+import { formatProposalPlayback } from "./playback.js";
 import type { GraneKernel } from "../kernel.js";
 import { createDiscovery, hashDiscoverySnapshot } from "./discover.js";
 import { configError } from "../errors.js";
@@ -13,6 +14,7 @@ import type { DatabaseSchema } from "../connectors/types.js";
 import {
   createSession,
   loadSession,
+  sessionDraftSourceHash,
   updateSession,
   warehouseLocator,
   type AuthoringSession,
@@ -258,6 +260,7 @@ export async function proposeDefinitions(
     unresolved: boolean;
     warning?: string;
     skipped_tables: string[];
+    playback: string;
   }
 > {
   const projectDir = requireProjectDir(kernel);
@@ -293,6 +296,7 @@ export async function proposeDefinitions(
     ...updated,
     ...flag,
     skipped_tables,
+    playback: formatProposalPlayback(draft_yaml),
     ...(warning ? { warning } : {}),
   };
 }
@@ -358,6 +362,13 @@ export function submitProposal(
   const session = loadSession(projectDir, sessionId);
   if (Object.keys(session.draft_yaml).length === 0) {
     throw configError("No draft YAML. Call propose_definitions first.");
+  }
+  const currentHash = sessionDraftSourceHash(session);
+  if (!session.draft_source_hash || session.draft_source_hash !== currentHash) {
+    throw configError(
+      "Session changed after propose_definitions. Call propose_definitions again before submit_proposal.",
+      { draft_source_hash: session.draft_source_hash, current_hash: currentHash },
+    );
   }
   for (const rel of Object.keys(session.draft_yaml)) {
     assertDraftYamlPath(rel);

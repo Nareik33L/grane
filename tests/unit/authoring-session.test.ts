@@ -10,6 +10,7 @@ import {
   listSessions,
   loadSession,
   saveSession,
+  sessionDraftSourceHash,
   sessionPath,
   warehouseLocator,
   type AuthoringSession,
@@ -36,7 +37,7 @@ afterEach(() => {
 function sampleSession(overrides: Partial<AuthoringSession> = {}): Omit<AuthoringSession, "version"> & {
   version?: typeof AUTHORING_SESSION_VERSION;
 } {
-  return {
+  const base: Omit<AuthoringSession, "version"> & { version?: typeof AUTHORING_SESSION_VERSION } = {
     id: "sess-roundtrip",
     created_at: "2026-10-14T12:00:00.000Z",
     updated_at: "2026-10-14T12:30:00.000Z",
@@ -59,8 +60,13 @@ function sampleSession(overrides: Partial<AuthoringSession> = {}): Omit<Authorin
       "grane.yml": "project:\n  name: shop\n",
       "metrics.yml": "metrics:\n  revenue:\n    entity: order\n    type: sum\n    sql: ${orders.net_amount}\n",
     },
+    draft_source_hash: null,
     ...overrides,
   };
+  if (!("draft_source_hash" in overrides) && Object.keys(base.draft_yaml).length > 0) {
+    base.draft_source_hash = sessionDraftSourceHash(base);
+  }
+  return base;
 }
 
 describe("authoring session store", () => {
@@ -103,6 +109,7 @@ describe("authoring session store", () => {
     expect(first.open_ambiguities).toEqual([]);
     expect(first.resolved_ambiguities).toEqual([]);
     expect(first.draft_yaml).toEqual({});
+    expect(first.draft_source_hash).toBeNull();
     expect(first.created_at).toBe(first.updated_at);
 
     createSession(dir, {

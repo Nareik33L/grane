@@ -141,6 +141,7 @@ export {
 export { generateDraftYaml } from "./authoring/generate.js";
 export {
   readSetupTone,
+  readSetupToneStrict,
   writeSetupTone,
   readLocalGraneConfig,
   assertLocalGraneConfigWritable,

@@ -5,6 +5,8 @@ export {
   withConfigStep,
   coreToolsPhrase,
   CORE_MCP_TOOLS_DISPLAY,
+  authoringSwitchSteps,
+  authoringConnectSteps,
   AUTHORING_SWITCH_STEPS,
   AUTHORING_PROPOSE_STEP,
   AUTHORING_CONNECT_STEPS,

@@ -114,7 +114,10 @@ function kernelFor(dir: string, extra: Record<string, unknown> = {}, grant?: Par
 }
 
 async function connectClient(kernel: GraneKernel, options?: BuildMcpServerOptions) {
-  const server = buildMcpServer(kernel, options);
+  const server = buildMcpServer(kernel, {
+    ...options,
+    homeDir: options?.homeDir ?? kernel.projectDir,
+  });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "grane-authoring-test", version: "0.0.1" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

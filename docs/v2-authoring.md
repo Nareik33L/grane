@@ -59,6 +59,9 @@ grane setup --yes --path demo --postgres --authoring
 ```
 
 `--authoring` enables authoring tools for **this process**.
+On stdio, put `--authoring` in the client config args
+(`grane serve --stdio --authoring`). On HTTP, pass `--authoring` to
+`grane serve` — do not put stdio args in the client config.
 On stdio, `authoring.enabled: true` in `grane.yml` also advertises all 9 tools
 (and the Set up Grane prompt). HTTP needs `authoring.mode: shared` and
 `auth.agents`. Authoring tools only propose a GitHub PR. Nothing is live until a
@@ -71,6 +74,31 @@ The nine tools (and the **Set up Grane** prompt) are:
 `preview_yaml`, `submit_proposal`.
 
 Core tools stay `catalog`, `query`, `validate`, `explain`.
+
+## Guided conversation (Set up Grane)
+
+The **Set up Grane** prompt is a conversation with a data engineer, not a form.
+The first question is open-ended (“What metrics are important to you?”). The
+agent inspects discovered columns and suggests plain-English meanings
+(table/column, calculation, filters, grain). The user confirms or adjusts by
+multiple choice. Suggested meanings stay **unconfirmed until the user picks
+one** — nothing ambiguous is settled silently. After `propose_definitions`,
+the play-back summary is derived from the draft YAML (name, table/column,
+calculation, filters, grain, and description) and must match the proposal
+exactly. If the session changes after `propose_definitions` (a later
+`resolve_ambiguity`, `record_term`, or any other edit), `submit_proposal`
+refuses until you call `propose_definitions` again — it will not commit a
+stale draft.
+
+Wording comes from `setup_tone` in `~/.grane/config.json` (the V2-16 wizard
+choice). The MCP server **only reads** that file, with the same refusal of
+symlinks and invalid JSON as the writer. Tone changes wording and verbosity
+only — never defaults, YAML, or the proposal. Missing config defaults to
+`technical`.
+
+There is no skip-review path. If the user asks to approve, pin, skip review,
+or mark metrics live, the agent must refuse. A proposal stays experimental
+until a human merges the pull request and pins.
 
 ## Local vs shared
 
