@@ -257,12 +257,26 @@ faithfully is **skipped with a reason**, never guessed. Native YAML next to
 
 | Kind | Status |
 | --- | --- |
-| dbt / MetricFlow | Supported. See [providers.md](providers.md) and [metricflow-support.md](metricflow-support.md). |
+| dbt / MetricFlow | Simple cases only. The pinned `simple_manifest` imports **2 of 112** metrics. See [providers.md](providers.md) and [metricflow-support.md](metricflow-support.md). |
 | Cube (YAML / `cube.js`) | Supported. JS is parsed, never eval'd. |
 | LookML | Supported. `derived_table` binds to a materialized relation. |
 | Apache Ossie | Supported. |
 | Malloy | Simple `source` / `measure` / `dimension` / `join_one`. |
 | Fragment | Grane-shaped YAML/JSON. |
+
+MetricFlow import currently covers only simple cases. dbt-labs/metricflow
+`simple_manifest` (Apache-2.0, `tests/fixtures/metricflow-simple`) imports
+**2 of 112** metrics (`largest_listing`, `smallest_listing`). Everything
+else is skipped with a reason. Main unsupported constructs: semantic models
+with `primary_entity` but no column-backed primary entity; `sum` (and
+non-count aggs) over a literal such as `expr: 1`; cumulative / conversion /
+`grain_to_date` / windows; derived expressions other than `metric / metric`
+(offsets, aliases, `*`, `-`); `median` / `percentile`; metric filters Grane
+cannot translate (`Entity()`, `or`, `in`, comparisons, `TimeDimension`);
+ratio-level filters; SQL-expression dimensions including
+`cast(ordered_at as DATE)` time dimensions (the metric skip names the
+unsupported expression — it does not say "not a declared time dimension").
+`cast(...)` and `sum(1)` are not imported.
 
 V2 authoring does not replace importers. Import existing definitions; author
 only what you do not already govern.
@@ -288,8 +302,11 @@ tells the user how to fix it (see validate issue codes such as
 and never overwrite the user's original YAML.
 
 Import/validate corpora include hand-built representative provider shapes
-plus one pinned public project (`dbt-labs/jaffle_shop` / jaffle-shop-classic).
-See [Real-world corpora](#real-world-corpora).
+plus pinned Apache-2.0 public projects (`dbt-labs/jaffle_shop` /
+jaffle-shop-classic, and dbt-labs/metricflow `simple_manifest`). MetricFlow
+import is not general-purpose: `simple_manifest` imports 2 of 112 metrics.
+See [Real-world corpora](#real-world-corpora) and
+[metricflow-support.md](metricflow-support.md).
 
 ## Real-world corpora
 
@@ -313,8 +330,8 @@ MetricFlow/Cube/LookML/Malloy/Ossie parser coverage):
 | Tree | Kind | Source |
 | --- | --- | --- |
 | `tests/fixtures/jaffle_shop`, `tests/fixtures/jaffle_shop-import` | dbt | [dbt-labs/jaffle-shop-classic](https://github.com/dbt-labs/jaffle-shop-classic) `@ fd7bfacae4f497ff044a6a0275268676bf1b64c3` (Apache-2.0). Historical URL: `dbt-labs/jaffle_shop`. Classic jaffle has no MetricFlow `semantic_models`; import detects `dbt` and yields the empty-graph warning. The Grane wrapper at `jaffle_shop-import` loads that path via `providers:` and `validate` stays clean. |
-| `tests/fixtures/jaffle-sl-template` | dbt / MetricFlow | [dbt-labs/jaffle-sl-template](https://github.com/dbt-labs/jaffle-sl-template) `@ c54c8fb8bea86c0c4d3d5c588d55f8de9de57ade`. Semantic models + metrics. The template repo ships no LICENSE file; dbt Labs' MetricFlow stack is [Apache-2.0](https://github.com/dbt-labs/metricflow/blob/main/LICENSE) (that text is vendored as `LICENSE`). Tests assert the exact imported metric, entity, and dimension names. |
-| `tests/fixtures/metricflow-simple`, `tests/fixtures/metricflow-simple-import` | dbt / MetricFlow | [dbt-labs/metricflow](https://github.com/dbt-labs/metricflow) `simple_manifest` `@ fe4b8c1ccb72a8ca77494b345777eff20a714119` (Apache-2.0). Tests assert the exact imported metric, entity, and dimension names (`largest_listing`, `smallest_listing`, …). |
+| `tests/fixtures/metricflow-simple`, `tests/fixtures/metricflow-simple-import` | dbt / MetricFlow | [dbt-labs/metricflow](https://github.com/dbt-labs/metricflow) `simple_manifest` `@ fe4b8c1ccb72a8ca77494b345777eff20a714119` (Apache-2.0). Imports **2 of 112** metrics (`largest_listing`, `smallest_listing`). Tests assert that exact count and the imported metric, entity, and dimension names. A compile test checks `largest_listing` SQL. |
+| `tests/fixtures/metricflow-expr-time` | dbt / MetricFlow | Apache-2.0 derivative of the same `simple_manifest` `listings_latest.yaml` @ `fe4b8c1c…`, with `ds.expr` changed to `cast(created_at as DATE)`. Tests assert the metric skip reason names that unsupported expression (not "not a declared time dimension"). |
 
 ## Warehouse categories
 

@@ -1,0 +1,4 @@
+# Detect wrapper (not upstream). Upstream MetricFlow YAML has no dbt_project.yml.
+name: metricflow_expr_time
+profile: metricflow_expr_time
+model-paths: ["semantic_models"]

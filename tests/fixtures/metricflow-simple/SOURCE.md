@@ -1,7 +1,9 @@
 # dbt-labs/metricflow simple_manifest
 
 Pinned public MetricFlow YAML (Apache-2.0) so import/validate can assert
-exact metric, entity, and dimension names.
+exact metric, entity, and dimension names. Import currently covers only
+simple cases: this tree imports 2 of 112 metrics (`largest_listing`,
+`smallest_listing`).
 
 - Upstream: https://github.com/dbt-labs/metricflow
 - Path: `metricflow_semantics/test_helpers/semantic_manifest_yamls/simple_manifest`

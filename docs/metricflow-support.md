@@ -32,13 +32,32 @@ Parser: `src/providers/dbt/parse.ts`. Mapper: `src/providers/dbt/map.ts`.
 | `fill_nulls_with` (integer, simple) | supported with constraints | `COALESCE` on the aggregate of **existing** groups. Not a timespine. |
 | `join_to_timespine` | query-shape dependent | Totals OK; per-period `time.grain` is `unsafe_query` (no spine). COALESCE is not timespine fill. |
 | `non_additive_dimension` | supported with constraints | `min`/`max` window; foreign-entity `group_by` or empty (global snapshot); day–year grain. Combined with an unsupported window type: skip the metric. |
-| `agg_time_dimension` | supported | Must be a declared time dimension of the model. Untimed component + query time: `ambiguous_query` (#20). |
+| `agg_time_dimension` | supported with constraints | Must be a **plain-column** declared time dimension of the model. A declared time dimension whose `expr` is SQL (`cast(created_at as DATE)`, `cast(ordered_at as DATE)`, …) is skipped as an unsupported expression — the metric warning names the expression, not "not a declared time dimension". Untimed component + query time: `ambiguous_query` (#20). |
+| SQL-expression time / categorical dimensions | unsupported / skipped | `dimension expr "…" is a SQL expression; Grane compiles plain column dimensions only.` Metrics that use that name as `agg_time_dimension` inherit the unsupported-expression skip. `cast(...)` is not imported. |
 | metric filters | supported with constraints | `=` / `!=` / `<>` / `and` on the metric's own model; JSON `NULL` literals are not imported (not mapped to `is_null`); #31 grain / fan-out / SA off-grain classification unchanged |
 | query time grain (output) | query-shape dependent | Must be ≥ the metric's native grain. Day grouping of a month-grain metric is `unsafe_query`. |
 | metric-defined grain vs query range | supported with constraints | Native week/month/quarter/year expands civil `from`/`to` to complete overlapping periods (MetricFlow 0.212). Day stays civil. Mixed coarse + civil-day metrics in one query refuse. |
 | component temporal alignment | query-shape dependent | Ratio components must share entity; mixed native grains in one query refuse; untimed companion must not inherit time (#20) |
 | `time_granularity` on the metric object in the manifest | ignored (always null in 0.212 Oakwell) | Native grain is taken from the **time dimension**, not this field |
 | `type_params.input_measures` / `is_private` / `metric_aggregation_params` | parsed via YAML/measure path | Manifest-only `metric_aggregation_params` is unused when YAML is present (Oakwell). Extra input keys skip the metric. |
+
+## simple_manifest import rate
+
+MetricFlow import covers only simple cases. The pinned Apache-2.0
+[dbt-labs/metricflow](https://github.com/dbt-labs/metricflow) `simple_manifest`
+(`tests/fixtures/metricflow-simple` @ `fe4b8c1ccb72a8ca77494b345777eff20a714119`)
+imports **2 of 112** metrics: `largest_listing` and `smallest_listing` (`max` /
+`min` of a plain `capacity` column on a model with a column-backed primary
+entity). The other 110 are skipped with a reason.
+
+Main unsupported constructs (see the matrix): semantic models with
+`primary_entity` but no column-backed primary entity (most fact models in
+`simple_manifest`); `sum` / non-count aggs over a literal (`expr: 1`,
+`sum(1)` is not imported); cumulative / conversion / `grain_to_date` /
+windows; derived expressions other than `metric / metric` (offsets, aliases,
+`*`, `-`); `median` / `percentile`; untranslatable filters; ratio-level
+filters; SQL-expression dimensions, including `cast(... as DATE)` time
+dimensions.
 
 ## Import-time vs query-time
 

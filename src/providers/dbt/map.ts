@@ -348,11 +348,28 @@ function entityNameFor(model: MfSemanticModel, out: SemanticContribution): strin
   return primary;
 }
 
-/** A declared time dimension's column, or null when the name is not a declared time dimension. */
-function timeDimensionColumn(model: MfSemanticModel, name: string | undefined): string | null {
-  if (!name) return null;
-  const dim = model.dimensions.find((d) => d.type === "time" && (d.name === name || d.column === name));
-  return dim?.column ?? null;
+function declaredTimeDimension(
+  model: MfSemanticModel,
+  name: string | undefined,
+): MfSemanticModel["dimensions"][number] | undefined {
+  if (!name) return undefined;
+  return model.dimensions.find((d) => d.type === "time" && (d.name === name || d.column === name));
+}
+
+/** Skip reason when `name` is missing, or is a declared time dimension whose expr is not a plain column. */
+function unsupportedTimeDimensionReason(
+  kind: "agg_time_dimension" | "non_additive_dimension",
+  name: string,
+  model: MfSemanticModel,
+): string {
+  const dim = declaredTimeDimension(model, name);
+  if (dim && !dim.column) {
+    return (
+      `${kind} "${name}" was skipped as an unsupported expression ("${dim.expr}"); ` +
+      `Grane compiles plain column time dimensions only.`
+    );
+  }
+  return `${kind} "${name}" is not a declared time dimension on semantic model "${model.name}".`;
 }
 
 function emitSimple(
@@ -387,15 +404,13 @@ function emitSimple(
     }
   }
 
-  // Time: must be a declared time dimension of this model, never a guessed column.
+  // Time: must be a declared plain-column time dimension of this model, never a guessed column.
   const timeName = opts.aggTimeDimension ?? model.aggTimeDimension;
-  const timeCol = timeDimensionColumn(model, timeName);
+  const timeDim = declaredTimeDimension(model, timeName);
+  const timeCol = timeDim?.column ?? null;
   if (timeName && !timeCol) {
-    return fail(`agg_time_dimension "${timeName}" is not a declared time dimension on semantic model "${model.name}".`);
+    return fail(unsupportedTimeDimensionReason("agg_time_dimension", timeName, model));
   }
-  const timeDim = timeName
-    ? model.dimensions.find((d) => d.type === "time" && (d.name === timeName || d.column === timeName))
-    : undefined;
   let timeGranularity = opts.timeGranularity;
   if (!timeGranularity && timeDim?.granularity) {
     const parsed = semiAdditiveGranularitySchema.safeParse(timeDim.granularity);
@@ -427,9 +442,9 @@ function emitSimple(
     if (!timeCol) {
       return fail(`non_additive_dimension "${na.name}" needs an agg_time_dimension on the metric or semantic model.`);
     }
-    const asOfDim = model.dimensions.find((d) => d.type === "time" && (d.name === na.name || d.column === na.name));
+    const asOfDim = declaredTimeDimension(model, na.name);
     if (!asOfDim?.column) {
-      return fail(`non_additive_dimension "${na.name}" is not a declared time dimension on semantic model "${model.name}".`);
+      return fail(unsupportedTimeDimensionReason("non_additive_dimension", na.name, model));
     }
     if (asOfDim.column !== timeCol) {
       return fail(

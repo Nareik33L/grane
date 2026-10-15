@@ -1,0 +1,21 @@
+---
+metric:
+  name: "largest_listing"
+  description: "largest listing"
+  type: simple
+  type_params:
+    measure: largest_listing
+---
+metric:
+  name: "smallest_listing"
+  description: "smallest listing"
+  type: simple
+  type_params:
+    measure: smallest_listing
+---
+metric:
+  name: "listings"
+  description: "listings"
+  type: simple
+  type_params:
+    measure: listings
