@@ -258,9 +258,11 @@ export const projectConfigSchema = z.object({
   name: z.string().default("grane-project"),
   timezone: z.string().default("UTC"),
   /**
-   * GitHub PR / active-pin base when `origin/HEAD`, `main`, and `master` are
-   * all absent. Must name an existing `refs/heads/` branch. Never inferred
-   * from HEAD.
+   * GitHub PR / active-pin base. Read only from the committed tree at
+   * origin/HEAD, main, or master — never HEAD, never the working-tree YAML,
+   * never a pin file. When set, it wins over `origin/HEAD`; a disagreement
+   * is refused. Without an established base, Grane refuses (run `grane setup`
+   * after main/master or origin/HEAD exists). A valid pin's `ref` must match.
    */
   base_branch: z.string().min(1).optional(),
   week: z.object({ starts: weekStartsSchema.default("monday") }).default({ starts: "monday" }),

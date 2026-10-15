@@ -315,14 +315,16 @@ function validateMetric(
           severity: "error",
           code: "unknown_metric",
           subject,
-          message: `Ratio ${role} "${ref}" is not a defined metric.`,
+          message: `Ratio ${role} "${ref}" is not a defined metric. How to fix: define "${ref}" first, or correct the name.`,
         });
       } else if (component.config.type === "ratio") {
         issues.push({
           severity: "error",
           code: "nested_ratio",
           subject,
-          message: `Ratio ${role} "${ref}" is itself a ratio; nested ratios are not supported in V0.1.`,
+          message:
+            `Ratio ${role} "${ref}" is itself a ratio; nested ratios are not supported in V0.1. ` +
+            `How to fix: point ${role} at a sum/count/min/max metric, not another ratio.`,
         });
       } else if (component.config.entity !== config.entity) {
         issues.push({
@@ -434,7 +436,9 @@ function validateMetric(
         subject,
         message:
           `Metric "${metric.name}" has multiple relationship paths from "${baseTable}" to "${metric.measure.table}" ` +
-          `(${(path.alternatives ?? []).join("; ")}). YAML declaration order is not a semantic discriminator.`,
+          `(${(path.alternatives ?? []).join("; ")}). YAML declaration order is not a semantic discriminator. ` +
+          `How to fix: keep a single relationship path between those tables (remove the extra relationship, ` +
+          `or bind the measure to a table that has only one path).`,
       });
     } else if (path.fansOut) {
       if (config.type === "count_distinct") {

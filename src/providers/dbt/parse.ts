@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parseAllDocuments } from "yaml";
 import {
   exprText,
   extractRef,
@@ -72,25 +72,32 @@ export function parseDbtYamlFiles(projectRoot: string): MetricFlowGraph {
   const graph: MetricFlowGraph = { models: [], metrics: [], warnings: [] };
   for (const file of walkYamlFiles(projectRoot)) {
     const rel = relative(projectRoot, file);
-    let doc: unknown;
+    let docs: unknown[];
     try {
-      doc = parseYaml(readFileSync(file, "utf8"));
+      docs = parseAllDocuments(readFileSync(file, "utf8")).map((document) => document.toJS());
     } catch (err) {
       graph.warnings.push(`Skipped ${rel}: ${(err as Error).message}`);
       continue;
     }
-    if (!isRecord(doc)) continue;
-    for (const model of asArray(doc.semantic_models)) {
-      const parsed = parseLegacySemanticModel(model, rel);
-      if (parsed) graph.models.push(parsed);
-    }
-    for (const model of asArray(doc.models)) {
-      const parsed = parseLatestSemanticModel(model, rel);
-      if (parsed) graph.models.push(parsed);
-    }
-    for (const metric of asArray(doc.metrics)) {
-      const parsed = parseTopLevelMetric(metric, rel);
-      if (parsed) graph.metrics.push(parsed);
+    for (const doc of docs) {
+      if (!isRecord(doc)) continue;
+      const semanticModels = [
+        ...asArray(doc.semantic_models),
+        ...(isRecord(doc.semantic_model) ? [doc.semantic_model] : []),
+      ];
+      for (const model of semanticModels) {
+        const parsed = parseLegacySemanticModel(model, rel);
+        if (parsed) graph.models.push(parsed);
+      }
+      for (const model of asArray(doc.models)) {
+        const parsed = parseLatestSemanticModel(model, rel);
+        if (parsed) graph.models.push(parsed);
+      }
+      const metrics = [...asArray(doc.metrics), ...(isRecord(doc.metric) ? [doc.metric] : [])];
+      for (const metric of metrics) {
+        const parsed = parseTopLevelMetric(metric, rel);
+        if (parsed) graph.metrics.push(parsed);
+      }
     }
   }
   return graph;
@@ -100,7 +107,8 @@ function parseLegacySemanticModel(raw: unknown, sourcePath: string): MfSemanticM
   if (!isRecord(raw)) return null;
   const name = str(raw.name);
   if (!name) return null;
-  const table = extractRef(raw.model) ?? name;
+  const relation = isRecord(raw.node_relation) ? raw.node_relation : {};
+  const table = extractRef(raw.model) ?? str(relation.alias) ?? name;
   const defaults = isRecord(raw.defaults) ? raw.defaults : {};
   const entities = asArray(raw.entities).map(parseEntity).filter((e): e is MfEntity => e !== null);
   const primary = entities.find((e) => e.type === "primary");

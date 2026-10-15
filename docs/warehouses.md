@@ -23,14 +23,36 @@ The map in `src/connectors/certification.ts` is the source of truth. `catalog.se
 exposes `{ type, certification, certified_version }`. Gold values for the shared corpus are
 TypeScript reductions over the seed, not SQL on the engine under test. Reports write to
 `certification/<engine>.json` (see `certification/README.md`). Self-certify Snowflake,
-BigQuery, Databricks, or Redshift with [`grane certify`](certify.md). Postgres CI
-certification does not cover Redshift.
+BigQuery, Databricks, or Redshift with [`grane certify`](certify.md). Those four
+stay `self_certifiable` (compile-supported, **not** runtime-certified) until a
+credentialed `certify-cloud` run has actually passed and this map is updated —
+do not call them runtime-certified before that.
+Postgres CI certification does not cover Redshift.
+
+Docs separate three categories that match the map 1:1. No cloud warehouse is
+runtime-certified.
+
+### Runtime-certified (`certified`)
+
+PostgreSQL 16, MySQL 8, DuckDB 1.5, and ClickHouse 24. The shared corpus runs
+in Grane CI.
+
+### Compile-supported (`self_certifiable`)
+
+Snowflake, BigQuery, Amazon Redshift, and Databricks. The connector ships and
+compiles SQL; Grane CI does not run the corpus. Self-certify locally. These
+are **not yet runtime-certified**.
+
+### Not yet certified (`compile_only`)
+
+No warehouse is `compile_only` today. That state means SQL compiles for the
+dialect but live execution is not a Grane-certified path.
 
 | State | Meaning |
 | --- | --- |
-| `certified` | Shared corpus runs in Grane CI. |
-| `self_certifiable` | Connector ships; Grane CI does not run the corpus. Verify against your warehouse. |
-| `compile_only` | SQL is compiled for this dialect; live execution is not a Grane-certified path. |
+| `certified` | runtime-certified — shared corpus runs in Grane CI. |
+| `self_certifiable` | compile-supported — connector ships and compiles; not yet runtime-certified. Self-certify with `grane certify`. Cloud warehouses stay here until a credentialed certify-cloud run passes. |
+| `compile_only` | not yet certified — SQL is compiled for this dialect; live execution is not a Grane-certified path. |
 
 | Warehouse | `connection.type` | State | Minimum certified version |
 | --- | --- | --- | --- |

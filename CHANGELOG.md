@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+- **Docs + compat cert (V2-15).** [docs/v2-authoring.md](docs/v2-authoring.md)
+  is the operator guide: proposals-as-PRs, experimental vs governed,
+  `--authoring`, local vs shared, read-only discovery with sampling caps,
+  `grane proposals`, `.grane/active.json` (only `serve` honours it),
+  `project.base_branch`, the temporal `group_by` warning on existing YAML,
+  demo Postgres ready-made vs build-your-own, and importer status. README
+  quickstart links the guide. CI compares `example/` (postgres) and `demo/`
+  (duckdb) certify reports to the pre-V2 main baseline (`7a7ffc6`); an
+  existing-YAML compat cert loads those projects and allows only the
+  temporal warning as a new finding. Docs and README warehouse claims must
+  match `WAREHOUSE_CERTIFICATION` exactly (`certified` vs `self_certifiable`);
+  no cloud warehouse is certified until a credentialed `certify-cloud` run
+  has actually passed. Docs name three categories that match the map
+  (`runtime-certified` / `compile-supported` / `not yet certified`); no cloud
+  warehouse is runtime-certified. Before/after compile evidence vs pre-V2
+  `7a7ffc6` is committed (`docs/v2-compat-evidence.md`). Import/validate never
+  pin or overwrite originals. Unsupported YAML is rejected with a How-to-fix
+  error. Hand-built dbt/Cube/LookML/Malloy/Ossie fixtures plus pinned
+  public Apache-2.0 `dbt-labs/jaffle_shop` (classic) and
+  `dbt-labs/metricflow` `simple_manifest` (2 of 112 metrics imported) are
+  documented. `jaffle-sl-template` is not vendored (upstream ships no
+  LICENSE).
+  [docs/release-checklist.md](docs/release-checklist.md) lists credentialed
+  `certify-cloud` on the exact RC commit and QA's independent RC cert — do
+  not run those from this PR. npm publish stays on hold.
+  The configured base is never read from HEAD's committed tree (a feature
+  branch that commits `base_branch: feature` cannot become the base). Base
+  comes from `base_branch` on `origin/HEAD` / `main` / `master` (a pin is
+  checked against that value, not used to discover it); otherwise
+  `grane setup` is required. With no committed
+  `base_branch`, `origin/HEAD` disagreeing with local `main`/`master` is
+  refused. `runGit` strips inherited `GIT_*` and sets
+  `GIT_NO_REPLACE_OBJECTS=1`; `refs/replace/*` and `.git/info/grafts` are
+  refused. `.grane/` must be a regular directory (not a symlink).
+  Committed `project.base_branch` wins over `origin/HEAD` (disagreement is
+  refused); working-tree YAML cannot redirect the base or silence audit.
+  Approve requires the proposal commit reachable from base (forged
+  `Grane-Proposal` trailers are refused). fail_closed audit refuses a
+  symlink or `/dev/null`. Gate-7 cases (including these) are wired into
+  `traps.ts`. Pinned public projects: `dbt-labs/jaffle_shop` (classic) and
+  `dbt-labs/metricflow` `simple_manifest` @ `fe4b8c1c` (Apache-2.0; imports
+  2 of 112 metrics, names asserted; 110 skip reasons snapshotted). A
+  "measure not found" skip names the missing column-backed primary entity.
+  A declared time dimension whose expr
+  is `cast(... as DATE)` skips the metric as an unsupported expression, not
+  as "not a declared time dimension". A develop-only repo with no
+  `origin/HEAD` is refused even if HEAD commits `base_branch`. When
+  `origin/<base>` exists, merge detection uses that tip.
 - **Authoring gauntlet (V2-14).** `tests/gauntlet/authoring*` is wired into the
   CRITICAL gate. Unexpected errors inside a security scenario score
   `SECURITY CRITICAL` (never report-only `FAIL`). Cases cover prompt injection

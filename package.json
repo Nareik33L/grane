@@ -30,6 +30,7 @@
     "test:integration": "vitest run tests/integration",
     "test:benchmark": "vitest run tests/benchmark tests/demo",
     "test:gauntlet": "vitest run tests/gauntlet",
+    "test:v2-compat": "tsx tests/certification/compare-v2-compat.ts",
     "certify": "tsx src/cli/index.ts certify"
   },
   "keywords": [

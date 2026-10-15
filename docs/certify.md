@@ -20,8 +20,11 @@ Writes `certification/<engine>.json` plus a human summary. JSON reports are
 gitignored; this is not a second gold set.
 
 Snowflake, BigQuery, Databricks, and Redshift stay `self_certifiable` until
-Grane CI actually runs this corpus against them. Postgres certification does
-not cover Redshift — use `--engine redshift`.
+a **credentialed `certify-cloud` run has actually passed** and
+`WAREHOUSE_CERTIFICATION` is updated. A pending dispatch, a skip-without-secrets
+job, or a connector that compiles is not certification. Postgres certification does
+not cover Redshift — use `--engine redshift`. Docs and README must match
+the map exactly (`certified` vs `self_certifiable`).
 
 ## Environment variables
 
@@ -100,6 +103,23 @@ Jobs skip cleanly when the corresponding `GRANE_CERT_*` secrets are absent.
 `continue-on-error` is `false` only on the certify step, which runs **only**
 when the secret is present. Public OSS CI therefore stays green without
 paying cloud credentials.
+
+**Pending release step:** do not dispatch this workflow with real warehouse
+secrets from a public PR. Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
+once before the V2 tag. Listed on [release-checklist.md](release-checklist.md)
+together with QA's independent RC cert. Do not run those steps from this PR.
+npm publish stays on hold.
+
+Cloud engines are compile-supported (`self_certifiable`), not
+runtime-certified. See [warehouses.md](warehouses.md#runtime-certified).
+
+## V2 example / demo compat
+
+`example/analytics` defaults to postgres and `demo/analytics` to duckdb.
+After `npm run test:unit`, CI runs `npx tsx tests/certification/compare-v2-compat.ts`
+and compares those two reports to the pre-V2 main baseline (`7a7ffc6`,
+`tests/fixtures/v2-compat/`). Scenario names must match; each must pass.
+See [v2-authoring.md](v2-authoring.md#compatibility).
 
 ## Cost controls
 

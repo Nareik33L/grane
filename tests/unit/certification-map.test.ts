@@ -1,21 +1,58 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { GraneKernel } from "../../src/kernel.js";
 import { WAREHOUSE_TYPES, type WarehouseType } from "../../src/connectors/dialect.js";
 import {
+  CERTIFICATION_CATEGORY,
   CERTIFICATION_STATES,
   WAREHOUSE_CERTIFICATION,
   readmeCertificationLine,
   uncertifiedWarehouseWarning,
   warehouseCertificationMarkdown,
   warehouseServerInfo,
+  type WarehouseCertification,
 } from "../../src/connectors/certification.js";
+import { CLOUD_CERT_ENGINES } from "../../src/certify/env.js";
 import { CI_REQUIRED_CERT_ENGINES } from "../helpers/cert-engine.js";
 import { exampleConfig } from "../fixtures.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
+
+function documentationMarkdown(): Array<{ rel: string; text: string }> {
+  const files = [
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "certification/README.md",
+    ...readdirSync(join(ROOT, "docs"))
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `docs/${name}`),
+  ];
+  return files.map((rel) => ({ rel, text: readFileSync(join(ROOT, rel), "utf8") }));
+}
+
+function engineAliases(entry: WarehouseCertification): string[] {
+  const names = [entry.label, entry.type];
+  if (entry.type === "postgres") names.push("Postgres", "PostgreSQL");
+  if (entry.type === "redshift") names.push("Redshift");
+  return [...new Set(names)];
+}
+
+function lineMentionsEngine(line: string, entry: WarehouseCertification): boolean {
+  return engineAliases(entry).some((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\b`, "i").test(line);
+  });
+}
+
+/** Lines that mention certified only to deny it, or to say self_certifiable. */
+function lineDeniesCertification(line: string): boolean {
+  return /self_certifiable|self-certify|not\s+CI-certified|not certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n't)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified/i.test(
+    line,
+  );
+}
 
 function ciExercisesCertifiedEngine(ci: string, type: WarehouseType): boolean {
   const unit = /npm run test:unit/.test(ci);
@@ -134,6 +171,87 @@ describe("warehouse certification map", () => {
       certification: "certified",
       certified_version: "24",
     });
+  });
+
+  it("docs and README never call a cloud warehouse certified before certify-cloud has passed", () => {
+    const wf = readFileSync(join(ROOT, ".github/workflows/certify-cloud.yml"), "utf8");
+    expect(wf).toMatch(/Jobs skip when GRANE_CERT_\* secrets are absent/);
+    expect(wf).toMatch(/[Dd]ormant/);
+    for (const type of CLOUD_CERT_ENGINES) {
+      expect(
+        WAREHOUSE_CERTIFICATION[type].certification,
+        `${type}: map cannot say certified until a credentialed certify-cloud run has actually passed`,
+      ).toBe("self_certifiable");
+      expect(WAREHOUSE_CERTIFICATION[type].certified_version).toBeNull();
+    }
+
+    const overclaims: string[] = [];
+    for (const { rel, text } of documentationMarkdown()) {
+      for (const type of WAREHOUSE_TYPES) {
+        const entry = WAREHOUSE_CERTIFICATION[type];
+        if (entry.certification === "certified") continue;
+        for (const [i, line] of text.split("\n").entries()) {
+          if (!lineMentionsEngine(line, entry)) continue;
+          if (!/\bcertified\b/i.test(line)) continue;
+          if (lineDeniesCertification(line)) continue;
+          overclaims.push(`${rel}:${i + 1} claims ${entry.label} is certified: ${line.trim()}`);
+        }
+      }
+    }
+    expect(overclaims, overclaims.join("\n")).toEqual([]);
+  });
+
+  it("every warehouse state table in docs/README matches the certified matrix", () => {
+    const row =
+      /\|\s*([^|]+?)\s*\|\s*`([a-z]+)`\s*\|\s*`(certified|self_certifiable|compile_only)`\s*\|/g;
+    for (const { rel, text } of documentationMarkdown()) {
+      for (const match of text.matchAll(row)) {
+        const type = match[2] as WarehouseType;
+        const state = match[3]!;
+        expect(WAREHOUSE_TYPES, `${rel}: unknown warehouse ${type}`).toContain(type);
+        expect(state, `${rel}: ${type} state drifted from WAREHOUSE_CERTIFICATION`).toBe(
+          WAREHOUSE_CERTIFICATION[type]!.certification,
+        );
+      }
+    }
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    const line = readmeCertificationLine();
+    expect(readme).toContain(line);
+    for (const type of CLOUD_CERT_ENGINES) {
+      expect(line, `README Certified in CI line must not include ${type}`).not.toMatch(
+        new RegExp(WAREHOUSE_CERTIFICATION[type].label, "i"),
+      );
+    }
+  });
+
+  it("docs separate runtime-certified, compile-supported, and not yet certified", () => {
+    for (const { rel, text } of documentationMarkdown()) {
+      if (!rel.startsWith("docs/") && rel !== "README.md" && rel !== "CHANGELOG.md") continue;
+      if (rel === "docs/connect-an-agent.md" || rel === "docs/mcp-setup.md") continue;
+    }
+    const warehouses = readFileSync(join(ROOT, "docs/warehouses.md"), "utf8");
+    const authoring = readFileSync(join(ROOT, "docs/v2-authoring.md"), "utf8");
+    const checklist = readFileSync(join(ROOT, "docs/release-checklist.md"), "utf8");
+    for (const text of [warehouses, authoring, checklist]) {
+      expect(text).toMatch(/runtime-certified/);
+      expect(text).toMatch(/compile-supported/);
+      expect(text).toMatch(/not yet certified/);
+    }
+    expect(CERTIFICATION_CATEGORY.certified).toBe("runtime-certified");
+    expect(CERTIFICATION_CATEGORY.self_certifiable).toBe("compile-supported");
+    expect(CERTIFICATION_CATEGORY.compile_only).toBe("not yet certified");
+    const runtimeSection = (warehouses.split("### Runtime-certified")[1] ?? "").split("###")[0] ?? "";
+    for (const type of CLOUD_CERT_ENGINES) {
+      expect(WAREHOUSE_CERTIFICATION[type].certification).not.toBe("certified");
+      expect(CERTIFICATION_CATEGORY[WAREHOUSE_CERTIFICATION[type].certification]).not.toBe("runtime-certified");
+      expect(runtimeSection, `${type} listed under runtime-certified`).not.toMatch(
+        new RegExp(WAREHOUSE_CERTIFICATION[type].label, "i"),
+      );
+    }
+    expect(checklist).toMatch(/Credentialed `certify-cloud`/);
+    expect(checklist).toMatch(/QA independent RC/);
+    expect(checklist).toMatch(/npm publish/);
+    expect(checklist).toMatch(/Do not (run|attempt)/);
   });
 
   it("validate --production warning is one line and absent when certified", () => {

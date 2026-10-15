@@ -1,4 +1,4 @@
-import { accessSync, appendFileSync, constants, mkdirSync } from "node:fs";
+import { accessSync, appendFileSync, constants, existsSync, lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { GraneConfig } from "./config/schema.js";
 import { GraneError, configError } from "./errors.js";
@@ -242,6 +242,46 @@ export function resolveAuditPath(projectDir: string | undefined, configured: str
   return join(projectDir, configured);
 }
 
+function assertRegularGraneDir(projectDir: string | undefined): void {
+  if (!projectDir) return;
+  const dir = join(projectDir, ".grane");
+  try {
+    const st = lstatSync(dir);
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new Error(`.grane/ is a symlink or special file; a regular directory is required`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+}
+
+/**
+ * fail_closed audit must append to a regular file. Symlinks and devices
+ * (`/dev/null`) would silently discard the trail.
+ */
+export function assertRegularAuditFile(path: string): void {
+  if (!existsSync(path)) {
+    try {
+      const st = lstatSync(path);
+      if (st.isSymbolicLink()) {
+        throw new Error(`audit path "${path}" is a symlink; a regular file is required`);
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw err;
+    }
+    return;
+  }
+  const st = lstatSync(path);
+  if (st.isSymbolicLink()) {
+    throw new Error(`audit path "${path}" is a symlink; a regular file is required`);
+  }
+  if (!st.isFile()) {
+    throw new Error(`audit path "${path}" is not a regular file (device or special file)`);
+  }
+}
+
 export function appendAudit(
   event: AuditEvent,
   options: { path?: string | null; stdout?: boolean },
@@ -251,6 +291,7 @@ export function appendAudit(
     process.stderr.write(line);
   }
   if (options.path) {
+    assertRegularAuditFile(options.path);
     mkdirSync(dirname(options.path), { recursive: true });
     appendFileSync(options.path, line);
   }
@@ -282,6 +323,7 @@ export function recordAudit(
 ): void {
   if (!config.audit.enabled) return;
   try {
+    assertRegularGraneDir(projectDir);
     appendAudit(event, {
       path: resolveAuditPath(projectDir, config.audit.path),
       stdout: config.audit.stdout,
@@ -298,11 +340,13 @@ export function recordAudit(
 export function preflightAuditWrite(config: GraneConfig, projectDir: string | undefined): void {
   if (!config.audit.enabled || !config.audit.fail_closed) return;
   try {
+    assertRegularGraneDir(projectDir);
     const path = resolveAuditPath(projectDir, config.audit.path);
     if (path) {
       const parent = dirname(path);
       mkdirSync(parent, { recursive: true });
       accessSync(parent, constants.W_OK);
+      assertRegularAuditFile(path);
     }
   } catch (err) {
     throw auditWriteFailed(err);

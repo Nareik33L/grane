@@ -13,6 +13,7 @@ npx grane-analytics setup   # after 0.7.0 is on npm
 ```
 
 That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).
+Drafting new metrics as a GitHub PR: [v2-authoring.md](v2-authoring.md).
 
 **Already have dbt/MetricFlow (or Cube, LookML, Ossie, Malloy)?** Do not
 recreate metrics here. Run `grane init --provider ../your_project`, set the
@@ -89,7 +90,9 @@ show this set. Add two or three dimensions (`country`, `channel`, a status).
 
 If the company already defines these in dbt, Cube, Looker, Ossie, or Malloy,
 skip this step: `grane init --provider ../that_project` (or add `providers:` to
-`grane.yml`) imports them instead of copying YAML. See
+`grane.yml`) imports them instead of copying YAML. MetricFlow import currently
+covers simple cases only; see the support matrix in
+[metricflow-support.md](metricflow-support.md). See also
 [providers.md](providers.md).
 
 ## 5. Validate

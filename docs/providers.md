@@ -120,7 +120,13 @@ Skipped with a reason: cumulative (including unbounded, rolling `window`, and
 numerator and denominator sit at different grains, ratios with their own
 filter or filtered inputs, filters using `or`, `in`, `>`/`<`, `null`,
 `TimeDimension`, `Entity`, SQL wrappers or another model's dimension,
-SQL-expression dimensions, and snapshot dimensions at sub-day granularity.
+SQL-expression dimensions (including `cast(ordered_at as DATE)` time
+dimensions — the metric skip names the unsupported expression, not "not a
+declared time dimension"), `sum` over a literal (`expr: 1`; `sum(1)` is not
+imported), semantic models with `primary_entity` but no column-backed
+primary entity, and snapshot dimensions at sub-day granularity.
+MetricFlow import currently covers only simple cases: the pinned
+`simple_manifest` imports 2 of 112 metrics.
 A ratio or derived metric whose component was not imported is skipped with
 that component's reason (no laundering through arithmetic). See
 `docs/metricflow-support.md`.

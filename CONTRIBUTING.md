@@ -18,7 +18,9 @@ Warehouse SDKs for Snowflake, BigQuery, and Databricks are not
 installed with the repo. Add the driver you are working on. DuckDB, `mysql2`,
 and `@clickhouse/client` are devDependencies so CI can certify those engines.
 
-`npm run test:unit` is the PR gate. GitHub Actions provisions PostgreSQL 16,
+`npm run test:unit` is the PR gate. After it, CI compares `example/`
+(postgres) and `demo/` (duckdb) certify reports to the pre-V2 baseline
+(`npm run test:v2-compat`). GitHub Actions provisions PostgreSQL 16,
 MySQL 8 (timezone tables loaded via `mysql_tzinfo_to_sql`), and ClickHouse 24
 and runs the shared certification corpus on every pull request via `GRANE_PG_*`,
 `GRANE_MYSQL_*`, and `GRANE_CLICKHOUSE_URL`. CI sets
@@ -55,6 +57,10 @@ MCP, CLI, database connectors, the query audit log, and production Docker.
 Out of scope: dashboards, chart builders, a built-in chatbot, hosted
 analytics, unrestricted agent-written SQL, SSO, or anything that makes Grane
 invent business definitions or present exploration as governed truth.
+
+Authoring (V2) is in scope as a proposal-as-PR workflow. Do not add MCP
+tools that approve, pin, merge, or write production YAML. Guide:
+[docs/v2-authoring.md](docs/v2-authoring.md).
 
 See [README.md](README.md), [docs/first-week.md](docs/first-week.md),
 [docs/production.md](docs/production.md),

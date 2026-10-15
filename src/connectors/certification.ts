@@ -112,10 +112,18 @@ export function uncertifiedWarehouseWarning(type: WarehouseType): string | null 
   return `${type} is ${entry.certification}, not certified. ${entry.explanation}`;
 }
 
+/** User-facing category for each map state (docs / release language). */
+export const CERTIFICATION_CATEGORY: Record<CertificationState, string> = {
+  certified: "runtime-certified",
+  self_certifiable: "compile-supported",
+  compile_only: "not yet certified",
+};
+
 const STATE_MEANING: Record<CertificationState, string> = {
-  certified: "Shared corpus runs in Grane CI.",
-  self_certifiable: "Connector ships; Grane CI does not run the corpus. Verify against your warehouse.",
-  compile_only: "SQL is compiled for this dialect; live execution is not a Grane-certified path.",
+  certified: "runtime-certified — shared corpus runs in Grane CI.",
+  self_certifiable:
+    "compile-supported — connector ships and compiles; not yet runtime-certified. Self-certify with `grane certify`. Cloud warehouses stay here until a credentialed certify-cloud run passes.",
+  compile_only: "not yet certified — SQL is compiled for this dialect; live execution is not a Grane-certified path.",
 };
 
 /** Markdown tables for docs/warehouses.md. Single source of truth with the map. */
