@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **Approved-version pin in git (T1).** The shared pin is tracked
+  `grane.pin.json` (not gitignored). `grane proposals approve` validates YAML
+  first (refuses before writing anything if invalid), writes the last-good
+  local pin, commits the tracked file on a `grane/pin/*` branch, and prints
+  `gh pr create` — it never pushes to or merges the base branch. **Legacy
+  `.grane/active.json` users:** approve now pins the proposal's merged
+  commit on the configured base (the merge commit, or the squash/rebase
+  commit whose metric YAML matches), **not** the moving base tip. The pinned
+  commit must be reachable from the configured base branch. If the
+  proposal is not merged (or squash/rebase YAML does not match), approve
+  refuses with a clear message — it never pins silently. Known limit:
+  identical YAML pushed straight to the base counts as merged (YAML match);
+  close that with branch protection and T2. When a tracked
+  pin exists, **rollback** prepares a `grane/pin/*` branch and `gh pr
+  create` like approve (it never pushes or merges); writing only
+  `.grane/active.json` would be ignored because `grane.pin.json` wins.
+  MCP tools still have no approve/pin action.
+  `serve` and `doctor` warn when the local pin differs from `origin`'s,
+  when this clone has no pin but origin does, or the pinned commit is not
+  on the base, and keep the last good pin rather than auto-switching.
+  `doctor --json` includes `config_hash` and `pin_warnings` (exit code
+  follows production lint, not those warnings). Serve prints pin warnings
+  (including the legacy migration warning) on stderr. A symlink
+  `grane.pin.json` is refused. Clones with no tracked pin still honour
+  legacy `.grane/active.json` (today's behaviour) with a migration warning.
+  Existing pin safety checks stay: base-branch only, no symlinks, no
+  replace/grafts, audit log. Config hash ignores absolute paths so two
+  clones compare equal. Two-person run:
+  [docs/two-person-test.md](docs/two-person-test.md).
 - **Certification least-privilege grants (P0-2).**
   [docs/certify-grants.md](docs/certify-grants.md) is the copy-paste GRANT
   SQL / IAM for Snowflake, BigQuery, Databricks Unity Catalog, and

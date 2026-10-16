@@ -166,7 +166,13 @@ describe("git proposal library", () => {
     const after = readMergedApproval(dir, proposal.id);
     expect(after.merged).toBe(true);
     expect(after.metric_trust).toBe("governed");
-    expect(after.merge_commit).toBe(git(dir, ["rev-parse", "HEAD"]));
+    const mergeCommit = git(dir, ["rev-parse", "HEAD"]);
+    expect(after.merge_commit).toBe(mergeCommit);
+    git(dir, ["commit", "--allow-empty", "-m", "later work on main"]);
+    const later = readMergedApproval(dir, proposal.id);
+    expect(later.merged).toBe(true);
+    expect(later.merge_commit).toBe(mergeCommit);
+    expect(later.merge_commit).not.toBe(git(dir, ["rev-parse", "HEAD"]));
   });
 
   it("refuses to pin an unmerged proposal commit", () => {

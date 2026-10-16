@@ -3,7 +3,8 @@ import { join, resolve } from "node:path";
 import { Command } from "commander";
 import { stringify as stringifyYaml } from "yaml";
 import { loadConfig } from "../config/load.js";
-import { loadServingConfig } from "../authoring/git.js";
+import { loadServingConfig, pinHealthWarnings } from "../authoring/git.js";
+import { stableConfigHash } from "../config/hash.js";
 import { formatValidateReport } from "../validate/format.js";
 import { GraneKernel, GRANE_VERSION } from "../kernel.js";
 import { inferRelationships } from "../connectors/types.js";
@@ -55,9 +56,12 @@ function loadKernel(): GraneKernel {
   });
 }
 
-/** `grane serve` honours `.grane/active.json` when present; otherwise today's working tree. */
+/** `grane serve` honours tracked `grane.pin.json`, else legacy `.grane/active.json`. */
 function loadServingKernel(): GraneKernel {
   const loaded = loadServingConfig(projectDir());
+  for (const warning of loaded.pin_warnings) {
+    console.warn(warning);
+  }
   return new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
     providerWarnings: loaded.warnings,
@@ -351,11 +355,16 @@ program
       fail(err);
     }
     const lint = lintProduction(loaded.config, loaded.projectDir);
+    const pin_warnings = pinHealthWarnings(projectDir());
     if (options.json) {
-      console.log(JSON.stringify(lint, null, 2));
+      console.log(JSON.stringify({ ...lint, pin_warnings, config_hash: stableConfigHash(loaded.config, loaded.projectDir) }, null, 2));
     } else {
       console.log("Grane production doctor\n");
       console.log(formatProductionLint(lint));
+      if (pin_warnings.length > 0) {
+        console.log(pin_warnings.join("\n"));
+        console.log("");
+      }
     }
     if (!lint.ok) process.exit(1);
   });

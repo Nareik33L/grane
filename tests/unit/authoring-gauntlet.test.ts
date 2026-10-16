@@ -22,7 +22,7 @@ import {
   runAuthoringReviewMergedProposal,
   runAuthoringUnmergedPin,
 } from "../gauntlet/authoring-review.js";
-import { runTamperedActivePinGauntlet } from "../gauntlet/active-pin-tamper.js";
+import { runTamperedActivePinGauntlet, runTamperedTrackedPinGauntlet } from "../gauntlet/active-pin-tamper.js";
 import {
   runActivePinSymlinkRefused,
   runAuditPathMustBeRegularFile,
@@ -122,6 +122,11 @@ describe("V2-14 authoring gauntlet", () => {
 
   it("pin tamper table fails closed", async () => {
     const verdict = await runTamperedActivePinGauntlet();
+    expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
+  });
+
+  it("hand-edited tracked pin not on the base branch fails closed", async () => {
+    const verdict = await runTamperedTrackedPinGauntlet();
     expect(verdict.code, verdict.detail).toBe("PASS — POLICY");
   });
 

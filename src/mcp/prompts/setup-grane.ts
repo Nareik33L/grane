@@ -17,7 +17,7 @@ const TOOL_ORDER =
 
 const SHARED_RULES = `Use only these nine Grane authoring tools, in this order: ${TOOL_ORDER}. Do not call any other Grane tool. Do not write warehouse statements. Do not write project files, YAML, or git commands yourself.
 
-Do not pin .grane/active.json. Do not merge the pull request. Do not approve, pin, or skip review. There is no skip-review path. Never say the metrics are live, approved, or in production. A proposal stays experimental until a human merges the pull request and pins.
+Do not pin .grane/active.json or grane.pin.json. Do not merge the pull request. Do not approve, pin, or skip review. There is no skip-review path. Never say the metrics are live, approved, or in production. A proposal stays experimental until a human merges the pull request and pins.
 
 If a column is still confusing, you may call profile_column. Do not echo or repeat sample values to the user. Summarise only shape, types, and counts (for example: "mostly whole numbers, about twelve distinct values, few blanks"). Never paste samples into the chat, into files, or into the draft.
 
@@ -47,7 +47,7 @@ ${SHARED_RULES}
 
 7. Call preview_yaml to show the draft. This is a preview only.
 
-8. If they want to keep it, call submit_proposal. That is the only way to save the draft: it opens a GitHub pull request on a proposal branch. Do not pin .grane/active.json. Do not merge the pull request. Do not change production config.
+8. If they want to keep it, call submit_proposal. That is the only way to save the draft: it opens a GitHub pull request on a proposal branch. Do not pin .grane/active.json or grane.pin.json. Do not merge the pull request. Do not change production config.
 
 After submit_proposal, tell them: a teammate with merge rights should review the pull request. Until it merges, the new metrics stay experimental and must not be treated as approved truth. After it merges, they become governed.
 `;
@@ -72,7 +72,7 @@ ${SHARED_RULES}
 
 7. preview_yaml. Preview only.
 
-8. submit_proposal opens a GitHub pull request on a proposal branch. Do not pin .grane/active.json. Do not merge the pull request. Do not change production config.
+8. submit_proposal opens a GitHub pull request on a proposal branch. Do not pin .grane/active.json or grane.pin.json. Do not merge the pull request. Do not change production config.
 
 After submit_proposal: a teammate with merge rights reviews the pull request. Until it merges, the new metrics stay experimental. After it merges, they become governed.
 `;

@@ -5,6 +5,8 @@ dist/
 .env.*
 !.env.example
 .DS_Store
+# Local runtime (audit log, legacy .grane/active.json). The shared pin is
+# grane.pin.json at the repo root — do not ignore it.
 .grane/
 *.duckdb
 *.duckdb.wal

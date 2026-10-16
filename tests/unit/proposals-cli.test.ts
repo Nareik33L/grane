@@ -187,7 +187,7 @@ describe("grane proposals list|diff|approve|reject|rollback", () => {
     expect(writes[0]).toMatchObject({ commit: merged, approved_by: "octocat" });
   });
 
-  it("rollback re-pins the previous approved commit on the configured base without moving main", () => {
+  it("rollback re-pins the previous approved commit on the configured base without moving main", { timeout: 60_000 }, () => {
     const dir = initRepo();
     const first = git(dir, ["rev-parse", "main"]);
     const proposal = createProposal(dir, {

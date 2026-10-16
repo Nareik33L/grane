@@ -112,7 +112,8 @@ Authoring is off until you turn it on:
    confirm suggested meanings; tools only propose a PR. A human merges, then pins.
 
 Guide: [docs/v2-authoring.md](docs/v2-authoring.md). Existing `example/` and
-`demo/` YAML do not change. Only `grane serve` honours `.grane/active.json`.
+`demo/` YAML do not change. Only `grane serve` honours the pin
+(`grane.pin.json` when present, else legacy `.grane/active.json`).
 
 Use a **read-only database user** — that role is the real control. Grane refuses write-headed SQL on every warehouse and honours `limits.timeout_ms`. Postgres and Redshift wrap each query in a `READ ONLY` transaction with `statement_timeout`. DuckDB file connections open with `access_mode: READ_ONLY`. MySQL sets `SESSION TRANSACTION READ ONLY`. ClickHouse sends `readonly=1`. Snowflake, BigQuery, and Databricks rely on the warehouse role plus the write-keyword guard.
 

@@ -8,6 +8,8 @@ import { preflightAuditWrite, recordPinAudit, recordProposalAudit } from "../aud
 import { findProjectDir, isAdopterTestYaml, loadConfig, type LoadedConfig } from "../config/load.js";
 import { graneConfigSchema, type GraneConfig } from "../config/schema.js";
 import { configError } from "../errors.js";
+import { SemanticModel } from "../model/model.js";
+import { validateModel } from "../validate/validate.js";
 import { isDemoAuthoringProject, DEMO_AUTHORING_MARKER } from "./demo-marker.js";
 import {
   combineSemanticYamlWithReport,
@@ -27,12 +29,26 @@ const FULL_SHA = /^[0-9a-fA-F]{40}$/;
  *
  * This module never writes to the active branch. Proposal commits are created
  * with plumbing (`commit-tree` + `update-ref` on `grane/proposal/*` only).
- * `approveProposal` pins a merge commit after a GitHub PR merge (or a TTY).
- * Rollback re-pins `.grane/active.json`. Reject deletes a proposal ref only.
+ * `approveProposal` validates YAML, pins the proposal's merged commit on
+ * the configured base (merge commit, or the squash/rebase commit whose
+ * metric YAML matches — never the moving base tip), commits the tracked
+ * pin on `grane/pin/*`, and prints a PR plan. If no matching base commit
+ * exists it refuses with a clear error; it never pins silently. It never
+ * pushes to or merges the base branch. Rollback re-pins the last good
+ * local pin. Reject deletes a proposal ref only.
  */
 
 export const PROPOSAL_BRANCH_PREFIX = "grane/proposal/";
+export const PIN_BRANCH_PREFIX = "grane/pin/";
+/** Legacy local-only pin (gitignored). Honoured when no tracked pin is present. */
 export const ACTIVE_PIN_PATH = ".grane/active.json";
+/** Shared pin committed on `grane/pin/*` and merged via PR. Not gitignored. */
+export const TRACKED_PIN_PATH = "grane.pin.json";
+
+export const LEGACY_PIN_MIGRATION =
+  `WARNING: ${ACTIVE_PIN_PATH} is local-only; other clones will not see this pin. ` +
+  `After merging a proposal, run \`grane proposals approve\` to commit ${TRACKED_PIN_PATH} ` +
+  `on a ${PIN_BRANCH_PREFIX}* branch and open a PR (never merged or pushed to the base by Grane).`;
 
 export const activePinSchema = z.object({
   ref: z.string().min(1),
@@ -43,6 +59,13 @@ export const activePinSchema = z.object({
   previous_commit: z.string().nullable().optional(),
 });
 export type ActivePin = z.infer<typeof activePinSchema>;
+export type PinSource = "tracked" | "legacy";
+
+export interface ApproveResult extends ActivePin {
+  pin_branch: string;
+  pin_file: typeof TRACKED_PIN_PATH;
+  github: GitHubPrPlan;
+}
 
 export interface Proposal {
   id: string;
@@ -208,6 +231,15 @@ function porcelainPath(line: string): string {
 function isRuntimeStatePath(path: string): boolean {
   const normalised = path.replaceAll("\\", "/");
   return normalised === ".grane" || normalised.startsWith(".grane/");
+}
+
+function isDeniedProposalPath(path: string): boolean {
+  const normalised = path.replaceAll("\\", "/");
+  return (
+    normalised === TRACKED_PIN_PATH ||
+    normalised === ACTIVE_PIN_PATH ||
+    isRuntimeStatePath(normalised)
+  );
 }
 
 function isProjectYamlName(filename: string): boolean {
@@ -467,6 +499,15 @@ function requireProposalBranch(branch: string): string {
   return branch;
 }
 
+function requirePinBranch(branch: string): string {
+  if (!branch.startsWith(PIN_BRANCH_PREFIX) || branch === PIN_BRANCH_PREFIX) {
+    throw configError(
+      `Refusing to write to "${branch}". Grane only commits ${TRACKED_PIN_PATH} on ${PIN_BRANCH_PREFIX}* — never on the active branch.`,
+    );
+  }
+  return branch;
+}
+
 function slugify(raw: string): string {
   const slug = raw
     .toLowerCase()
@@ -514,7 +555,7 @@ function gitPath(root: string, projectDir: string, rel: string): string {
   }
   const abs = resolve(projectDir, rel);
   const fromRoot = relative(root, abs).replaceAll(sep, "/");
-  if (fromRoot.startsWith("..") || isAbsolute(fromRoot) || isRuntimeStatePath(fromRoot)) {
+  if (fromRoot.startsWith("..") || isAbsolute(fromRoot) || isDeniedProposalPath(fromRoot)) {
     throw configError(`Refusing to commit path "${rel}" onto a proposal branch.`);
   }
   return fromRoot;
@@ -534,12 +575,12 @@ export function assertRegularGraneDir(projectDir: string): void {
   }
 }
 
-function assertRegularPinFile(path: string): void {
+function assertRegularPinFile(path: string, label: string): void {
   try {
     const st = lstatSync(path);
     if (st.isSymbolicLink() || !st.isFile()) {
       throw configError(
-        `Refusing ${ACTIVE_PIN_PATH}: must be a regular file, not a symlink or special file.`,
+        `Refusing ${label}: must be a regular file, not a symlink or special file.`,
       );
     }
   } catch (err) {
@@ -548,17 +589,13 @@ function assertRegularPinFile(path: string): void {
   }
 }
 
-export function readActivePin(projectDir: string): ActivePin | null {
-  assertRegularGraneDir(projectDir);
-  const path = join(projectDir, ACTIVE_PIN_PATH);
-  assertRegularPinFile(path);
-  if (!existsSync(path)) return null;
+function parsePinJson(rawText: string, label: string): ActivePin {
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
+    raw = JSON.parse(rawText);
   } catch (err) {
     throw configError(
-      `Invalid ${ACTIVE_PIN_PATH}: ${(err as Error).message}. ` +
+      `Invalid ${label}: ${(err as Error).message}. ` +
         `Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
     );
   }
@@ -566,11 +603,46 @@ export function readActivePin(projectDir: string): ActivePin | null {
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`).join("; ");
     throw configError(
-      `Invalid ${ACTIVE_PIN_PATH}: ${issues}. ` +
+      `Invalid ${label}: ${issues}. ` +
         `Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
     );
   }
   return parsed.data;
+}
+
+function readPinFile(projectDir: string, rel: string): ActivePin | null {
+  if (rel.startsWith(".grane/") || rel === ACTIVE_PIN_PATH) {
+    assertRegularGraneDir(projectDir);
+  }
+  const path = join(projectDir, rel);
+  assertRegularPinFile(path, rel);
+  if (!existsSync(path)) return null;
+  return parsePinJson(readFileSync(path, "utf8"), rel);
+}
+
+export function readTrackedPin(projectDir: string): ActivePin | null {
+  return readPinFile(projectDir, TRACKED_PIN_PATH);
+}
+
+export function readLegacyPin(projectDir: string): ActivePin | null {
+  return readPinFile(projectDir, ACTIVE_PIN_PATH);
+}
+
+/**
+ * Prefer the tracked pin (`grane.pin.json`) when present so clones share the
+ * approved version. If there is no tracked pin, honour the legacy local
+ * `.grane/active.json` (today's behaviour).
+ */
+export function readActivePin(projectDir: string): ActivePin | null {
+  return readTrackedPin(projectDir) ?? readLegacyPin(projectDir);
+}
+
+export function readActivePinWithSource(projectDir: string): { pin: ActivePin; source: PinSource } | { pin: null; source: null } {
+  const tracked = readTrackedPin(projectDir);
+  if (tracked) return { pin: tracked, source: "tracked" };
+  const legacy = readLegacyPin(projectDir);
+  if (legacy) return { pin: legacy, source: "legacy" };
+  return { pin: null, source: null };
 }
 
 /** YAML `loadConfig` would merge from `commit` at `projectDir` (non-recursive). */
@@ -589,24 +661,33 @@ export function yamlContentsAtCommit(projectDir: string, commit: string): Record
   return contents;
 }
 
-function assertServablePin(projectDir: string, pin: ActivePin): { commit: string; ref: string } {
+function pinLabel(source: PinSource | string | null | undefined): string {
+  if (source === "tracked" || source === TRACKED_PIN_PATH) return TRACKED_PIN_PATH;
+  return ACTIVE_PIN_PATH;
+}
+
+function assertServablePin(
+  projectDir: string,
+  pin: ActivePin,
+  label: string = ACTIVE_PIN_PATH,
+): { commit: string; ref: string } {
   const approvedBy = pin.approved_by.trim();
   if (!approvedBy) {
     throw configError(
-      `Invalid ${ACTIVE_PIN_PATH}: approved_by is empty. Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
+      `Invalid ${label}: approved_by is empty. Expected {ref, commit, approved_by, approved_at}. Serve refuses to start.`,
     );
   }
   if (!FULL_SHA.test(pin.commit)) {
     throw configError(
       `Pinned commit "${pin.commit}" is not a full 40-character hex SHA. ` +
-        `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+        `Serve refuses to start. The pin looks tampered. Fix ${label}.`,
     );
   }
   const base = configuredBaseBranch(projectDir);
   if (pin.ref !== base && pin.ref !== `refs/heads/${base}`) {
     throw configError(
       `Pinned ref "${pin.ref}" is not the configured base branch "${base}" under refs/heads/. ` +
-        `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+        `Serve refuses to start. The pin looks tampered. Fix ${label}.`,
     );
   }
   const root = gitRoot(projectDir);
@@ -614,41 +695,170 @@ function assertServablePin(projectDir: string, pin: ActivePin): { commit: string
   const refProbe = runGit(root, ["rev-parse", "--verify", `${heads}^{commit}`], { allowFail: true });
   if (refProbe.status !== 0) {
     throw configError(
-      `Pinned ref "${pin.ref}" is not a branch in this repository. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+      `Pinned ref "${pin.ref}" is not a branch in this repository. Serve refuses to start. Fix ${label}.`,
     );
   }
   const commitProbe = runGit(root, ["rev-parse", "--verify", `${pin.commit}^{commit}`], { allowFail: true });
   if (commitProbe.status !== 0) {
     throw configError(
       `Pinned commit "${pin.commit}" is not in this repository. ` +
-        `Serve refuses to start. Restore the commit or fix ${ACTIVE_PIN_PATH}.`,
+        `Serve refuses to start. Restore the commit or fix ${label}.`,
     );
   }
   const commit = commitProbe.stdout.trim();
   if (commit.toLowerCase() !== pin.commit.toLowerCase()) {
     throw configError(
       `Pinned commit "${pin.commit}" is not a full 40-character hex SHA. ` +
-        `Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+        `Serve refuses to start. The pin looks tampered. Fix ${label}.`,
     );
   }
   if (!isAncestor(root, commit, heads)) {
     throw configError(
-      `Pinned commit ${commit} is not on "${base}". Serve refuses to start. The pin looks tampered. Fix ${ACTIVE_PIN_PATH}.`,
+      `Pinned commit ${commit} is not on "${base}". Serve refuses to start. The pin looks tampered. Fix ${label}.`,
     );
   }
   return { commit, ref: base };
 }
 
+function originTrackedPin(projectDir: string): ActivePin | null {
+  try {
+    const root = gitRoot(projectDir);
+    const base = configuredBaseBranch(projectDir);
+    const origin = originBaseTip(root, base);
+    if (!origin) return null;
+    const raw = fileAtCommit(root, origin, TRACKED_PIN_PATH);
+    if (!raw) return null;
+    return parsePinJson(raw, `origin/${base}:${TRACKED_PIN_PATH}`);
+  } catch {
+    return null;
+  }
+}
+
+function pinCommitOnBase(projectDir: string, commit: string, base: string): boolean {
+  try {
+    const root = gitRoot(projectDir);
+    const resolved = resolveCommit(root, commit);
+    const heads = `refs/heads/${base}`;
+    const origin = originBaseTip(root, base);
+    if (runGit(root, ["rev-parse", "--verify", `${heads}^{commit}`], { allowFail: true }).status === 0) {
+      if (isAncestor(root, resolved, heads)) return true;
+    }
+    if (origin && isAncestor(root, resolved, origin)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Warnings only. Never auto-switches the served pin to origin's copy.
+ * Serve still refuses a tampered local pin (not on the base branch).
+ */
+export function pinHealthWarnings(projectDir: string): string[] {
+  const warnings: string[] = [];
+  let local: { pin: ActivePin; source: PinSource } | { pin: null; source: null };
+  try {
+    local = readActivePinWithSource(projectDir);
+  } catch (err) {
+    warnings.push(`WARNING: ${err instanceof Error ? err.message : String(err)}`);
+    return warnings;
+  }
+  if (!local.pin) {
+    try {
+      const originPin = originTrackedPin(projectDir);
+      if (originPin) {
+        const base = configuredBaseBranch(projectDir);
+        warnings.push(
+          `WARNING: origin/${base} has ${TRACKED_PIN_PATH} at ${originPin.commit.slice(0, 7)}; this clone has no local pin. ` +
+            `Keeping the last good local pin (working tree); not auto-switching. git pull to take the shared pin.`,
+        );
+      }
+    } catch {
+      // no git / no origin
+    }
+    return warnings;
+  }
+  if (local.source === "legacy") warnings.push(LEGACY_PIN_MIGRATION);
+
+  try {
+    const base = configuredBaseBranch(projectDir);
+    if (!pinCommitOnBase(projectDir, local.pin.commit, base)) {
+      warnings.push(
+        `WARNING: pinned commit ${local.pin.commit} is not on "${base}". Keeping the last good local pin; not auto-switching.`,
+      );
+    }
+
+    const originPin = originTrackedPin(projectDir);
+    if (originPin) {
+      const originOnBase = pinCommitOnBase(projectDir, originPin.commit, base);
+      if (!originOnBase) {
+        warnings.push(
+          `WARNING: origin/${base} ${TRACKED_PIN_PATH} commit ${originPin.commit} is not on "${base}". ` +
+            `Keeping the last good local pin; not auto-switching.`,
+        );
+      }
+      if (
+        originPin.commit.toLowerCase() !== local.pin.commit.toLowerCase() ||
+        originPin.approved_by !== local.pin.approved_by
+      ) {
+        warnings.push(
+          `WARNING: local pin ${local.pin.commit.slice(0, 7)} (${local.pin.approved_by}) differs from origin/${base} ` +
+            `${originPin.commit.slice(0, 7)} (${originPin.approved_by}, ${TRACKED_PIN_PATH}). ` +
+            `Keeping the last good local pin; not auto-switching.`,
+        );
+      }
+    }
+  } catch (err) {
+    warnings.push(`WARNING: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return warnings;
+}
+
+/** Load + structural-validate YAML at `commit`. Refuse before any pin write. */
+export function assertPinnableYaml(projectDir: string, commit: string): void {
+  const dir = findProjectDir(projectDir);
+  let yamlContents: Record<string, string>;
+  try {
+    yamlContents = yamlContentsAtCommit(dir, commit);
+  } catch (err) {
+    throw configError(
+      `Refusing to pin invalid YAML at ${commit}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!yamlContents["grane.yml"] && !yamlContents["grane.yaml"]) {
+    throw configError(`Refusing to pin invalid YAML at ${commit}: no grane.yml.`);
+  }
+  let loaded: LoadedConfig;
+  try {
+    loaded = loadConfig(dir, { yamlContents });
+  } catch (err) {
+    throw configError(
+      `Refusing to pin invalid YAML at ${commit}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const report = validateModel(new SemanticModel(loaded.config));
+  const errors = [...report.issues, ...report.metrics.flatMap((metric) => metric.issues)].filter(
+    (issue) => issue.severity === "error",
+  );
+  if (!report.ok || errors.length > 0) {
+    const detail = errors.map((issue) => `${issue.code}: ${issue.message}`).join("; ") || "validation failed";
+    throw configError(`Refusing to pin invalid YAML at ${commit}: ${detail}`);
+  }
+}
+
 /**
  * Config `grane serve` loads. No pin: identical to `loadConfig` (working tree).
- * With a pin: YAML from that commit's tree. Malformed, missing-commit, or
- * tampered pins fail closed.
+ * Tracked pin wins; otherwise the legacy local pin (with a migration warning).
+ * Origin's pin is compared for warnings only — never auto-switched.
+ * Malformed, missing-commit, or tampered local pins fail closed.
  */
-export function loadServingConfig(projectDir: string): LoadedConfig & { pin: ActivePin | null } {
+export function loadServingConfig(
+  projectDir: string,
+): LoadedConfig & { pin: ActivePin | null; pin_source: PinSource | null; pin_warnings: string[] } {
   const dir = findProjectDir(projectDir);
-  let pin: ActivePin | null;
+  let local: { pin: ActivePin; source: PinSource } | { pin: null; source: null };
   try {
-    pin = readActivePin(dir);
+    local = readActivePinWithSource(dir);
   } catch (err) {
     recordPinEvent(dir, {
       operation: "refuse",
@@ -656,31 +866,33 @@ export function loadServingConfig(projectDir: string): LoadedConfig & { pin: Act
     });
     throw err;
   }
-  if (!pin) {
-    return { ...loadConfig(dir), pin: null };
+  if (!local.pin) {
+    return { ...loadConfig(dir), pin: null, pin_source: null, pin_warnings: pinHealthWarnings(dir) };
   }
+  const label = pinLabel(local.source);
   try {
-    const resolved = assertServablePin(dir, pin);
+    const resolved = assertServablePin(dir, local.pin, label);
     const yamlContents = yamlContentsAtCommit(dir, resolved.commit);
     if (!yamlContents["grane.yml"] && !yamlContents["grane.yaml"]) {
       throw configError(
-        `Pinned commit ${resolved.commit} has no grane.yml. Serve refuses to start. Fix ${ACTIVE_PIN_PATH}.`,
+        `Pinned commit ${resolved.commit} has no grane.yml. Serve refuses to start. Fix ${label}.`,
       );
     }
     const loaded = loadConfig(dir, { yamlContents });
-    const next = { ...pin, ref: resolved.ref, commit: resolved.commit };
+    const next = { ...local.pin, ref: resolved.ref, commit: resolved.commit };
+    const pin_warnings = pinHealthWarnings(dir);
     recordPinEvent(
       dir,
       { operation: "load", ref: next.ref, commit: next.commit, approved_by: next.approved_by },
       loaded.config,
     );
-    return { ...loaded, pin: next };
+    return { ...loaded, pin: next, pin_source: local.source, pin_warnings };
   } catch (err) {
     recordPinEvent(dir, {
       operation: "refuse",
-      ref: pin.ref,
-      commit: pin.commit,
-      approved_by: pin.approved_by,
+      ref: local.pin.ref,
+      commit: local.pin.commit,
+      approved_by: local.pin.approved_by,
       reason: err instanceof Error ? err.message : String(err),
     });
     throw err;
@@ -769,7 +981,7 @@ export function writeActivePin(projectDir: string, pin: ActivePin): ActivePin {
   preflightAuditWrite(audit.config, audit.dir);
   assertRegularGraneDir(projectDir);
   const path = join(projectDir, ACTIVE_PIN_PATH);
-  assertRegularPinFile(path);
+  assertRegularPinFile(path, ACTIVE_PIN_PATH);
   const previous = existsSync(path) ? readFileSync(path) : null;
   mkdirSync(dirname(path), { recursive: true });
   atomicWriteFile(path, `${JSON.stringify(next, null, 2)}\n`);
@@ -847,6 +1059,43 @@ function commitOnProposalBranch(
   message: string,
 ): string {
   requireProposalBranch(branch);
+  return commitOnSideBranch(root, branch, parent, files, message);
+}
+
+function commitOnPinBranch(
+  root: string,
+  branch: string,
+  parent: string,
+  files: Record<string, string>,
+  message: string,
+): string {
+  requirePinBranch(branch);
+  const exists = runGit(root, ["rev-parse", "--verify", `refs/heads/${branch}`], { allowFail: true });
+  if (exists.status === 0) {
+    throw configError(
+      `Pin branch "${branch}" already exists. Competing approvals must open separate PRs; Grane will not overwrite it.`,
+    );
+  }
+  return commitOnSideBranch(root, branch, parent, files, message);
+}
+
+function commitOnSideBranch(
+  root: string,
+  branch: string,
+  parent: string,
+  files: Record<string, string>,
+  message: string,
+): string {
+  if (
+    !(
+      (branch.startsWith(PROPOSAL_BRANCH_PREFIX) && branch !== PROPOSAL_BRANCH_PREFIX) ||
+      (branch.startsWith(PIN_BRANCH_PREFIX) && branch !== PIN_BRANCH_PREFIX)
+    )
+  ) {
+    throw configError(
+      `Refusing to write to "${branch}". Grane only creates commits on ${PROPOSAL_BRANCH_PREFIX}* or ${PIN_BRANCH_PREFIX}* — never on the active branch.`,
+    );
+  }
   const { name, email } = identity(root);
   const indexFile = join(root, ".git", `grane-proposal-index-${process.pid}-${Date.now()}`);
   const env = { GIT_INDEX_FILE: indexFile, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email };
@@ -1111,6 +1360,12 @@ function githubRepoFromOrigin(root: string): string | null {
   return `${match.groups.owner}/${match.groups.repo}`;
 }
 
+function formatGhPrCreate(plan: { base: string; head: string; title: string; body: string }): string {
+  return ["gh", "pr", "create", "--base", plan.base, "--head", plan.head, "--title", plan.title, "--body", plan.body]
+    .map((part) => (/^[A-Za-z0-9_./:-]+$/.test(part) ? part : JSON.stringify(part)))
+    .join(" ");
+}
+
 export function githubPrPlan(projectDir: string, idOrBranch: string): GitHubPrPlan {
   const root = gitRoot(projectDir);
   const proposal = readProposal(root, resolveProposalBranch(root, idOrBranch));
@@ -1126,33 +1381,121 @@ export function githubPrPlan(projectDir: string, idOrBranch: string): GitHubPrPl
     `Grane-Base: ${active.branch}`,
     `Grane-Base-Commit: ${active.commit}`,
   ].join("\n");
-  const command = [
-    "gh",
-    "pr",
-    "create",
-    "--base",
-    active.branch,
-    "--head",
-    proposal.branch,
-    "--title",
-    title,
-    "--body",
-    body,
-  ]
-    .map((part) => (/^[A-Za-z0-9_./:-]+$/.test(part) ? part : JSON.stringify(part)))
-    .join(" ");
   return {
     title,
     body,
     head: proposal.branch,
     base: active.branch,
     repo: githubRepoFromOrigin(root),
-    command,
+    command: formatGhPrCreate({ base: active.branch, head: proposal.branch, title, body }),
+  };
+}
+
+export function githubPinPrPlan(projectDir: string, pinBranch: string, pin: ActivePin): GitHubPrPlan {
+  requirePinBranch(pinBranch);
+  const root = gitRoot(projectDir);
+  const base = configuredBaseBranch(projectDir);
+  const title = `Pin approved version ${pin.commit.slice(0, 7)}`;
+  const body = [
+    `Commit \`${TRACKED_PIN_PATH}\` so every clone serves the same approved version.`,
+    "",
+    `- ref: \`${pin.ref}\``,
+    `- commit: \`${pin.commit}\``,
+    `- approved_by: ${pin.approved_by}`,
+    pin.proposal ? `- proposal: \`${pin.proposal}\`` : "",
+    "",
+    "Grane does not merge or push this PR. A human with merge rights merges it onto the base branch.",
+    "MCP tools cannot approve or pin.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  return {
+    title,
+    body,
+    head: pinBranch,
+    base,
+    repo: githubRepoFromOrigin(root),
+    command: formatGhPrCreate({ base, head: pinBranch, title, body }),
   };
 }
 
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
   return runGit(root, ["merge-base", "--is-ancestor", ancestor, descendant], { allowFail: true }).status === 0;
+}
+
+/** First-parent SHAs of `tip`, newest first. */
+function firstParentHistory(root: string, tip: string): string[] {
+  const raw = git(root, ["log", "--first-parent", "--format=%H", tip], { allowFail: true }).trim();
+  return raw ? raw.split("\n").filter((line) => FULL_SHA.test(line)) : [];
+}
+
+/** Serving YAML at `commit` (metrics + the other project YAML `loadConfig` merges). */
+export function projectYamlFingerprint(projectDir: string, commit: string): string {
+  const contents = yamlContentsAtCommit(projectDir, commit);
+  return Object.keys(contents)
+    .sort()
+    .map((name) => `${name}\n${contents[name]}`)
+    .join("\n\u001e\n");
+}
+
+/**
+ * Commit on `tip`'s first-parent history to pin for this proposal.
+ * Merge/FF: the merge commit (or the proposal itself) — not later tips.
+ * Squash/rebase: the oldest first-parent commit whose project YAML matches
+ * the proposal. Returns null if nothing matches (caller must refuse; never
+ * pin the moving tip).
+ */
+export function resolveProposalMergedCommit(
+  projectDir: string,
+  proposalCommit: string,
+  tip: string,
+): string | null {
+  const root = gitRoot(projectDir);
+  const proposal = resolveCommit(root, proposalCommit);
+  const tipSha = resolveCommit(root, tip);
+  const history = firstParentHistory(root, tipSha);
+  if (history.length === 0) return null;
+
+  if (isAncestor(root, proposal, tipSha)) {
+    let found: string | null = null;
+    for (const sha of history) {
+      if (isAncestor(root, proposal, sha)) found = sha;
+      else break;
+    }
+    if (found && isAncestor(root, found, tipSha)) return found;
+    return null;
+  }
+
+  const wanted = projectYamlFingerprint(projectDir, proposal);
+  let found: string | null = null;
+  const mergeBaseProbe = runGit(root, ["merge-base", proposal, tipSha], { allowFail: true });
+  const mergeBase = mergeBaseProbe.status === 0 ? mergeBaseProbe.stdout.trim() || null : null;
+  for (const sha of history) {
+    if (mergeBase && sha === mergeBase) break;
+    if (projectYamlFingerprint(projectDir, sha) === wanted) {
+      found = sha;
+      continue;
+    }
+    if (found) break;
+  }
+  if (found && isAncestor(root, found, tipSha)) return found;
+  return null;
+}
+
+export function pinCommitUnmatchedMessage(approval: {
+  proposal_id: string;
+  proposal_commit: string;
+  base_branch: string;
+}): string {
+  return (
+    `Merge the GitHub PR for "${approval.proposal_id}" before approving. ` +
+    `Proposal commit ${approval.proposal_commit} is not on "${approval.base_branch}" ` +
+    `(squash and rebase merges rewrite the commit). ` +
+    `No commit on "${approval.base_branch}" has metric YAML matching the proposal. ` +
+    `Refusing to pin — will not silently pin the ${approval.base_branch} tip. ` +
+    `Approve pins the proposal's merged commit; it does not merge. ` +
+    `Merge, squash, or rebase the proposal onto ${approval.base_branch} so its YAML is reachable from that branch, then retry.`
+  );
 }
 
 /** When origin/<base> exists, merge detection uses that tip — not a local-only rewrite. */
@@ -1183,6 +1526,8 @@ function findExactProposalTrailer(root: string, baseCommit: string, proposalId: 
  * Read whether a proposal has been merged into the active branch.
  * Does not merge, fast-forward, or otherwise write to the active branch.
  * The proposal id always comes from the branch name, never from the commit trailer.
+ * `merge_commit` is the proposal's merged commit on the base (merge / FF /
+ * squash / rebase YAML match), never the moving tip after later commits.
  */
 export function readMergedApproval(
   projectDir: string,
@@ -1199,17 +1544,18 @@ export function readMergedApproval(
     against === "base"
       ? originBaseTip(root, base_branch) ?? git(root, ["rev-parse", `refs/heads/${base_branch}`]).trim()
       : resolveActiveRef(projectDir).commit;
-  const ancestor = isAncestor(root, proposal_commit, tip);
   // Trailer-only "merges" (forged Grane-Proposal on an empty commit) are not
-  // merged. The proposal commit itself must be reachable from the base tip.
-  const merged = ancestor;
+  // merged. Merge/FF requires the proposal commit on the base; squash/rebase
+  // requires a base commit whose metric YAML matches. Never pin the tip.
+  const merge_commit = resolveProposalMergedCommit(projectDir, proposal_commit, tip);
+  const merged = merge_commit !== null;
   return {
     merged,
     proposal_id,
     proposal_branch: branch,
     proposal_commit,
     base_branch,
-    merge_commit: merged ? tip : null,
+    merge_commit,
     metric_trust: merged ? "governed" : "experimental",
   };
 }
@@ -1259,29 +1605,25 @@ export function diffProposalAction(projectDir: string, idOrBranch: string): Prop
 }
 
 /**
- * Pin the merge commit of a proposal. Requires a human TTY or a merged GitHub PR.
- * Never merges, fast-forwards, or moves the configured base branch.
+ * Pin the proposal's merged commit on the configured base (not the moving
+ * tip). Validates YAML first (refuse before writing anything if invalid).
+ * Writes the last-good local pin, then commits `grane.pin.json` on a
+ * `grane/pin/*` branch and returns a `gh pr create` plan. Never merges,
+ * fast-forwards, pushes, or moves the configured base. Squash/rebase
+ * matches metric YAML on the base; no match → refuse, never pin silently.
  */
 export function approveProposal(
   projectDir: string,
   idOrBranch: string,
-  options: { tty?: boolean; approved_by?: string } = {},
-): ActivePin {
+  options: { tty?: boolean; approved_by?: string; at?: Date } = {},
+): ApproveResult {
   assertNotDemoAuthoring(projectDir, "approve");
   const approval = readMergedApproval(projectDir, idOrBranch, { against: "base" });
-  if (!options.tty && !approval.merged) {
-    const reason =
-      `approve requires a human TTY or a merged GitHub PR. Merge the PR, or run "grane proposals approve" in a terminal.`;
-    recordProposalLine(projectDir, {
-      operation: "approve",
-      proposal_id: approval.proposal_id,
-      branch: approval.proposal_branch,
-      reason,
-    });
-    throw configError(reason);
-  }
   if (!approval.merged || !approval.merge_commit) {
-    const reason = `Merge the GitHub PR for "${approval.proposal_id}" before approving. Approve pins the merge commit; it does not merge.`;
+    const unmatched = pinCommitUnmatchedMessage(approval);
+    const reason = options.tty
+      ? unmatched
+      : `approve requires a human TTY or a merged GitHub PR. ${unmatched}`;
     recordProposalLine(projectDir, {
       operation: "approve",
       proposal_id: approval.proposal_id,
@@ -1292,30 +1634,89 @@ export function approveProposal(
   }
   const root = gitRoot(projectDir);
   const mainBefore = baseHeadsSha(root, projectDir);
+  const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  assertPinnableYaml(projectDir, approval.merge_commit);
+  if (baseHeadsSha(root, projectDir) !== mainBefore) {
+    throw configError("Internal error: YAML validation moved the configured base branch. Refusing.");
+  }
+
   const existing = readActivePin(projectDir);
   const previous =
     existing && existing.commit !== approval.merge_commit
       ? existing.commit
       : (existing?.previous_commit ?? null);
+  const legacyPath = join(projectDir, ACTIVE_PIN_PATH);
+  const previousLegacy = existsSync(legacyPath) ? readFileSync(legacyPath) : null;
   const pin = writeActivePin(projectDir, {
     ref: configuredBaseBranch(projectDir),
     commit: approval.merge_commit,
     approved_by: options.approved_by ?? identity(root).name,
-    approved_at: new Date().toISOString(),
+    approved_at: (options.at ?? new Date()).toISOString(),
     proposal: approval.proposal_id,
     previous_commit: previous,
   });
+  let published: ApproveResult;
+  try {
+    published = commitTrackedPinPlan(projectDir, root, pin, {
+      at: options.at,
+      verb: "approve",
+    });
+  } catch (err) {
+    if (previousLegacy === null) rmSync(legacyPath, { force: true });
+    else atomicWriteFile(legacyPath, previousLegacy);
+    throw err;
+  }
   recordProposalLine(projectDir, {
     operation: "approve",
     proposal_id: approval.proposal_id,
     branch: approval.proposal_branch,
-    commit: pin.commit,
+    commit: published.commit,
   });
   const mainAfter = baseHeadsSha(root, projectDir);
-  if (mainAfter !== mainBefore) {
+  const headAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  if (mainAfter !== mainBefore || headAfter !== headBefore) {
     throw configError("Internal error: approve moved the configured base branch. Refusing.");
   }
-  return pin;
+  return published;
+}
+
+export function isTrackedPinPlan(value: ActivePin | ApproveResult): value is ApproveResult {
+  return "pin_branch" in value && "github" in value;
+}
+
+function commitTrackedPinPlan(
+  projectDir: string,
+  root: string,
+  pin: ActivePin,
+  options: { at?: Date; verb: "approve" | "rollback"; parent?: string },
+): ApproveResult {
+  const stamp = yyyymmdd(options.at ?? new Date());
+  const suffix = options.verb === "rollback" ? "-rollback" : "";
+  const pin_branch = `${PIN_BRANCH_PREFIX}${stamp}-${pin.commit.slice(0, 12)}-${slugify(pin.approved_by)}${suffix}`;
+  commitOnPinBranch(
+    root,
+    pin_branch,
+    options.parent ?? pin.commit,
+    { [TRACKED_PIN_PATH]: `${JSON.stringify(pin, null, 2)}\n` },
+    [
+      `chore(pin): ${options.verb} ${pin.commit.slice(0, 7)}`,
+      "",
+      `Grane-Pin: ${TRACKED_PIN_PATH}`,
+      `Grane-Pin-Commit: ${pin.commit}`,
+      `Grane-Base: ${pin.ref}`,
+      pin.proposal ? `Grane-Proposal: ${pin.proposal}` : "",
+      "",
+      "This branch only adds the tracked pin. It must not be merged by Grane.",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  return {
+    ...pin,
+    pin_branch,
+    pin_file: TRACKED_PIN_PATH,
+    github: githubPinPrPlan(projectDir, pin_branch, pin),
+  };
 }
 
 /** Delete a proposal branch. Never writes the pin or the configured base. */
@@ -1367,11 +1768,16 @@ function restoreProposalRef(root: string, branch: string, sha: string): void {
   runGit(root, ["update-ref", `refs/heads/${branch}`, sha], { allowFail: true });
 }
 
-/** Re-pin a previously approved commit. Never resets or commits on the active branch. */
+/**
+ * Re-pin a previously approved commit. Never resets, pushes, or commits on
+ * the active branch. When a tracked `grane.pin.json` exists, last-good local
+ * is not enough (tracked wins on serve) — prepare a `grane/pin/*` branch
+ * like approve, or refuse. Never pin silently.
+ */
 export function rollbackPin(
   projectDir: string,
-  options: { to?: string; approved_by?: string } = {},
-): ActivePin {
+  options: { to?: string; approved_by?: string; at?: Date } = {},
+): ActivePin | ApproveResult {
   assertNotDemoAuthoring(projectDir, "rollback");
   gitRoot(projectDir);
   const pin = readActivePin(projectDir);
@@ -1406,14 +1812,31 @@ export function rollbackPin(
   }
   const mainBefore = baseHeadsSha(root, projectDir);
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const tracked = readTrackedPin(projectDir);
+  const legacyPath = join(projectDir, ACTIVE_PIN_PATH);
+  const previousLegacy = existsSync(legacyPath) ? readFileSync(legacyPath) : null;
   const next = writeActivePin(projectDir, {
     ref,
     commit: resolved,
     approved_by: options.approved_by ?? identity(root).name,
-    approved_at: new Date().toISOString(),
+    approved_at: (options.at ?? new Date()).toISOString(),
     proposal: pin.proposal,
     previous_commit: pin.commit,
   });
+  let published: ActivePin | ApproveResult = next;
+  if (tracked) {
+    try {
+      published = commitTrackedPinPlan(projectDir, root, next, {
+        at: options.at,
+        verb: "rollback",
+        parent: mainBefore,
+      });
+    } catch (err) {
+      if (previousLegacy === null) rmSync(legacyPath, { force: true });
+      else atomicWriteFile(legacyPath, previousLegacy);
+      throw err;
+    }
+  }
   recordProposalLine(projectDir, {
     operation: "rollback",
     commit: next.commit,
@@ -1424,5 +1847,5 @@ export function rollbackPin(
   if (headAfter !== headBefore || mainAfter !== mainBefore) {
     throw configError("Internal error: rollback moved the configured base branch. Refusing.");
   }
-  return next;
+  return published;
 }

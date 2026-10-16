@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ACTIVE_PIN_PATH,
+  TRACKED_PIN_PATH,
   createProposal,
   loadServingConfig,
   writeActivePin,
@@ -24,8 +25,8 @@ function git(cwd: string, args: string[]): string {
   return (result.stdout ?? "").trim();
 }
 
-function writePinFile(dir: string, pin: ActivePin): void {
-  writeFileSync(join(dir, ACTIVE_PIN_PATH), `${JSON.stringify(pin, null, 2)}\n`);
+function writePinFile(dir: string, pin: ActivePin, rel = ACTIVE_PIN_PATH): void {
+  writeFileSync(join(dir, rel), `${JSON.stringify(pin, null, 2)}\n`);
 }
 
 function mustRefuse(dir: string, label: string): Verdict | null {
@@ -41,7 +42,7 @@ function mustRefuse(dir: string, label: string): Verdict | null {
     }
     const message = err instanceof Error ? err.message : String(err);
     if (
-      !/refuse|tampered|Invalid \.grane\/active\.json|not in this repository|not on "|full 40|hex SHA|refs\/heads|configured base/i.test(
+      !/refuse|tampered|Invalid \.grane\/active\.json|Invalid grane\.pin\.json|not in this repository|not on "|full 40|hex SHA|refs\/heads|configured base/i.test(
         message,
       )
     ) {
@@ -126,6 +127,71 @@ export async function runTamperedActivePinGauntlet(): Promise<Verdict> {
     return {
       code: "SECURITY CRITICAL",
       detail: `unexpected error in security scenario: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Hand-edited tracked `grane.pin.json` whose commit is not on the base branch must fail closed. */
+export async function runTamperedTrackedPinGauntlet(): Promise<Verdict> {
+  const dir = mkdtempSync(join(tmpdir(), "grane-gauntlet-tracked-pin-"));
+  try {
+    mkdirSync(join(dir, ".grane"), { recursive: true });
+    git(dir, ["init", "-b", "main"]);
+    git(dir, ["config", "user.email", "gauntlet@grane.dev"]);
+    git(dir, ["config", "user.name", "Grane Gauntlet"]);
+    writeFileSync(join(dir, ".gitignore"), ".grane/\n");
+    writeFileSync(
+      join(dir, "grane.yml"),
+      "project: { name: shop, timezone: UTC }\nconnection: { type: postgres, schema: public }\nentities:\n  order: { table: orders, primary_key: id }\n",
+    );
+    writeFileSync(join(dir, "metrics.yml"), "metrics: {}\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const main = git(dir, ["rev-parse", "HEAD"]);
+
+    const proposal = createProposal(dir, {
+      slug: "tracked-tamper",
+      files: {
+        "metrics.yml": `metrics:
+  leaked:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+    status: experimental
+`,
+      },
+    });
+
+    const valid: ActivePin = {
+      ref: "main",
+      commit: main,
+      approved_by: "Reagent Smith",
+      approved_at: "2026-10-14T12:00:00.000Z",
+    };
+    writeActivePin(dir, valid);
+
+    writePinFile(
+      dir,
+      { ...valid, commit: proposal.commit },
+      TRACKED_PIN_PATH,
+    );
+    const failed = mustRefuse(dir, "tracked pin commit not on main");
+    if (failed) return failed;
+
+    writePinFile(dir, { ...valid, ref: "other" }, TRACKED_PIN_PATH);
+    const failedRef = mustRefuse(dir, "tracked pin ref not base");
+    if (failedRef) return failedRef;
+
+    return {
+      code: "PASS — POLICY",
+      detail: "Hand-edited grane.pin.json not on the base branch failed closed; serve did not load it",
+    };
+  } catch (err) {
+    return {
+      code: "SECURITY CRITICAL",
+      detail: `unexpected error in tracked-pin scenario: ${err instanceof Error ? err.message : String(err)}`,
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
