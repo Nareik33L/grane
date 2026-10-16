@@ -82,7 +82,7 @@ If Grane cannot safely resolve the meaning, it **refuses**. That is a feature.
 
 Connect Claude, ChatGPT, Gemini, Cursor, or any MCP agent. Grane does not need their API keys.
 
-Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)** · Authoring (V2): **[docs/v2-authoring.md](docs/v2-authoring.md)** · Two-person pin: **[docs/two-person-test.md](docs/two-person-test.md)**
+Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)** · Authoring (V2): **[docs/v2-authoring.md](docs/v2-authoring.md)** · Team repo: **[docs/team-setup.md](docs/team-setup.md)** · Two-person pin: **[docs/two-person-test.md](docs/two-person-test.md)**
 
 ## Install (your warehouse)
 

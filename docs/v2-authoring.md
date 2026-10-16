@@ -167,8 +167,9 @@ grane proposals rollback [--to <sha>] [--approved-by NAME]
   `approved_by` defaults to `git user.name`. Legacy `.grane/active.json`
   users: approve used to pin the base tip; it now pins the proposal's merged
   commit. Known limit: identical YAML committed straight to the base (no PR)
-  matches as if squash-merged. Close that with branch protection (no direct
-  pushes to `main`) and T2.
+  matches as if squash-merged. Close that with GitHub branch protection
+  (no direct pushes to `main`) and the T2 check in `grane doctor` /
+  `grane setup` — [team-setup.md](team-setup.md).
 - **reject** — deletes the proposal ref after the audit line (restores the SHA
   if that write fails). TTY prompts `y/N` unless `--yes`. Does not write the pin.
 - **rollback** — re-pins `previous_commit`, or `--to` of a previously approved
@@ -202,10 +203,13 @@ see it after the pin PR is merged. It is not gitignored.
   this clone has no pin but origin does, the pin is not on the base, and
   the legacy `.grane/active.json` migration warning. Serve never
   auto-switches to origin's pin.
-- **`grane doctor --json`** adds `config_hash` (same hash as catalog) and
-  `pin_warnings` (same strings serve prints on stderr). Those fields are
-  informational; the process exit code follows production lint (`ok`),
-  not pin warnings (fail-open). A missing local pin while
+- **`grane doctor --json`** adds `config_hash` (same hash as catalog),
+  `pin_warnings` (same strings serve prints on stderr), and
+  `branch_protection` (read-only GET of GitHub rulesets + classic
+  protection on `origin`). Those fields are informational; the process
+  exit code follows production lint (`ok`), not pin warnings or T2
+  (fail-open). `--offline` skips the live GitHub GET and reports
+  **couldn't verify**. A missing local pin while
   `origin/<base>:grane.pin.json` exists is a warning, not a refuse.
 - **`grane validate`, `grane query`, `grane certify`, `loadConfig`** read the
   working tree.
@@ -217,6 +221,7 @@ see it after the pin PR is merged. It is not gitignored.
 - MCP and authoring tools cannot write the pin. Malformed or hand-edited pins
   fail closed. Pin load / refuse / write are audited.
 
+Team repo + branch protection: [team-setup.md](team-setup.md).
 Two-person evidence run: [two-person-test.md](two-person-test.md).
 
 ## `project.base_branch`

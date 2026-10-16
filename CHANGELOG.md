@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Team setup + branch-protection check (T2).** `grane doctor` and
+  `grane setup` GET classic branch protection and repository rulesets for
+  the customer's `origin` (GitHub only). Token from `GITHUB_TOKEN`,
+  `GH_TOKEN`, or `gh auth token`. Warns once per missing setting (PR
+  required with >=1 approval, CODEOWNERS review for metric YAML and
+  `grane.pin.json`, dismiss stale approvals, require approval of the most
+  recent push, required status checks, branch up to date, no
+  force-push/deletion, no bypass). No token, 403, 404, network error,
+  `--offline`, or a non-GitHub remote is **couldn't verify** (never
+  "protected") and never fails doctor. Grane never changes protection
+  settings. Guide: [docs/team-setup.md](docs/team-setup.md).
 - **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
   same claim: “Snowflake is production-ready, not certified by us yet”
   fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase

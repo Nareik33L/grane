@@ -22,3 +22,5 @@ The agent should catalog governed metrics, find Germany, then investigate
 permitted raw payments.failure_code (trust: mixed). It must not write SQL.
 
 Project  <PROJECT>
+
+WARNING: branch protection: couldn't verify (no GitHub remote)

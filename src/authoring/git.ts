@@ -1352,12 +1352,17 @@ export function listProposals(projectDir: string): Proposal[] {
     .map((branch) => readProposal(root, branch));
 }
 
-function githubRepoFromOrigin(root: string): string | null {
-  const url = git(root, ["remote", "get-url", "origin"], { allowFail: true }).trim();
-  if (!url) return null;
-  const match = url.match(/github\.com[:/](?<owner>[^/]+)\/(?<repo>[^/]+?)(?:\.git)?$/i);
+/** `owner/repo` from a GitHub remote URL, or null for GitLab / SSH hosts that are not github.com. */
+export function parseGithubOrigin(url: string): string | null {
+  const match = url.trim().match(/github\.com[:/](?<owner>[^/]+)\/(?<repo>[^/]+?)(?:\.git)?\/?$/i);
   if (!match?.groups) return null;
   return `${match.groups.owner}/${match.groups.repo}`;
+}
+
+export function githubRepoFromOrigin(root: string): string | null {
+  const url = git(root, ["remote", "get-url", "origin"], { allowFail: true }).trim();
+  if (!url) return null;
+  return parseGithubOrigin(url);
 }
 
 function formatGhPrCreate(plan: { base: string; head: string; title: string; body: string }): string {

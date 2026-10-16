@@ -1,0 +1,19 @@
+Grane production doctor
+
+OK    auth.agents    1 agent(s)
+OK    exploration    no agent has exploration: true
+OK    tls            connection.ssl is on and certificates are verified
+OK    audit.path     writable <PROJECT>/.grane/audit.jsonl
+OK    limits         within production ceilings
+OK    metrics        no status: experimental metrics
+
+Production lint passed.
+
+WARNING: acme/shop@main: enable PR required with >=1 approval
+WARNING: acme/shop@main: enable CODEOWNERS review for metric YAML and grane.pin.json
+WARNING: acme/shop@main: enable dismiss stale approvals
+WARNING: acme/shop@main: enable require approval of most recent push
+WARNING: acme/shop@main: enable required status checks
+WARNING: acme/shop@main: enable branch up to date
+WARNING: acme/shop@main: enable no force-push/deletion
+WARNING: acme/shop@main: enable no bypass
