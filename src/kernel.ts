@@ -1,4 +1,5 @@
 import type { GraneConfig } from "./config/schema.js";
+import { stableConfigHash } from "./config/hash.js";
 import { SemanticModel } from "./model/model.js";
 import { createConnector } from "./connectors/create.js";
 import type { WarehouseConnector } from "./connectors/types.js";
@@ -36,8 +37,10 @@ export interface ServerInfo {
   exploration: { enabled: boolean };
   semantic_providers: string[];
   agent: string | null;
-  /** Present only when `.grane/active.json` pinned the served tree. */
+  /** Present only when a tracked or legacy pin pinned the served tree. */
   active?: { ref: string; commit: string };
+  /** Semantic config hash; independent of absolute filesystem paths. */
+  config_hash: string;
 }
 
 export interface CatalogMetric {
@@ -218,6 +221,7 @@ export class GraneKernel {
       exploration: { enabled: this.config.exploration.enabled },
       semantic_providers: [...new Set(semantic_providers)],
       agent: this.agent?.id ?? null,
+      config_hash: stableConfigHash(this.config, this.projectDir),
       ...(this.activePin
         ? { active: { ref: this.activePin.ref, commit: this.activePin.commit } }
         : {}),

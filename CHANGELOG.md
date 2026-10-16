@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Approved-version pin in git (T1).** The shared pin is tracked
+  `grane.pin.json` (not gitignored). `grane proposals approve` validates YAML
+  first (refuses before writing anything if invalid), writes the last-good
+  local pin, commits the tracked file on a `grane/pin/*` branch, and prints
+  `gh pr create` — it never pushes to or merges the base branch. MCP tools
+  still have no approve/pin action. `serve` and `doctor` warn when the local
+  pin differs from `origin`'s or the pinned commit is not on the base, and
+  keep the last good pin rather than auto-switching. Clones with no tracked
+  pin still honour legacy `.grane/active.json` (today's behaviour) with a
+  migration warning. Existing pin safety checks stay: base-branch only, no
+  symlinks, no replace/grafts, audit log. Config hash ignores absolute
+  paths so two clones compare equal. Two-person run:
+  [docs/two-person-test.md](docs/two-person-test.md).
 - **Certification least-privilege grants (P0-2).**
   [docs/certify-grants.md](docs/certify-grants.md) is the copy-paste GRANT
   SQL / IAM for Snowflake, BigQuery, Databricks Unity Catalog, and

@@ -6,7 +6,7 @@
 
 import { toGrant } from "../../../src/auth/agents.js";
 import { runAuthoringActivateGauntlet } from "../authoring-activate.js";
-import { runTamperedActivePinGauntlet } from "../active-pin-tamper.js";
+import { runTamperedActivePinGauntlet, runTamperedTrackedPinGauntlet } from "../active-pin-tamper.js";
 import { runAuthoringMcpSweep } from "../authoring-sweep.js";
 import {
   runAuthoringActiveWrites,
@@ -889,6 +889,19 @@ function tamperedPinTraps(): Scenario[] {
       expectedSqlBehaviour: "n/a — no warehouse SQL.",
       expectation: { kind: "refuse", reason: "tampered pin", statuses: ["config_error"] },
       custom: async () => runTamperedActivePinGauntlet(),
+    }),
+    sc({
+      id: "mcp/tampered-tracked-pin-not-on-base",
+      category: "mcp",
+      mode: "custom",
+      guessSeverity: "security",
+      disposition: "REFUSE_POLICY",
+      question: "Someone hand-edits grane.pin.json to a commit that is not on the base branch.",
+      interpretation:
+        "A tracked pin whose commit is not on main (or whose ref is not the configured base) must fail closed. Serve must not load it or auto-switch to origin.",
+      expectedSqlBehaviour: "n/a — no warehouse SQL.",
+      expectation: { kind: "refuse", reason: "tampered tracked pin", statuses: ["config_error"] },
+      custom: async () => runTamperedTrackedPinGauntlet(),
     }),
   ];
 }

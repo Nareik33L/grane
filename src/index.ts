@@ -2,9 +2,12 @@
 
 export { GraneKernel, GRANE_VERSION, type ActiveConfigPin } from "./kernel.js";
 export { loadConfig, findProjectDir } from "./config/load.js";
+export { stableConfigHash } from "./config/hash.js";
 export {
   loadServingConfig,
   readActivePin,
+  readActivePinWithSource,
+  readTrackedPin,
   configuredBaseBranch,
   resolveActiveRef,
   approveProposal,
@@ -15,8 +18,13 @@ export {
   diffProposal,
   diffProposalAction,
   deleteProposalBranch,
+  pinHealthWarnings,
   ACTIVE_PIN_PATH,
+  TRACKED_PIN_PATH,
+  PIN_BRANCH_PREFIX,
+  LEGACY_PIN_MIGRATION,
   type ActivePin,
+  type ApproveResult,
 } from "./authoring/git.js";
 export { DEMO_AUTHORING_MARKER, isDemoAuthoringProject } from "./authoring/demo-marker.js";
 export {

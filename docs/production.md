@@ -93,7 +93,8 @@ these tokens — the agent is a local child process.
 
 ## Active config pin
 
-When `.grane/active.json` is present, `grane serve` loads YAML from that
+When `grane.pin.json` is present (or, if it is missing, legacy
+`.grane/active.json`), `grane serve` loads YAML from that
 git commit (`ref`, `commit`, `approved_by`, `approved_at`) instead of the
 working tree. Only `serve` honours the pin — `validate`, `query`, and
 `certify` read the working tree. Operator guide:

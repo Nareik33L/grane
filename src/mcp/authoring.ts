@@ -313,7 +313,7 @@ export function registerAuthoringTools(
       title: "Submit a git proposal",
       description:
         "Commit draft YAML onto a grane/proposal/* branch and return a GitHub PR plan. " +
-        "Never writes production config, never pins .grane/active.json, never moves HEAD.",
+        "Never writes production config, never pins .grane/active.json or grane.pin.json, never moves HEAD.",
       inputSchema: {
         session_id: z.string(),
         slug: z.string().optional().describe("Optional proposal slug"),

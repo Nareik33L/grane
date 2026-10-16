@@ -52,8 +52,9 @@ describe("V2 existing-YAML compat cert", () => {
     expect(docs).toMatch(/Local vs shared/);
     expect(docs).toMatch(/Discovery is read-only/);
     expect(docs).toMatch(/`grane proposals` CLI/);
-    expect(docs).toMatch(/`\.grane\/active\.json` pin/);
-    expect(docs).toMatch(/only `serve` honours it/);
+    expect(docs).toMatch(/`grane\.pin\.json` pin/);
+    expect(docs).toMatch(/`serve` honours it/);
+    expect(docs).toMatch(/`\.grane\/active\.json`/);
     expect(docs).toMatch(/`project\.base_branch`/);
     expect(docs).toMatch(/Temporal `group_by` warning/);
     expect(docs).toMatch(/Demo Postgres: ready-made vs build-your-own/);

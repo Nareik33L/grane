@@ -21,8 +21,9 @@ authoring_start → discover_schema → (profile_column) → record_term
        → git branch grane/proposal/<id>
        → gh pr create --base <configured base> --head grane/proposal/<id>
        → human merges the PR
-       → grane proposals approve <id>     # pins the merge commit
-       → grane serve                      # honours .grane/active.json
+       → grane proposals approve <id>     # validates YAML, pin branch + PR
+       → human merges the pin PR          # grane.pin.json on the base
+       → grane serve                      # honours grane.pin.json
 ```
 
 `submit_proposal` writes a local `grane/proposal/*` branch with plumbing
@@ -156,8 +157,10 @@ grane proposals rollback [--to <sha>] [--approved-by NAME]
 - **list / diff** — local `grane/proposal/*` branches. Diff is against the
   active pin or the configured base. JSON includes semantic added/changed/removed
   metrics and entities, keys restored by the YAML merge, and lost comments.
-- **approve** — pins the merge commit of a **merged** GitHub PR, or requires a
-  human TTY. Does not merge. `approved_by` defaults to `git user.name`.
+- **approve** — validates YAML at the merge commit first (refuses before
+  writing anything if invalid), pins that commit of a **merged** GitHub PR,
+  commits `grane.pin.json` on `grane/pin/*`, and prints `gh pr create`.
+  Does not merge or push the base. `approved_by` defaults to `git user.name`.
 - **reject** — deletes the proposal ref after the audit line (restores the SHA
   if that write fails). TTY prompts `y/N` unless `--yes`. Does not write the pin.
 - **rollback** — re-pins `previous_commit`, or `--to` of a previously approved
@@ -167,26 +170,37 @@ None of these move `main` or the proposal parent. Nested demo authoring repos
 (`.grane-demo` from `setup --dir`) refuse approve / reject / rollback / pin
 write.
 
-## `.grane/active.json` pin (only `serve` honours it)
+## `grane.pin.json` pin (tracked; `serve` honours it)
+
+The approved version is a **tracked** file at the repo root so other clones
+see it after the pin PR is merged. It is not gitignored.
 
 ```json
 {
   "ref": "main",
   "commit": "0123456789abcdef0123456789abcdef01234567",
   "approved_by": "Ada",
-  "approved_at": "2026-10-14T12:00:00.000Z"
+  "approved_at": "2026-10-16T12:00:00.000Z"
 }
 ```
 
 - **`grane serve`** loads YAML from that commit. Uncommitted edits do not
-  change what agents query. `catalog` includes `active.commit`.
+  change what agents query. `catalog` includes `active.commit` and a
+  `config_hash` that does not depend on absolute filesystem paths.
+- **`grane doctor`** (and serve) **warn** when the local pin differs from
+  `origin/<base>:grane.pin.json`, or when a pin's commit is not on the base.
+  They keep the last good local pin; they do not auto-switch to origin.
 - **`grane validate`, `grane query`, `grane certify`, `loadConfig`** read the
-  working tree. A missing pin is today's behaviour.
+  working tree.
+- Existing clones with **no tracked pin** still honour local
+  `.grane/active.json` (today's behaviour) and print a migration warning.
 - `ref` must be the configured base under `refs/heads/` (not `HEAD`, a tag,
   another branch, or a proposal ref). `commit` must be a full 40-hex SHA on
-  that base.
+  that base. A hand-edited tracked pin that is not on the base is refused.
 - MCP and authoring tools cannot write the pin. Malformed or hand-edited pins
   fail closed. Pin load / refuse / write are audited.
+
+Two-person evidence run: [two-person-test.md](two-person-test.md).
 
 ## `project.base_branch`
 
@@ -231,9 +245,10 @@ Authoring shells every `git` spawn with inherited `GIT_*` stripped and
 `.git/info/grafts` is refused — `git replace` (or grafts) must not make a
 proposal look like a parent of the base. Shallow clones are allowed.
 
-`.grane/` must be a regular directory (`lstat`, not a symlink) so the pin
-and audit trail cannot live outside the project. `active.json` and the
-audit file must be regular files, not symlinks or devices (`/dev/null`).
+`.grane/` must be a regular directory (`lstat`, not a symlink) so the
+legacy pin and audit trail cannot live outside the project. `grane.pin.json`,
+`active.json`, and the audit file must be regular files, not symlinks or
+devices (`/dev/null`).
 
 ## Temporal `group_by` warning on existing YAML
 

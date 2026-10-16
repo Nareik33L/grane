@@ -94,7 +94,7 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
   proposals
     .command("approve")
     .argument("<id>", "proposal id or grane/proposal/* branch")
-    .description("Pin the merge commit of a merged GitHub PR (TTY or already-merged)")
+    .description("Validate YAML, pin the merge commit, commit grane.pin.json on a pin branch, print a PR (does not merge/push)")
     .option("--json", "print JSON")
     .option("--approved-by <name>", "recorded approved_by on the pin")
     .action((id: string, options: { json?: boolean; approvedBy?: string }) => {
@@ -108,6 +108,9 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
           return;
         }
         console.log(`approved  ${pin.ref} @ ${pin.commit.slice(0, 7)}  (${pin.approved_by})`);
+        console.log(`pin file  ${pin.pin_file} on ${pin.pin_branch}`);
+        console.log("Grane does not merge or push the pin PR onto the base branch.");
+        console.log(pin.github.command);
       } catch (err) {
         ctx.fail(err);
       }
