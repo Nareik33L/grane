@@ -3,8 +3,9 @@
  * Release-checklist dry-run (P0-3).
  *
  * Pins every gate to an exact RC SHA cut from main. Runs a file-list
- * `npm pack --dry-run` check and a read-only `npm view grane-analytics`
- * ownership check. Does not publish, tag, push, or dispatch certify-cloud.
+ * `npm pack --dry-run --ignore-scripts` check and a read-only
+ * `npm view grane-analytics` ownership check. Does not publish, tag,
+ * push, version, dist-tag, or dispatch certify-cloud.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -48,32 +49,55 @@ export type NpmViewResult =
   | { kind: "unpublished"; detail: string }
   | { kind: "published"; name: string; version: string; detail: string };
 
+export type PackageMeta = {
+  name?: string;
+  main?: string;
+  bin?: Record<string, string>;
+};
+
 export type DryRunResult = {
   exitCode: number;
   output: string;
   steps: DryRunStep[];
   packedFiles: string[];
   unexpectedFiles: string[];
+  missingRequired: string[];
   npmView: NpmViewResult | null;
   executed: string[][];
 };
 
 const SHA_RE = /^[0-9a-f]{40}$/i;
 
-const ALWAYS_PACKED = new Set([
+/** prepack/prepare/postpack must not run — always pass --ignore-scripts. */
+export const NPM_PACK_ARGV = ["npm", "pack", "--dry-run", "--ignore-scripts", "--json"] as const;
+export const NPM_VIEW_ARGV = ["npm", "view", PACKAGE_NAME, "--json"] as const;
+
+const EXACT_PACK_FILES = new Set([
   "package.json",
   "README.md",
   "README",
   "LICENSE",
   "LICENSE.md",
   "CHANGELOG.md",
+  "demo/mcp.json",
 ]);
+
+/** Exact names plus these path patterns — not a denylist of secrets. */
+export const PACK_ALLOW_PATTERNS: readonly RegExp[] = [
+  /^dist\/.+\.js$/,
+  /^dist\/.+\.d\.ts$/,
+  /^demo\/.+\.(yml|yaml|md|sql|sh|py|gif|svg)$/,
+  /^example\/.+\.(yml|yaml|md|sql|py|parquet)$/,
+];
 
 const FORBIDDEN_ARGV = [
   ["npm", "publish"],
+  ["npm", "version"],
+  ["npm", "dist-tag"],
   ["git", "tag"],
   ["git", "push"],
   ["gh", "workflow", "run"],
+  ["gh", "release"],
   ["gh", "api"],
 ];
 
@@ -132,10 +156,10 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
     },
     {
       id: "npm-pack",
-      title: "npm pack --dry-run file-list check",
+      title: "npm pack --dry-run --ignore-scripts file-list check",
       owner: "Lead",
       sha: pin,
-      command: `git rev-parse HEAD # expect ${pin} && npm pack --dry-run --json`,
+      command: `git rev-parse HEAD # expect ${pin} && ${NPM_PACK_ARGV.join(" ")}`,
       execute: "run",
     },
     {
@@ -143,7 +167,7 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
       title: "package-name ownership check (read-only)",
       owner: "Lead",
       sha: pin,
-      command: `npm view ${PACKAGE_NAME} --json # read-only at RC ${pin}`,
+      command: `${NPM_VIEW_ARGV.join(" ")} # read-only at RC ${pin}`,
       execute: "run",
     },
     {
@@ -151,35 +175,38 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
       title: "npm publish (on hold — not run)",
       owner: "Lead",
       sha: pin,
-      command: `# not run at ${pin}: npm publish`,
+      command: `# not run at ${pin}: npm publish / npm version / npm dist-tag / gh release`,
       execute: "print-only",
     },
   ];
 }
 
-export function isForbiddenPackPath(rel: string): boolean {
-  const n = rel.replaceAll("\\", "/").replace(/^\.?\//, "");
-  const parts = n.split("/");
-  if (parts.some((p) => p === "tests" || p === "test" || p === "fixtures")) return true;
-  if (parts.some((p) => p === ".env" || p.startsWith(".env."))) return true;
-  if (/(?:^|\/)\.env(?:$|\.)/.test(n)) return true;
-  if (/\.(pem|p8|p12|pfx|key)$/i.test(n)) return true;
-  if (/(?:^|\/)id_rsa(?:$|\.)/i.test(n)) return true;
-  return false;
+export function normalizePackPath(rel: string): string {
+  return rel.replaceAll("\\", "/").replace(/^\.?\//, "").replace(/^package\//, "");
 }
 
-export function isAllowedPackPath(rel: string, filesField: readonly string[]): boolean {
-  const n = rel.replaceAll("\\", "/").replace(/^\.?\//, "");
-  if (isForbiddenPackPath(n)) return false;
-  if (ALWAYS_PACKED.has(n)) return true;
-  return filesField.some((entry) => {
-    const prefix = entry.replace(/\/$/, "");
-    return n === prefix || n.startsWith(`${prefix}/`);
+export function isAllowedPackPath(rel: string): boolean {
+  const n = normalizePackPath(rel);
+  if (EXACT_PACK_FILES.has(n)) return true;
+  return PACK_ALLOW_PATTERNS.some((re) => re.test(n));
+}
+
+export function unexpectedPackedFiles(paths: readonly string[]): string[] {
+  return paths.filter((p) => !isAllowedPackPath(p));
+}
+
+export function requiredPackedPaths(pkg: PackageMeta): string[] {
+  const bins = [...new Set(Object.values(pkg.bin ?? {}))];
+  const main = pkg.main?.trim() || "dist/index.js";
+  return [...new Set(["README.md", main, ...bins])];
+}
+
+export function missingRequiredPackedFiles(paths: readonly string[], pkg: PackageMeta): string[] {
+  const have = new Set(paths.map(normalizePackPath));
+  return requiredPackedPaths(pkg).filter((req) => {
+    if (req === "README.md") return !have.has("README.md") && !have.has("README");
+    return !have.has(req);
   });
-}
-
-export function unexpectedPackedFiles(paths: readonly string[], filesField: readonly string[]): string[] {
-  return paths.filter((p) => !isAllowedPackPath(p, filesField));
 }
 
 export function packedPathsFromNpmPackJson(stdout: string): string[] {
@@ -254,6 +281,22 @@ export function assertSafeArgv(argv: readonly string[]): void {
   }
 }
 
+export function assertRunnable(step: DryRunStep): void {
+  if (step.execute !== "run") {
+    throw new Error(`refusing to execute print-only step ${step.id}`);
+  }
+}
+
+export function runnableSteps(steps: readonly DryRunStep[]): DryRunStep[] {
+  const run: DryRunStep[] = [];
+  for (const step of steps) {
+    if (step.execute === "print-only") continue;
+    assertRunnable(step);
+    run.push(step);
+  }
+  return run;
+}
+
 export function assertCertifyCloudPinsDispatchRef(workflow: string): void {
   if (!/workflow_dispatch/.test(workflow)) {
     throw new Error("certify-cloud.yml must declare workflow_dispatch so Kieran can pin --ref <RC SHA>.");
@@ -279,12 +322,12 @@ function defaultRun(argv: readonly string[], opts?: { cwd?: string }): { stdout:
   };
 }
 
-function readFilesField(root: string): string[] {
-  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { name?: string; files?: string[] };
+function readPackageMeta(root: string): PackageMeta {
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageMeta;
   if (pkg.name !== PACKAGE_NAME) {
     throw new Error(`package.json name must be ${PACKAGE_NAME}, got ${pkg.name ?? "(missing)"}.`);
   }
-  return pkg.files ?? [];
+  return pkg;
 }
 
 export function runReleaseDryRun(options: DryRunOptions): DryRunResult {
@@ -338,35 +381,53 @@ export function runReleaseDryRun(options: DryRunOptions): DryRunResult {
   }
   log("");
 
-  const filesField = readFilesField(options.root);
-  const pack = exec(["npm", "pack", "--dry-run", "--json"]);
-  if (pack.status !== 0) {
-    throw new Error(`npm pack --dry-run failed: ${(pack.stderr || pack.stdout).trim()}`);
-  }
-  const packedFiles = packedPathsFromNpmPackJson(pack.stdout || pack.stderr);
-  const unexpectedFiles = unexpectedPackedFiles(packedFiles, filesField);
-  if (unexpectedFiles.length > 0) {
-    throw new Error(
-      `npm pack --dry-run file-list check failed (tests, fixtures, .env, keys, or other unexpected files):\n` +
-        unexpectedFiles.map((f) => `  ${f}`).join("\n"),
-    );
-  }
-  log(`npm pack --dry-run: ${packedFiles.length} files, none unexpected.`);
+  let packedFiles: string[] = [];
+  let unexpectedFiles: string[] = [];
+  let missingRequired: string[] = [];
+  const pkg = readPackageMeta(options.root);
 
-  const view = exec(["npm", "view", PACKAGE_NAME, "--json"]);
-  const npmView = parseNpmViewResult(view.stdout, view.stderr, view.status);
-  log(`npm view ${PACKAGE_NAME}: ${npmView.detail}`);
-  log("PASS");
+  for (const step of runnableSteps(steps)) {
+    if (step.id === "npm-pack") {
+      const pack = exec(NPM_PACK_ARGV);
+      if (pack.status !== 0) {
+        throw new Error(`npm pack --dry-run failed: ${(pack.stderr || pack.stdout).trim()}`);
+      }
+      packedFiles = packedPathsFromNpmPackJson(pack.stdout || pack.stderr);
+      unexpectedFiles = unexpectedPackedFiles(packedFiles);
+      missingRequired = missingRequiredPackedFiles(packedFiles, pkg);
+      if (unexpectedFiles.length > 0 || missingRequired.length > 0) {
+        const bits: string[] = [];
+        if (missingRequired.length > 0) bits.push(`missing required files: ${missingRequired.join(", ")}`);
+        if (unexpectedFiles.length > 0) {
+          bits.push(
+            `not on the pack allowlist:\n${unexpectedFiles.map((f) => `  ${f}`).join("\n")}`,
+          );
+        }
+        throw new Error(`npm pack --dry-run file-list check failed (${bits.join("; ")})`);
+      }
+      log(`npm pack --dry-run --ignore-scripts: ${packedFiles.length} files, allowlist + required files OK.`);
+      continue;
+    }
+    if (step.id === "npm-view") {
+      const view = exec(NPM_VIEW_ARGV);
+      const npmView = parseNpmViewResult(view.stdout, view.stderr, view.status);
+      log(`npm view ${PACKAGE_NAME}: ${npmView.detail}`);
+      log("PASS");
+      return {
+        exitCode: 0,
+        output: lines.join("\n"),
+        steps,
+        packedFiles,
+        unexpectedFiles,
+        missingRequired,
+        npmView,
+        executed,
+      };
+    }
+    throw new Error(`no runner for step ${step.id}`);
+  }
 
-  return {
-    exitCode: 0,
-    output: lines.join("\n"),
-    steps,
-    packedFiles,
-    unexpectedFiles,
-    npmView,
-    executed,
-  };
+  throw new Error("release dry-run did not run the npm-view step.");
 }
 
 function invokedAsCli(): boolean {

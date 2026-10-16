@@ -6,10 +6,15 @@
   pins every step to that 40-character SHA
   (`npx tsx src/release/dry-run.ts --sha <RC>`). Gate 5 (Kieran,
   `certify-cloud --ref <SHA>`) and gate 8 (QA, independent cert on the
-  same SHA) are printed, not run. `npm pack --dry-run` fails on tests,
-  fixtures, `.env`, keys, or other unexpected files. `npm view grane-analytics`
-  is read-only (404 while unpublished is OK). The dry-run does not publish,
-  tag, or push, and adds no tokens. npm publish stays on hold.
+  same SHA) are `print-only` and are not executed. `npm pack --dry-run
+  --ignore-scripts` so prepack/prepare/postpack do not run; the file list
+  is an exact/pattern allowlist (README, `dist/index.js`, and the bin
+  target are required; `demo/secrets.json`, `demo/id_ed25519`,
+  `example/notes.txt`, and dist source maps are rejected). `npm view
+  grane-analytics` is read-only (404 while unpublished is OK). The dry-run
+  does not publish, tag, or push (`npm publish` / `npm version` /
+  `npm dist-tag` / `git tag` / `git push` / `gh release` are refused), and
+  adds no tokens. npm publish stays on hold.
 - **Approved-version pin in git (T1).** The shared pin is tracked
   `grane.pin.json` (not gitignored). `grane proposals approve` validates YAML
   first (refuses before writing anything if invalid), writes the last-good

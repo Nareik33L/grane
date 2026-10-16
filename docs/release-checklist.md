@@ -24,12 +24,12 @@ branch tip.
 
 | Step | Owner | Dry-run |
 | --- | --- | --- |
-| Cut RC from `main` | Lead | Verifies `--sha` is 40 hex, `HEAD` is that SHA, and the tree is clean |
-| 5. Credentialed `certify-cloud` | Kieran | Prints `gh workflow run certify-cloud.yml --ref <SHA>` — does **not** dispatch |
-| 8. QA independent RC certification | QA | Prints `git checkout <SHA>` + `grane certify` for each cloud engine — does **not** run them |
-| `npm pack --dry-run` file-list | Lead | **Runs.** Fails on tests, fixtures, `.env`, keys, or other unexpected files |
+| Cut RC from `main` | Lead | Verifies `--sha` is 40 hex (rejects 7-char short SHAs), `HEAD` is that SHA, and the tree is clean |
+| 5. Credentialed `certify-cloud` | Kieran | Prints `gh workflow run certify-cloud.yml --ref <SHA>` — `execute: print-only`, not dispatched |
+| 8. QA independent RC certification | QA | Prints `git checkout <SHA>` + `grane certify` for each cloud engine — `execute: print-only`, not run |
+| `npm pack --dry-run --ignore-scripts` file-list | Lead | **Runs** with `--ignore-scripts` so prepack/prepare/postpack do not run. Exact/pattern **allowlist** (not a denylist): `package.json`, README, LICENSE, CHANGELOG, `demo/mcp.json`, `dist/*.js`, `dist/*.d.ts`, demo `yml|yaml|md|sql|sh|py|gif|svg`, example `yml|yaml|md|sql|py|parquet`. Fails if README, `dist/index.js`, or the bin target (`dist/cli/index.js`) are missing. Rejects `demo/secrets.json`, `demo/id_ed25519`, `example/notes.txt`, and dist `*.js.map` |
 | `npm view grane-analytics` | Lead | **Runs, read-only.** No token. 404 (unpublished) is OK while npm is on hold |
-| `npm publish` / `git tag` / `git push` | Lead | On hold. The dry-run refuses `--publish` / `--tag` / `--push` and never executes them |
+| `npm publish` / `npm version` / `npm dist-tag` / `git tag` / `git push` / `gh release` | Lead | On hold. The dry-run refuses `--publish` / `--tag` / `--push` and never executes `npm publish`, `npm version`, `npm dist-tag`, `git tag`, `git push`, `gh workflow run`, `gh release`, or `gh api` |
 
 ## Warehouse categories (must match the certified matrix)
 
@@ -79,11 +79,13 @@ The dry-run only prints these commands.
 
 ## Also on hold
 
-- `npm publish` of the V2 package
+- `npm publish` / `npm version` / `npm dist-tag` of the V2 package
 - `git tag` / `git push` of the release tag
+- `gh release`
 
 No npm or GitHub tokens are stored in-repo for this checklist. `npm view
-grane-analytics` is unauthenticated.
+grane-analytics` is unauthenticated. The dry-run does not publish, tag, or
+push.
 
 ## After those pass (owner: Lead)
 
