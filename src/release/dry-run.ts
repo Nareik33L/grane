@@ -9,7 +9,7 @@
  * tag, push, version, dist-tag, or dispatch certify-cloud.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -140,6 +140,7 @@ export const PACK_ALLOW_PATTERNS: readonly RegExp[] = [
 /** Names that must never ship, even if someone adds them to the exact list. */
 export const FORBIDDEN_PACK_NAME_RES: readonly RegExp[] = [
   /(^|\/)creds(\.|\/|$)/i,
+  /credentials/i,
   /(^|\/)\.secrets(\.|\/|$)/i,
   /(^|\/)secrets?(\.|\/|$)/i,
   /deploy-key/i,
@@ -416,13 +417,45 @@ function readPackageMeta(root: string): PackageMeta {
   return pkg;
 }
 
-function assertPublishFilesExcludeMaps(files: string[] | undefined): void {
+export function assertPublishFilesExcludeMaps(files: string[] | undefined): void {
   const entries = files ?? [];
   if (!entries.some((f) => f === "!dist/**/*.map" || f === "!dist/**/*.js.map")) {
     throw new Error(
       'package.json files must exclude source maps (`!dist/**/*.map`) so the published tarball cannot ship dist/**/*.js.map.',
     );
   }
+}
+
+/** dist JS and d.ts files that tsc emits from src TypeScript. */
+export function expectedBuiltDistPaths(root: string): Set<string> {
+  const srcRoot = join(root, "src");
+  const out = new Set<string>();
+  if (!existsSync(srcRoot)) return out;
+  const walk = (rel: string) => {
+    const abs = rel ? join(srcRoot, rel) : srcRoot;
+    for (const name of readdirSync(abs)) {
+      const next = rel ? `${rel}/${name}` : name;
+      const st = statSync(join(srcRoot, next));
+      if (st.isDirectory()) {
+        walk(next);
+        continue;
+      }
+      if (!name.endsWith(".ts") || name.endsWith(".d.ts")) continue;
+      const dest = next.slice(0, -3);
+      out.add(`dist/${dest}.js`);
+      out.add(`dist/${dest}.d.ts`);
+    }
+  };
+  walk("");
+  return out;
+}
+
+/** Packed `dist/` paths that the TypeScript build would not emit. */
+export function strayPackedDistFiles(paths: readonly string[], root: string): string[] {
+  const expected = expectedBuiltDistPaths(root);
+  return paths
+    .map(normalizePackPath)
+    .filter((n) => n.startsWith("dist/") && !expected.has(n));
 }
 
 export function runReleaseDryRun(options: DryRunOptions): DryRunResult {
@@ -492,12 +525,18 @@ export function runReleaseDryRun(options: DryRunOptions): DryRunResult {
       packedFiles = packedPathsFromNpmPackJson(pack.stdout || pack.stderr);
       unexpectedFiles = unexpectedPackedFiles(packedFiles);
       missingRequired = missingRequiredPackedFiles(packedFiles, pkg);
-      if (unexpectedFiles.length > 0 || missingRequired.length > 0) {
+      const strayDist = strayPackedDistFiles(packedFiles, options.root);
+      if (unexpectedFiles.length > 0 || missingRequired.length > 0 || strayDist.length > 0) {
         const bits: string[] = [];
         if (missingRequired.length > 0) bits.push(`missing required files: ${missingRequired.join(", ")}`);
         if (unexpectedFiles.length > 0) {
           bits.push(
             `not on the pack allowlist:\n${unexpectedFiles.map((f) => `  ${f}`).join("\n")}`,
+          );
+        }
+        if (strayDist.length > 0) {
+          bits.push(
+            `not produced by the build (stray dist/):\n${strayDist.map((f) => `  ${f}`).join("\n")}`,
           );
         }
         throw new Error(`npm pack --dry-run file-list check failed (${bits.join("; ")})`);

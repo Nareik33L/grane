@@ -13,9 +13,12 @@
   example paths are an **exact** allowlist (not `*.yml` / `*.sql` / `*.sh`
   under those trees); `package.json` `files` includes `!dist/**/*.map`.
   README, `dist/index.js`, and the bin target are required. Forbidden
-  names (`demo/creds.yml`, `example/.secrets.yaml`, `demo/deploy-key.sh`,
+  names (`demo/creds.yml`, `demo/.env.yml`, `example/.secrets.yaml`,
+  `example/aws_credentials.sql`, `demo/deploy-key.sh`,
   `demo/fixtures/a.sql`, `dist/tests/x.js`, `demo/secrets.json`,
   `demo/id_ed25519`, `example/notes.txt`, dist source maps) are rejected.
+  Packed `dist/` paths that `tsc` would not emit (stray gitignored files)
+  are refused.
   `npm view grane-analytics` is read-only (404 while unpublished is OK).
   The dry-run does not publish, tag, or push (`npm publish` / `npm version` /
   `npm dist-tag` / `git tag` / `git push` / `gh release` are refused), and

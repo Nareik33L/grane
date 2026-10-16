@@ -1,18 +1,21 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   EXACT_PACK_FILES,
   NPM_PACK_ARGV,
   PACKAGE_NAME,
+  PACK_ALLOW_PATTERNS,
   RELEASE_OWNERS,
   assertCertifyCloudPinsDispatchRef,
   assertNoPackLifecycleScripts,
+  assertPublishFilesExcludeMaps,
   assertRunnable,
   assertSafeArgv,
+  expectedBuiltDistPaths,
   isAllowedPackPath,
   isForbiddenPackName,
   missingRequiredPackedFiles,
@@ -26,6 +29,7 @@ import {
   releaseDryRunPlan,
   runReleaseDryRun,
   runnableSteps,
+  strayPackedDistFiles,
   unexpectedPackedFiles,
   type RunCommand,
 } from "../../src/release/dry-run.js";
@@ -42,6 +46,38 @@ const PKG = {
 };
 
 const REQUIRED_PACK = ["package.json", "README.md", "LICENSE", "dist/index.js", "dist/cli/index.js"];
+
+const temps: string[] = [];
+
+afterEach(() => {
+  for (const dir of temps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function tempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "grane-dry-run-"));
+  temps.push(dir);
+  return dir;
+}
+
+type PkgJson = {
+  name?: string;
+  scripts?: Record<string, string>;
+  files?: string[];
+  main?: string;
+  bin?: Record<string, string>;
+};
+
+function fixtureRoot(mutate: (pkg: PkgJson) => void): string {
+  const dir = tempDir();
+  mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+  cpSync(join(ROOT, ".github/workflows/certify-cloud.yml"), join(dir, ".github/workflows/certify-cloud.yml"));
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as PkgJson;
+  mutate(pkg);
+  writeFileSync(join(dir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  return dir;
+}
 
 function packJson(paths: string[]): string {
   return JSON.stringify([{ files: paths.map((path) => ({ path })) }]);
@@ -177,11 +213,13 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(packLifecycleScriptHits({ prepare: "node x" })).toEqual(["prepare"]);
     expect(packLifecycleScriptHits({ prepack: "x", postpack: "y" })).toEqual(["prepack", "postpack"]);
     expect(packLifecycleScriptHits({ prepublish: "x" })).toEqual(["prepublish"]);
+    expect(packLifecycleScriptHits({ prepublishFoo: "x" })).toEqual(["prepublishFoo"]);
     expect(packLifecycleScriptHits({ prepublishOnly: "npm run build" })).toEqual([]);
     expect(() => assertNoPackLifecycleScripts({ prepare: "node x" })).toThrow(/prepare/);
     expect(() => assertNoPackLifecycleScripts({ prepack: "x" })).toThrow(/prepack/);
     expect(() => assertNoPackLifecycleScripts({ postpack: "x" })).toThrow(/postpack/);
     expect(() => assertNoPackLifecycleScripts({ prepublish: "x" })).toThrow(/prepublish/);
+    expect(() => assertNoPackLifecycleScripts({ prepublishFoo: "x" })).toThrow(/prepublishFoo/);
     expect(() => assertNoPackLifecycleScripts({ prepublishOnly: "npm run build" })).not.toThrow();
 
     const dir = mkdtempSync(join(tmpdir(), "grane-pack-scripts-"));
@@ -235,11 +273,15 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(isAllowedPackPath("demo/deploy-key.sh")).toBe(false);
     expect(isAllowedPackPath("demo/fixtures/a.sql")).toBe(false);
     expect(isAllowedPackPath("dist/tests/x.js")).toBe(false);
+    expect(isAllowedPackPath("demo/.env.yml")).toBe(false);
+    expect(isAllowedPackPath("example/aws_credentials.sql")).toBe(false);
     expect(isForbiddenPackName("demo/creds.yml")).toBe(true);
     expect(isForbiddenPackName("example/.secrets.yaml")).toBe(true);
     expect(isForbiddenPackName("demo/deploy-key.sh")).toBe(true);
     expect(isForbiddenPackName("demo/fixtures/a.sql")).toBe(true);
     expect(isForbiddenPackName("dist/tests/x.js")).toBe(true);
+    expect(isForbiddenPackName("demo/.env.yml")).toBe(true);
+    expect(isForbiddenPackName("example/aws_credentials.sql")).toBe(true);
     expect(EXACT_PACK_FILES.has("demo/creds.yml")).toBe(false);
     expect(EXACT_PACK_FILES.has("example/.secrets.yaml")).toBe(false);
     expect(EXACT_PACK_FILES.has("demo/deploy-key.sh")).toBe(false);
@@ -254,6 +296,8 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(unexpectedPackedFiles(["demo/deploy-key.sh"])).toEqual(["demo/deploy-key.sh"]);
     expect(unexpectedPackedFiles(["demo/fixtures/a.sql"])).toEqual(["demo/fixtures/a.sql"]);
     expect(unexpectedPackedFiles(["dist/tests/x.js"])).toEqual(["dist/tests/x.js"]);
+    expect(unexpectedPackedFiles(["demo/.env.yml"])).toEqual(["demo/.env.yml"]);
+    expect(unexpectedPackedFiles(["example/aws_credentials.sql"])).toEqual(["example/aws_credentials.sql"]);
     expect(isAllowedPackPath("dist/cli/index.js")).toBe(true);
     expect(isAllowedPackPath("dist/index.js")).toBe(true);
     expect(isAllowedPackPath("README.md")).toBe(true);
@@ -431,6 +475,33 @@ describe("release-checklist dry-run (P0-3)", () => {
         run: mockRun({ pack: [...REQUIRED_PACK, "dist/tests/x.js"] }),
       }),
     ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "demo/.env.yml"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "example/aws_credentials.sql"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "dist/leaked.js"] }),
+      }),
+    ).toThrow(/not produced by the build/);
   });
 
   it("certify-cloud dispatch leaves checkout unpinned so --ref SHA wins", () => {
@@ -488,29 +559,113 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(paths).toContain("package.json");
   });
 
-  it("built package pack list has no source maps and passes the allowlist", () => {
-    const build = spawnSync("npx", ["tsc", "-p", "tsconfig.json"], {
-      cwd: ROOT,
-      encoding: "utf8",
+  it("exact allowlist layer rejects demo/example files that are not listed", () => {
+    expect(isForbiddenPackName("demo/extra.yml")).toBe(false);
+    expect(EXACT_PACK_FILES.has("demo/extra.yml")).toBe(false);
+    expect(isAllowedPackPath("demo/extra.yml")).toBe(false);
+    expect(isForbiddenPackName("example/other.yml")).toBe(false);
+    expect(EXACT_PACK_FILES.has("example/other.yml")).toBe(false);
+    expect(isAllowedPackPath("example/other.yml")).toBe(false);
+    expect(EXACT_PACK_FILES.has("demo/analytics/grane.yml")).toBe(true);
+    expect(isAllowedPackPath("demo/analytics/grane.yml")).toBe(true);
+  });
+
+  it("forbidden-name layer rejects independently of the exact list", () => {
+    expect(isForbiddenPackName("demo/.env.yml")).toBe(true);
+    expect(isForbiddenPackName("example/aws_credentials.sql")).toBe(true);
+    expect(isForbiddenPackName("demo/creds.yml")).toBe(true);
+    expect(isAllowedPackPath("demo/.env.yml")).toBe(false);
+    expect(isAllowedPackPath("example/aws_credentials.sql")).toBe(false);
+    expect(isForbiddenPackName("demo/analytics/grane.yml")).toBe(false);
+  });
+
+  it("dist/tests rule rejects compiled tests even when the path looks like dist js", () => {
+    expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/cli/index.js"))).toBe(true);
+    expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/index.d.ts"))).toBe(true);
+    expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/tests/x.js"))).toBe(false);
+    expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/foo/tests/x.js"))).toBe(true);
+    expect(isForbiddenPackName("dist/tests/x.js")).toBe(true);
+    expect(isForbiddenPackName("dist/foo/tests/x.js")).toBe(true);
+    expect(isAllowedPackPath("dist/tests/x.js")).toBe(false);
+    expect(isAllowedPackPath("dist/cli/index.js")).toBe(true);
+  });
+
+  it("actual dry-run refuses a package.json with pack-time lifecycle scripts", () => {
+    const dir = fixtureRoot((pkg) => {
+      pkg.scripts = { ...(pkg.scripts ?? {}), prepare: "node -e \"process.exit(0)\"" };
     });
-    expect(build.status, build.stderr || build.stdout).toBe(0);
-    const result = spawnSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
-      cwd: ROOT,
-      encoding: "utf8",
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: dir,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({}),
+      }),
+    ).toThrow(/prepare|pack-time scripts/);
+  });
+
+  it("actual dry-run refuses package.json files that do not exclude source maps", () => {
+    const dir = fixtureRoot((pkg) => {
+      pkg.files = (pkg.files ?? []).filter((f) => f !== "!dist/**/*.map" && f !== "!dist/**/*.js.map");
     });
-    expect(result.status, result.stderr).toBe(0);
-    const paths = packedPathsFromNpmPackJson(result.stdout || result.stderr);
-    const maps = paths.filter((p) => p.endsWith(".map"));
-    expect(maps, maps.join("\n")).toEqual([]);
-    expect(paths).toContain("dist/index.js");
-    expect(paths).toContain("dist/cli/index.js");
-    expect(paths).toContain("README.md");
-    expect(paths.some((p) => p === "dist/tests/x.js" || p.startsWith("dist/tests/"))).toBe(false);
-    expect(unexpectedPackedFiles(paths), unexpectedPackedFiles(paths).join("\n")).toEqual([]);
-    expect(missingRequiredPackedFiles(paths, PKG)).toEqual([]);
-    for (const path of paths) {
-      expect(isAllowedPackPath(path), path).toBe(true);
-      expect(isForbiddenPackName(path), path).toBe(false);
+    expect(() => assertPublishFilesExcludeMaps(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).files)).toThrow(
+      /source maps/,
+    );
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: dir,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({}),
+      }),
+    ).toThrow(/source maps|!dist\/\*\*\/\*\.map/);
+  });
+
+  it("built package pack list in a temp copy has no maps and refuses stray dist files", () => {
+    const dest = tempDir();
+    for (const name of ["src", "tsconfig.json", "package.json", "README.md", "LICENSE", "demo", "example", ".npmignore", ".github"]) {
+      const from = join(ROOT, name);
+      if (existsSync(from)) cpSync(from, join(dest, name), { recursive: true });
     }
-  }, 60_000);
+    symlinkSync(join(ROOT, "node_modules"), join(dest, "node_modules"));
+    const build = spawnSync("npx", ["tsc", "-p", "tsconfig.json"], { cwd: dest, encoding: "utf8" });
+    expect(build.status, build.stderr || build.stdout).toBe(0);
+    const expected = expectedBuiltDistPaths(dest);
+    expect(expected.has("dist/index.js")).toBe(true);
+    expect(expected.has("dist/cli/index.js")).toBe(true);
+
+    const clean = spawnSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+      cwd: dest,
+      encoding: "utf8",
+    });
+    expect(clean.status, clean.stderr).toBe(0);
+    const cleanPaths = packedPathsFromNpmPackJson(clean.stdout || clean.stderr);
+    expect(cleanPaths.filter((p) => p.endsWith(".map"))).toEqual([]);
+    expect(strayPackedDistFiles(cleanPaths, dest)).toEqual([]);
+    expect(unexpectedPackedFiles(cleanPaths)).toEqual([]);
+    expect(cleanPaths).toContain("dist/index.js");
+    expect(missingRequiredPackedFiles(cleanPaths, PKG)).toEqual([]);
+
+    mkdirSync(join(dest, "dist"), { recursive: true });
+    writeFileSync(join(dest, "dist", "stray-leaked.js"), "module.exports = 1;\n");
+    const dirty = spawnSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+      cwd: dest,
+      encoding: "utf8",
+    });
+    expect(dirty.status, dirty.stderr).toBe(0);
+    const dirtyPaths = packedPathsFromNpmPackJson(dirty.stdout || dirty.stderr);
+    expect(dirtyPaths).toContain("dist/stray-leaked.js");
+    expect(strayPackedDistFiles(dirtyPaths, dest)).toContain("dist/stray-leaked.js");
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: dest,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: dirtyPaths }),
+      }),
+    ).toThrow(/not produced by the build|stray dist/);
+  }, 90_000);
 });
