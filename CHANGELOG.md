@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **BigQuery certify-cloud credentials (P0-1).** The GitHub secret
+  `GRANE_CERT_BIGQUERY_CREDENTIALS` is a service-account JSON document, but
+  the cert client treats that env var as a `keyFilename` path. Passing the
+  secret value through was the failure this blocks: a BigQuery cert run that
+  silently fails to authenticate. `certify-cloud.yml` now writes the JSON
+  with `printf` (never `echo`) to a `mktemp` file at mode `0600` under
+  `$RUNNER_TEMP` (outside the repo and workspace artifacts), exports that
+  path, and deletes the file on every exit path (`trap EXIT` plus an
+  `always()` step before artifact upload). The key is never logged or
+  uploaded (`certification/<engine>.json` only). Forked-PR workflows do not
+  receive the secret. Skip-without-secrets is unchanged. See
+  [docs/certify.md](docs/certify.md).
 - **MCP guided YAML authoring (V2-18).** The Set up Grane prompt is an
   open-ended conversation (first question: “What metrics are important to
   you?”). The agent suggests plain-English meanings from discovered columns;

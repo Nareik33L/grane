@@ -104,6 +104,33 @@ Jobs skip cleanly when the corresponding `GRANE_CERT_*` secrets are absent.
 when the secret is present. Public OSS CI therefore stays green without
 paying cloud credentials.
 
+### GitHub secret `GRANE_CERT_BIGQUERY_CREDENTIALS` (CI only)
+
+The Node client (`keyFilename` / `credentials`) expects
+`GRANE_CERT_BIGQUERY_CREDENTIALS` to be a **filesystem path**, not the JSON
+body. Passing the GitHub secret value through as that env var is the failure
+this blocks: a BigQuery cert run that **silently fails to authenticate**
+because the JSON document is treated as a `keyFilename`.
+
+In `.github/workflows/certify-cloud.yml`:
+
+- The Actions secret stores the service-account JSON document.
+- The certify step copies it with `printf` (never `echo`) into a `mktemp`
+  file under `$RUNNER_TEMP` (outside the repo and outside workspace
+  artifacts), mode `0600`.
+- That path is exported as `GRANE_CERT_BIGQUERY_CREDENTIALS`.
+- A `trap` on `EXIT` and an `always()` step delete the file on every exit
+  path, including failures. Cleanup runs before the artifact upload.
+- The key is never logged, echoed, or uploaded. The only artifact is
+  `certification/<engine>.json`.
+- Forked-PR workflows never receive the secret (`pull_request` from a fork
+  has empty `secrets.*`; the job also forces `present=false` when
+  `head.repo` is a fork or a different repository, and does not interpolate
+  the secret onto those runs). The workflow does not use `pull_request_target`.
+
+Locally, keep setting `GRANE_CERT_BIGQUERY_CREDENTIALS` to a key file path
+(or omit it and use ADC / `GOOGLE_APPLICATION_CREDENTIALS`).
+
 **Pending release step:** do not dispatch this workflow with real warehouse
 secrets from a public PR. Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
 once before the V2 tag. Listed on [release-checklist.md](release-checklist.md)
