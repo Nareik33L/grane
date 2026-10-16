@@ -577,11 +577,18 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(isAllowedPackPath("demo/.env.yml")).toBe(false);
     expect(isAllowedPackPath("example/aws_credentials.sql")).toBe(false);
     expect(isForbiddenPackName("demo/analytics/grane.yml")).toBe(false);
+    // dist/secrets.js matches PACK_ALLOW_PATTERNS; only the forbidden-name layer refuses it.
+    expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/secrets.js"))).toBe(true);
+    expect(isForbiddenPackName("dist/secrets.js")).toBe(true);
+    expect(isAllowedPackPath("dist/secrets.js")).toBe(false);
+    expect(isForbiddenPackName("dist/index.js.map")).toBe(true);
+    expect(isAllowedPackPath("dist/index.js.map")).toBe(false);
   });
 
-  it("dist/tests rule rejects compiled tests even when the path looks like dist js", () => {
+  it("dist allow-pattern layer rejects maps and compiled tests on its own", () => {
     expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/cli/index.js"))).toBe(true);
     expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/index.d.ts"))).toBe(true);
+    expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/index.js.map"))).toBe(false);
     expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/tests/x.js"))).toBe(false);
     expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/foo/tests/x.js"))).toBe(true);
     expect(isForbiddenPackName("dist/tests/x.js")).toBe(true);
