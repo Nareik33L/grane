@@ -36,6 +36,18 @@ function documentationMarkdown(): Array<{ rel: string; text: string }> {
   return files.map((rel) => ({ rel, text: readFileSync(join(ROOT, rel), "utf8") }));
 }
 
+/** README, docs/, and CONTRIBUTING — the P2 prose-honesty scan set. */
+function honestyMarkdown(): Array<{ rel: string; text: string }> {
+  const files = [
+    "README.md",
+    "CONTRIBUTING.md",
+    ...readdirSync(join(ROOT, "docs"))
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `docs/${name}`),
+  ];
+  return files.map((rel) => ({ rel, text: readFileSync(join(ROOT, rel), "utf8") }));
+}
+
 function engineAliases(entry: WarehouseCertification): string[] {
   const names = [entry.label, entry.type];
   if (entry.type === "postgres") names.push("Postgres", "PostgreSQL");
@@ -50,11 +62,64 @@ function lineMentionsEngine(line: string, entry: WarehouseCertification): boolea
   });
 }
 
-/** Lines that mention certified only to deny it, or to say self_certifiable. */
+/**
+ * Pairing an uncertified engine with any of these is an over-claim unless the
+ * line also denies it.
+ */
+const OVERCLAIM_PHRASE =
+  /production[-\s]ready|fully\s+support(?:s|ed)?|supports\b.{0,80}\bin production\b|battle-tested|\bcertified\b/i;
+
+function normalizeProse(line: string): string {
+  return line.replace(/\*+/g, "");
+}
+
+function lineHasOverclaimPhrase(line: string): boolean {
+  return OVERCLAIM_PHRASE.test(normalizeProse(line));
+}
+
+/** Lines that mention a claim only to deny it, or to say self_certifiable. */
 function lineDeniesCertification(line: string): boolean {
-  return /self_certifiable|self-certify|not\s+CI-certified|not certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n't)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified|not yet tested/i.test(
-    line,
+  return /self_certifiable|self-certify|not\s+CI-certified|not(?:\s+\w+){0,3}\s+certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n['’]?t)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified|not yet tested|isn['’]?t|aren['’]?t|not\s+production[-\s]ready|not\s+fully\s+support|not\s+battle-tested/i.test(
+    normalizeProse(line),
   );
+}
+
+type UncertifiedSubject = { label: string; aliases: string[] };
+
+function uncertifiedSubjects(): UncertifiedSubject[] {
+  const clouds = CLOUD_CERT_ENGINES.map((type) => ({
+    label: WAREHOUSE_CERTIFICATION[type].label,
+    aliases: engineAliases(WAREHOUSE_CERTIFICATION[type]),
+  }));
+  return [...clouds, { label: "MariaDB", aliases: ["MariaDB"] }];
+}
+
+function lineMentionsAliases(line: string, aliases: string[]): boolean {
+  return aliases.some((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\b`, "i").test(line);
+  });
+}
+
+function lineOverclaimsUncertified(line: string, aliases: string[]): boolean {
+  const text = normalizeProse(line);
+  if (!lineMentionsAliases(text, aliases)) return false;
+  if (!lineHasOverclaimPhrase(text)) return false;
+  if (lineDeniesCertification(text)) return false;
+  return true;
+}
+
+function collectProseOverclaims(files: Array<{ rel: string; text: string }>): string[] {
+  const overclaims: string[] = [];
+  for (const { rel, text } of files) {
+    for (const subject of uncertifiedSubjects()) {
+      for (const [i, line] of text.split("\n").entries()) {
+        if (!lineOverclaimsUncertified(line, subject.aliases)) continue;
+        overclaims.push(`${rel}:${i + 1} overclaims ${subject.label}: ${line.trim()}`);
+      }
+    }
+  }
+  return overclaims;
 }
 
 /** README matrix rows: | Warehouse | `type` | Status |. */
@@ -230,11 +295,12 @@ describe("warehouse certification map", () => {
     expect(readme).toMatch(/Excel/);
     expect(readme).toMatch(/Google Sheets/);
     expect(readme).toMatch(/not supported/i);
+    expect(readme).toMatch(/not a spreadsheet/i);
+    expect(readme).not.toMatch(/team guide coming/i);
     if (existsSync(join(ROOT, "docs/team-setup.md"))) {
       expect(readme).toMatch(/docs\/team-setup\.md/);
     } else {
       expect(readme).toMatch(/docs\/two-person-test\.md/);
-      expect(readme).toMatch(/team guide coming/i);
     }
   });
 
@@ -288,6 +354,29 @@ describe("warehouse certification map", () => {
       }
     }
     expect(overclaims, overclaims.join("\n")).toEqual([]);
+  });
+
+  it("docs never call uncertified engines production-ready, fully supported, or certified", () => {
+    expect(collectProseOverclaims(honestyMarkdown()), collectProseOverclaims(honestyMarkdown()).join("\n")).toEqual([]);
+  });
+
+  it("fails on production-ready Snowflake and fully-supports BigQuery in production", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    const bigquery = engineAliases(WAREHOUSE_CERTIFICATION.bigquery);
+    const mariadb = ["MariaDB"];
+    expect(lineOverclaimsUncertified("Grane is production-ready on Snowflake.", snowflake)).toBe(true);
+    expect(lineOverclaimsUncertified("Grane fully supports BigQuery in production.", bigquery)).toBe(true);
+    expect(lineOverclaimsUncertified("Grane is production-ready on MariaDB.", mariadb)).toBe(true);
+    expect(lineOverclaimsUncertified("Databricks is battle-tested.", engineAliases(WAREHOUSE_CERTIFICATION.databricks))).toBe(
+      true,
+    );
+    expect(lineOverclaimsUncertified("Redshift is fully supported.", engineAliases(WAREHOUSE_CERTIFICATION.redshift))).toBe(
+      true,
+    );
+    expect(lineOverclaimsUncertified("Snowflake is not production-ready.", snowflake)).toBe(false);
+    expect(lineOverclaimsUncertified("Grane isn't production-ready on Snowflake.", snowflake)).toBe(false);
+    expect(lineOverclaimsUncertified("BigQuery aren't certified.", bigquery)).toBe(false);
+    expect(lineOverclaimsUncertified("MariaDB isn't fully supported.", mariadb)).toBe(false);
   });
 
   it("every warehouse state table in docs/README matches the certified matrix", () => {
