@@ -5,15 +5,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  EXACT_PACK_FILES,
   NPM_PACK_ARGV,
   PACKAGE_NAME,
   RELEASE_OWNERS,
   assertCertifyCloudPinsDispatchRef,
+  assertNoPackLifecycleScripts,
   assertRunnable,
   assertSafeArgv,
   isAllowedPackPath,
+  isForbiddenPackName,
   missingRequiredPackedFiles,
   packedPathsFromNpmPackJson,
+  packLifecycleScriptHits,
   parseDryRunArgs,
   parseNpmViewResult,
   parseRcSha,
@@ -148,10 +152,16 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(src).toMatch(/--ignore-scripts/);
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       scripts?: Record<string, string>;
+      files?: string[];
     };
     expect(pkg.scripts?.prepack).toBeUndefined();
     expect(pkg.scripts?.prepare).toBeUndefined();
     expect(pkg.scripts?.postpack).toBeUndefined();
+    expect(pkg.scripts?.prepublish).toBeUndefined();
+    expect(pkg.scripts?.prepublishOnly).toBeTruthy();
+    expect(pkg.files).toContain("!dist/**/*.map");
+    expect(packLifecycleScriptHits(pkg.scripts)).toEqual([]);
+    expect(() => assertNoPackLifecycleScripts(pkg.scripts)).not.toThrow();
     const result = runReleaseDryRun({
       sha: SHA,
       root: ROOT,
@@ -163,7 +173,17 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(result.executed[0]?.includes("--ignore-scripts")).toBe(true);
   });
 
-  it("fails if --ignore-scripts is removed: prepack and postpack would run", () => {
+  it("refuses package.json prepare/prepack/postpack/prepublish* because npm 10 still runs prepare", () => {
+    expect(packLifecycleScriptHits({ prepare: "node x" })).toEqual(["prepare"]);
+    expect(packLifecycleScriptHits({ prepack: "x", postpack: "y" })).toEqual(["prepack", "postpack"]);
+    expect(packLifecycleScriptHits({ prepublish: "x" })).toEqual(["prepublish"]);
+    expect(packLifecycleScriptHits({ prepublishOnly: "npm run build" })).toEqual([]);
+    expect(() => assertNoPackLifecycleScripts({ prepare: "node x" })).toThrow(/prepare/);
+    expect(() => assertNoPackLifecycleScripts({ prepack: "x" })).toThrow(/prepack/);
+    expect(() => assertNoPackLifecycleScripts({ postpack: "x" })).toThrow(/postpack/);
+    expect(() => assertNoPackLifecycleScripts({ prepublish: "x" })).toThrow(/prepublish/);
+    expect(() => assertNoPackLifecycleScripts({ prepublishOnly: "npm run build" })).not.toThrow();
+
     const dir = mkdtempSync(join(tmpdir(), "grane-pack-scripts-"));
     try {
       writeFileSync(
@@ -175,6 +195,7 @@ describe("release-checklist dry-run (P0-3)", () => {
             prepack: "node -e \"require('fs').writeFileSync('prepack.ran','1')\"",
             prepare: "node -e \"require('fs').writeFileSync('prepare.ran','1')\"",
             postpack: "node -e \"require('fs').writeFileSync('postpack.ran','1')\"",
+            prepublish: "node -e \"require('fs').writeFileSync('prepublish.ran','1')\"",
           },
         }),
       );
@@ -184,24 +205,55 @@ describe("release-checklist dry-run (P0-3)", () => {
         encoding: "utf8",
       });
       expect(packed.status, packed.stderr).toBe(0);
+      expect(existsSync(join(dir, "prepare.ran")), "npm 10 still runs prepare with --ignore-scripts").toBe(
+        true,
+      );
       expect(existsSync(join(dir, "prepack.ran")), "prepack must not run").toBe(false);
       expect(existsSync(join(dir, "postpack.ran")), "postpack must not run").toBe(false);
-      expect(NPM_PACK_ARGV.includes("--ignore-scripts")).toBe(true);
+      expect(existsSync(join(dir, "prepublish.ran")), "prepublish must not run").toBe(false);
+      expect(() =>
+        assertNoPackLifecycleScripts({
+          prepare: "node x",
+          prepack: "node x",
+          postpack: "node x",
+          prepublish: "node x",
+        }),
+      ).toThrow(/prepare/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("pack allowlist rejects secrets.json, id_ed25519, notes.txt, and dist source maps", () => {
+  it("pack allowlist is exact for demo/example and rejects forbidden names", () => {
     expect(isAllowedPackPath("demo/secrets.json")).toBe(false);
     expect(isAllowedPackPath("demo/id_ed25519")).toBe(false);
     expect(isAllowedPackPath("example/notes.txt")).toBe(false);
     expect(isAllowedPackPath("dist/cli/index.js.map")).toBe(false);
     expect(isAllowedPackPath("dist/index.js.map")).toBe(false);
+    expect(isAllowedPackPath("demo/creds.yml")).toBe(false);
+    expect(isAllowedPackPath("example/.secrets.yaml")).toBe(false);
+    expect(isAllowedPackPath("demo/deploy-key.sh")).toBe(false);
+    expect(isAllowedPackPath("demo/fixtures/a.sql")).toBe(false);
+    expect(isAllowedPackPath("dist/tests/x.js")).toBe(false);
+    expect(isForbiddenPackName("demo/creds.yml")).toBe(true);
+    expect(isForbiddenPackName("example/.secrets.yaml")).toBe(true);
+    expect(isForbiddenPackName("demo/deploy-key.sh")).toBe(true);
+    expect(isForbiddenPackName("demo/fixtures/a.sql")).toBe(true);
+    expect(isForbiddenPackName("dist/tests/x.js")).toBe(true);
+    expect(EXACT_PACK_FILES.has("demo/creds.yml")).toBe(false);
+    expect(EXACT_PACK_FILES.has("example/.secrets.yaml")).toBe(false);
+    expect(EXACT_PACK_FILES.has("demo/deploy-key.sh")).toBe(false);
+    expect(EXACT_PACK_FILES.has("demo/fixtures/a.sql")).toBe(false);
+    expect(EXACT_PACK_FILES.has("dist/tests/x.js")).toBe(false);
     expect(unexpectedPackedFiles(["demo/secrets.json"])).toEqual(["demo/secrets.json"]);
     expect(unexpectedPackedFiles(["demo/id_ed25519"])).toEqual(["demo/id_ed25519"]);
     expect(unexpectedPackedFiles(["example/notes.txt"])).toEqual(["example/notes.txt"]);
     expect(unexpectedPackedFiles(["dist/cli/index.js.map"])).toEqual(["dist/cli/index.js.map"]);
+    expect(unexpectedPackedFiles(["demo/creds.yml"])).toEqual(["demo/creds.yml"]);
+    expect(unexpectedPackedFiles(["example/.secrets.yaml"])).toEqual(["example/.secrets.yaml"]);
+    expect(unexpectedPackedFiles(["demo/deploy-key.sh"])).toEqual(["demo/deploy-key.sh"]);
+    expect(unexpectedPackedFiles(["demo/fixtures/a.sql"])).toEqual(["demo/fixtures/a.sql"]);
+    expect(unexpectedPackedFiles(["dist/tests/x.js"])).toEqual(["dist/tests/x.js"]);
     expect(isAllowedPackPath("dist/cli/index.js")).toBe(true);
     expect(isAllowedPackPath("dist/index.js")).toBe(true);
     expect(isAllowedPackPath("README.md")).toBe(true);
@@ -334,6 +386,51 @@ describe("release-checklist dry-run (P0-3)", () => {
         run: mockRun({ pack: [...REQUIRED_PACK, "dist/index.js.map"] }),
       }),
     ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "demo/creds.yml"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "example/.secrets.yaml"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "demo/deploy-key.sh"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "demo/fixtures/a.sql"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "dist/tests/x.js"] }),
+      }),
+    ).toThrow(/allowlist/);
   });
 
   it("certify-cloud dispatch leaves checkout unpinned so --ref SHA wins", () => {
@@ -390,4 +487,30 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(paths).toContain("README.md");
     expect(paths).toContain("package.json");
   });
+
+  it("built package pack list has no source maps and passes the allowlist", () => {
+    const build = spawnSync("npx", ["tsc", "-p", "tsconfig.json"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(build.status, build.stderr || build.stdout).toBe(0);
+    const result = spawnSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const paths = packedPathsFromNpmPackJson(result.stdout || result.stderr);
+    const maps = paths.filter((p) => p.endsWith(".map"));
+    expect(maps, maps.join("\n")).toEqual([]);
+    expect(paths).toContain("dist/index.js");
+    expect(paths).toContain("dist/cli/index.js");
+    expect(paths).toContain("README.md");
+    expect(paths.some((p) => p === "dist/tests/x.js" || p.startsWith("dist/tests/"))).toBe(false);
+    expect(unexpectedPackedFiles(paths), unexpectedPackedFiles(paths).join("\n")).toEqual([]);
+    expect(missingRequiredPackedFiles(paths, PKG)).toEqual([]);
+    for (const path of paths) {
+      expect(isAllowedPackPath(path), path).toBe(true);
+      expect(isForbiddenPackName(path), path).toBe(false);
+    }
+  }, 60_000);
 });

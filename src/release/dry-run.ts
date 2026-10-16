@@ -2,10 +2,11 @@
 /**
  * Release-checklist dry-run (P0-3).
  *
- * Pins every gate to an exact RC SHA cut from main. Runs a file-list
- * `npm pack --dry-run --ignore-scripts` check and a read-only
- * `npm view grane-analytics` ownership check. Does not publish, tag,
- * push, version, dist-tag, or dispatch certify-cloud.
+ * Pins every gate to an exact RC SHA cut from main. Refuses pack-time
+ * lifecycle scripts (npm 10 still runs `prepare` with `--ignore-scripts`),
+ * then runs a file-list `npm pack --dry-run --ignore-scripts` check and a
+ * read-only `npm view grane-analytics` ownership check. Does not publish,
+ * tag, push, version, dist-tag, or dispatch certify-cloud.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -53,6 +54,8 @@ export type PackageMeta = {
   name?: string;
   main?: string;
   bin?: Record<string, string>;
+  scripts?: Record<string, string>;
+  files?: string[];
 };
 
 export type DryRunResult = {
@@ -72,22 +75,79 @@ const SHA_RE = /^[0-9a-f]{40}$/i;
 export const NPM_PACK_ARGV = ["npm", "pack", "--dry-run", "--ignore-scripts", "--json"] as const;
 export const NPM_VIEW_ARGV = ["npm", "view", PACKAGE_NAME, "--json"] as const;
 
-const EXACT_PACK_FILES = new Set([
+/**
+ * Pack-time lifecycle hooks. npm 10.x `npm pack --ignore-scripts` still
+ * runs `prepare`; refuse these so the dry-run never executes them.
+ * `prepublishOnly` is publish-only and is not invoked (we never publish).
+ */
+export const PACK_TIME_LIFECYCLE_SCRIPTS = ["prepare", "prepack", "postpack", "prepublish"] as const;
+
+/** Demo/example/root files that may appear in the tarball — not a glob. */
+export const EXACT_PACK_FILES = new Set([
   "package.json",
   "README.md",
   "README",
   "LICENSE",
   "LICENSE.md",
   "CHANGELOG.md",
+  "demo/README.md",
+  "demo/analytics/dimensions.yml",
+  "demo/analytics/grane.yml",
+  "demo/analytics/metrics.yml",
+  "demo/analytics/relationships.yml",
   "demo/mcp.json",
+  "demo/questions.md",
+  "demo/run.sh",
+  "demo/scripts/generate_shop.py",
+  "demo/seed/01_schema.sql",
+  "demo/seed/02_data.sql",
+  "demo/seed/duckdb.sql",
+  "demo/seed/duckdb_schema.sql",
+  "demo/why-revenue-fell.gif",
+  "demo/why-revenue-fell.svg",
+  "example/DEMO.md",
+  "example/analytics-duckdb/databricks_load.sql",
+  "example/analytics-duckdb/dimensions.yml",
+  "example/analytics-duckdb/grane.yml",
+  "example/analytics-duckdb/metrics.yml",
+  "example/analytics-duckdb/parquet/customers.parquet",
+  "example/analytics-duckdb/parquet/order_items.parquet",
+  "example/analytics-duckdb/parquet/orders.parquet",
+  "example/analytics-duckdb/parquet/payments.parquet",
+  "example/analytics-duckdb/parquet/products.parquet",
+  "example/analytics-duckdb/parquet/refunds.parquet",
+  "example/analytics-duckdb/relationships.yml",
+  "example/analytics-from-dbt/grane.yml",
+  "example/analytics/dimensions.yml",
+  "example/analytics/grane.yml",
+  "example/analytics/metrics.yml",
+  "example/analytics/relationships.yml",
+  "example/dbt-shop/dbt_project.yml",
+  "example/dbt-shop/models/customers.yml",
+  "example/dbt-shop/models/metrics.yml",
+  "example/dbt-shop/models/orders.yml",
+  "example/docker-compose.yml",
+  "example/scripts/build_duckdb.py",
+  "example/seed/README.md",
 ]);
 
-/** Exact names plus these path patterns — not a denylist of secrets. */
+/** Compiled output only — never `dist/tests/**` or `*.map`. */
 export const PACK_ALLOW_PATTERNS: readonly RegExp[] = [
-  /^dist\/.+\.js$/,
-  /^dist\/.+\.d\.ts$/,
-  /^demo\/.+\.(yml|yaml|md|sql|sh|py|gif|svg)$/,
-  /^example\/.+\.(yml|yaml|md|sql|py|parquet)$/,
+  /^dist\/(?!tests\/).+\.js$/,
+  /^dist\/(?!tests\/).+\.d\.ts$/,
+];
+
+/** Names that must never ship, even if someone adds them to the exact list. */
+export const FORBIDDEN_PACK_NAME_RES: readonly RegExp[] = [
+  /(^|\/)creds(\.|\/|$)/i,
+  /(^|\/)\.secrets(\.|\/|$)/i,
+  /(^|\/)secrets?(\.|\/|$)/i,
+  /deploy-key/i,
+  /(^|\/)fixtures\//,
+  /(^|\/)tests\//,
+  /\.map$/i,
+  /(^|\/)id_(rsa|ed25519|ecdsa)(\.|\/|$)/,
+  /(^|\/)\.env(\.|\/|$)/,
 ];
 
 const FORBIDDEN_ARGV = [
@@ -185,8 +245,34 @@ export function normalizePackPath(rel: string): string {
   return rel.replaceAll("\\", "/").replace(/^\.?\//, "").replace(/^package\//, "");
 }
 
+export function packLifecycleScriptHits(scripts: Record<string, unknown> | undefined): string[] {
+  return Object.keys(scripts ?? {}).filter((name) => {
+    const key = name.toLowerCase();
+    if (key === "prepublishonly") return false;
+    if ((PACK_TIME_LIFECYCLE_SCRIPTS as readonly string[]).includes(key)) return true;
+    return key.startsWith("prepublish");
+  });
+}
+
+export function assertNoPackLifecycleScripts(scripts: Record<string, unknown> | undefined): void {
+  const hits = packLifecycleScriptHits(scripts);
+  if (hits.length > 0) {
+    throw new Error(
+      `package.json must not define pack-time scripts (${hits.join(", ")}): ` +
+        `npm pack --dry-run --ignore-scripts still runs prepare on npm 10. ` +
+        `Remove them; prepublishOnly (publish-only) is the exception because this dry-run never publishes.`,
+    );
+  }
+}
+
+export function isForbiddenPackName(rel: string): boolean {
+  const n = normalizePackPath(rel);
+  return FORBIDDEN_PACK_NAME_RES.some((re) => re.test(n));
+}
+
 export function isAllowedPackPath(rel: string): boolean {
   const n = normalizePackPath(rel);
+  if (isForbiddenPackName(n)) return false;
   if (EXACT_PACK_FILES.has(n)) return true;
   return PACK_ALLOW_PATTERNS.some((re) => re.test(n));
 }
@@ -330,6 +416,15 @@ function readPackageMeta(root: string): PackageMeta {
   return pkg;
 }
 
+function assertPublishFilesExcludeMaps(files: string[] | undefined): void {
+  const entries = files ?? [];
+  if (!entries.some((f) => f === "!dist/**/*.map" || f === "!dist/**/*.js.map")) {
+    throw new Error(
+      'package.json files must exclude source maps (`!dist/**/*.map`) so the published tarball cannot ship dist/**/*.js.map.',
+    );
+  }
+}
+
 export function runReleaseDryRun(options: DryRunOptions): DryRunResult {
   const sha = parseRcSha(options.sha);
   refuseMutatingCliArgs(options.argv ?? []);
@@ -385,6 +480,8 @@ export function runReleaseDryRun(options: DryRunOptions): DryRunResult {
   let unexpectedFiles: string[] = [];
   let missingRequired: string[] = [];
   const pkg = readPackageMeta(options.root);
+  assertNoPackLifecycleScripts(pkg.scripts);
+  assertPublishFilesExcludeMaps(pkg.files);
 
   for (const step of runnableSteps(steps)) {
     if (step.id === "npm-pack") {
