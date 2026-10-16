@@ -15,6 +15,7 @@ import {
   githubGet,
   type GithubGet,
 } from "../../src/github/branch-protection.js";
+import { parseGithubOrigin } from "../../src/authoring/git.js";
 import { stringify as stringifyYaml } from "yaml";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -103,6 +104,26 @@ function api(path: string): string {
   return `https://api.github.com/repos/acme/shop${path}`;
 }
 
+async function reportFor(
+  routes: Record<string, { status: number; body: unknown }>,
+  extra: { originUrl?: string | null; branch?: string; token?: string | null } = {},
+) {
+  return checkBranchProtection({
+    projectDir: tempDir(),
+    originUrl: extra.originUrl === undefined ? "https://github.com/acme/shop.git" : extra.originUrl,
+    branch: extra.branch ?? "main",
+    token: extra.token === undefined ? "t" : extra.token,
+    get: mockGet(routes, []),
+  });
+}
+
+function expectNotOkOrUnverified(report: { status: string; detail: string; missing: string[] }): void {
+  expect(report.status).not.toBe("ok");
+  expect(["missing", "couldn't verify"]).toContain(report.status);
+  expect(report.detail).not.toMatch(/protected/i);
+  expect(JSON.stringify(report)).not.toMatch(/protected/i);
+}
+
 describe("branch protection check (T2)", () => {
   it("unprotected: warns once per missing setting", async () => {
     const recorded: Recorded[] = [];
@@ -146,6 +167,8 @@ describe("branch protection check (T2)", () => {
     expect(report.status).toBe("ok");
     expect(report.missing).toEqual([]);
     expect(report.warnings).toEqual([]);
+    expect(report.detail).not.toMatch(/protected/i);
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
     expect(recorded.every((r) => r.method === "GET")).toBe(true);
   });
 
@@ -167,8 +190,141 @@ describe("branch protection check (T2)", () => {
     });
     expect(report.status).toBe("ok");
     expect(report.missing).toEqual([]);
+    expect(report.detail).not.toMatch(/protected/i);
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
     expect(recorded.some((r) => r.url.includes("/rulesets/11"))).toBe(true);
     expect(recorded.every((r) => r.method === "GET")).toBe(true);
+  });
+
+  it("classic 200 omitting force-push/deletion flags is missing, not ok", async () => {
+    const { allow_force_pushes, allow_deletions, ...partial } = CLASSIC_FULL;
+    void allow_force_pushes;
+    void allow_deletions;
+    const report = await checkBranchProtection({
+      projectDir: tempDir(),
+      originUrl: "https://github.com/acme/shop.git",
+      branch: "main",
+      token: "t",
+      get: mockGet(
+        {
+          [api("/branches/main/protection")]: { status: 200, body: partial },
+          [api("/rulesets")]: { status: 200, body: [] },
+        },
+        [],
+      ),
+    });
+    expect(report.status).toBe("missing");
+    expect(report.missing).toContain("no force-push/deletion");
+    expect(report.detail).not.toMatch(/protected/i);
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
+  });
+
+  it("partial ruleset (list without details, GET 403) is couldn't verify, not ok", async () => {
+    const report = await checkBranchProtection({
+      projectDir: tempDir(),
+      originUrl: "https://github.com/acme/shop.git",
+      branch: "main",
+      token: "t",
+      get: mockGet(
+        {
+          [api("/branches/main/protection")]: { status: 200, body: CLASSIC_FULL },
+          [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+          [api("/rulesets/11")]: { status: 403, body: { message: "Resource not accessible" } },
+        },
+        [],
+      ),
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toMatch(/couldn't verify \(incomplete|403\)/);
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
+  });
+
+  it("ruleset with bypass actors does not report no bypass as on", async () => {
+    const report = await checkBranchProtection({
+      projectDir: tempDir(),
+      originUrl: "https://github.com/acme/shop.git",
+      branch: "main",
+      token: "t",
+      get: mockGet(
+        {
+          [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+          [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+          [api("/rulesets/11")]: {
+            status: 200,
+            body: { ...RULESET_FULL, bypass_actors: [{ actor_id: 1, actor_type: "OrganizationAdmin" }] },
+          },
+        },
+        [],
+      ),
+    });
+    expect(report.status).toBe("missing");
+    expect(report.missing).toContain("no bypass");
+    expect(report.detail).not.toMatch(/protected/i);
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
+  });
+
+  it("ruleset omitting bypass_actors is couldn't verify, not ok", async () => {
+    const { bypass_actors, ...noBypassField } = RULESET_FULL;
+    void bypass_actors;
+    const report = await checkBranchProtection({
+      projectDir: tempDir(),
+      originUrl: "https://github.com/acme/shop.git",
+      branch: "main",
+      token: "t",
+      get: mockGet(
+        {
+          [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+          [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+          [api("/rulesets/11")]: { status: 200, body: noBypassField },
+        },
+        [],
+      ),
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toMatch(/couldn't verify \(incomplete\)/);
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
+  });
+
+  it("classic no-bypass plus ruleset bypass actors does not over-claim no bypass", async () => {
+    const report = await checkBranchProtection({
+      projectDir: tempDir(),
+      originUrl: "https://github.com/acme/shop.git",
+      branch: "main",
+      token: "t",
+      get: mockGet(
+        {
+          [api("/branches/main/protection")]: { status: 200, body: CLASSIC_FULL },
+          [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+          [api("/rulesets/11")]: {
+            status: 200,
+            body: { ...RULESET_FULL, bypass_actors: [{ actor_id: 5, actor_type: "Team" }] },
+          },
+        },
+        [],
+      ),
+    });
+    expect(report.status).toBe("missing");
+    expect(report.missing).toContain("no bypass");
+    expect(report.detail).not.toMatch(/protected/i);
+  });
+
+  it("classic 200 + unreadable rulesets is couldn't verify, not ok", async () => {
+    const report = await checkBranchProtection({
+      projectDir: tempDir(),
+      originUrl: "https://github.com/acme/shop.git",
+      branch: "main",
+      token: "t",
+      get: mockGet(
+        {
+          [api("/branches/main/protection")]: { status: 200, body: CLASSIC_FULL },
+          [api("/rulesets")]: { status: 403, body: { message: "Resource not accessible" } },
+        },
+        [],
+      ),
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toBe("couldn't verify (403)");
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
   });
 
   it("403 is couldn't verify, never protected", async () => {
@@ -269,41 +425,33 @@ describe("branch protection check (T2)", () => {
   });
 
   it("fails if any non-GET request is made", async () => {
-    const methods: string[] = [];
-    const fetchImpl: typeof fetch = async (_input, init) => {
-      const method = String(init?.method ?? "GET");
-      methods.push(method);
-      if (method.toUpperCase() !== "GET") {
-        throw new Error(`non-GET ${method}`);
+    const recorded: Recorded[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      recorded.push({ method: String(init?.method ?? ""), url: String(input) });
+      if (String(init?.method ?? "").toUpperCase() !== "GET") {
+        throw new Error(`non-GET ${String(init?.method)}`);
       }
       return new Response(JSON.stringify({ message: "Branch not protected" }), { status: 404 });
     };
-    await githubGet("https://api.github.com/repos/acme/shop/branches/main/protection", "t", fetchImpl);
-    expect(methods).toEqual(["GET"]);
-    await expect(githubGet("https://api.github.com/repos/acme/shop/branches/main/protection", "t", fetchImpl, "PUT")).rejects.toThrow(
-      /GET-only|refused PUT/,
-    );
+    const protection = "https://api.github.com/repos/acme/shop/branches/main/protection";
+    await githubGet(protection, "t", fetchImpl);
+    expect(recorded).toEqual([{ method: "GET", url: protection }]);
+    await expect(githubGet(protection, "t", fetchImpl, "PUT")).rejects.toThrow(/GET-only|refused PUT/);
     await expect(githubGet("https://example.com/x", "t", fetchImpl)).rejects.toThrow(/api\.github\.com/);
 
-    const recorded: Recorded[] = [];
-    const get: GithubGet = async (url) => {
-      recorded.push({ method: "GET", url });
-      if (!url.startsWith("https://api.github.com/")) {
-        throw new Error(`non-api ${url}`);
-      }
-      return { status: 404, body: JSON.stringify({ message: "Branch not protected" }) };
-    };
+    recorded.length = 0;
     await checkBranchProtection({
       projectDir: tempDir(),
       originUrl: "https://github.com/acme/shop.git",
       branch: "main",
       token: "t",
-      get,
+      get: (url) => githubGet(url, "t", fetchImpl),
     });
     expect(recorded.length).toBeGreaterThan(0);
     expect(recorded.every((r) => r.method === "GET")).toBe(true);
     expect(recorded.every((r) => r.url.startsWith("https://api.github.com/"))).toBe(true);
-    expect(recorded.some((r) => /\/protection$/.test(r.url) || r.url.includes("/rulesets"))).toBe(true);
+    expect(recorded.some((r) => r.url.includes("/branches/main/protection"))).toBe(true);
+    expect(recorded.some((r) => r.url.includes("/rulesets"))).toBe(true);
   });
 
   it("doctor output snapshot (unprotected + lint passed)", async () => {
@@ -382,6 +530,9 @@ describe("branch protection check (T2)", () => {
     expect(docs).toMatch(/two-person-test\.md/);
     expect(docs).toMatch(/never PUT, PATCH, POST, or DELETE/i);
     expect(docs).not.toMatch(/Grane (will|does) turn on branch protection/i);
+    expect(docs).toMatch(/partial ruleset|unreadable/);
+    expect(docs).toMatch(/do not claim GitHub is enforcing a setting unless that setting is/);
+    expect(docs).not.toMatch(/\bstatus\b[^\n]*protected/i);
   });
 
   it("docs/team-setup.md org-wide MCP example has no literal secret", () => {
@@ -405,12 +556,246 @@ describe("branch protection check (T2)", () => {
     expect(literalSecretInSharedExample(example!)).toBe(false);
     expect(literalSecretInSharedExample(url)).toBe(false);
   });
+
+  it("docs secret scanner catches a JSON PGPASSWORD hunter2 entry", () => {
+    expect(literalSecretInSharedExample('"PGPASSWORD": "hunter2"')).toBe(true);
+    expect(literalSecretInSharedExample(JSON.stringify({ PGPASSWORD: "hunter2" }))).toBe(true);
+    const docs = readFileSync(join(ROOT, "docs/team-setup.md"), "utf8");
+    expect(literalSecretInSharedExample(docs)).toBe(false);
+  });
+
+  it("bypass_actors missing is not ok", async () => {
+    const { bypass_actors, ...noBypassField } = RULESET_FULL;
+    void bypass_actors;
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: { status: 200, body: noBypassField },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.status).toBe("couldn't verify");
+  });
+
+  it("current_user_can_bypass always is not ok", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: { ...RULESET_FULL, current_user_can_bypass: "always" },
+      },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toContain("no bypass");
+  });
+
+  it("enforce_admins false with only an unrelated ruleset is not ok", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: {
+        status: 200,
+        body: { ...CLASSIC_FULL, enforce_admins: { enabled: false } },
+      },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: {
+          ...RULESET_FULL,
+          conditions: { ref_name: { include: ["refs/heads/dev"], exclude: [] } },
+        },
+      },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toContain("no bypass");
+  });
+
+  it("ruleset detail 403 is couldn't verify, not ok", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 200, body: CLASSIC_FULL },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: { status: 403, body: { message: "Resource not accessible" } },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.status).toBe("couldn't verify");
+  });
+
+  it("does not add classic protection and rulesets together", async () => {
+    const { required_status_checks, ...classicNoChecks } = CLASSIC_FULL;
+    void required_status_checks;
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 200, body: classicNoChecks },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: {
+          ...RULESET_FULL,
+          rules: [
+            {
+              type: "required_status_checks",
+              parameters: {
+                strict_required_status_checks_policy: true,
+                required_status_checks: [{ context: "ci" }],
+              },
+            },
+          ],
+        },
+      },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing.length).toBeGreaterThan(0);
+  });
+
+  it("mutation: enforce_admins forced on", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: {
+        status: 200,
+        body: { ...CLASSIC_FULL, enforce_admins: { enabled: false } },
+      },
+      [api("/rulesets")]: { status: 200, body: [] },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toContain("no bypass");
+  });
+
+  it("mutation: force-push OR deletion where both are required", async () => {
+    const forceOnly = await reportFor({
+      [api("/branches/main/protection")]: {
+        status: 200,
+        body: { ...CLASSIC_FULL, allow_force_pushes: { enabled: false }, allow_deletions: { enabled: true } },
+      },
+      [api("/rulesets")]: { status: 200, body: [] },
+    });
+    expectNotOkOrUnverified(forceOnly);
+    expect(forceOnly.missing).toContain("no force-push/deletion");
+
+    const delOnly = await reportFor({
+      [api("/branches/main/protection")]: {
+        status: 200,
+        body: { ...CLASSIC_FULL, allow_force_pushes: { enabled: true }, allow_deletions: { enabled: false } },
+      },
+      [api("/rulesets")]: { status: 200, body: [] },
+    });
+    expectNotOkOrUnverified(delOnly);
+    expect(delOnly.missing).toContain("no force-push/deletion");
+  });
+
+  it("mutation: ref match-all", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: {
+          ...RULESET_FULL,
+          conditions: { ref_name: { include: ["refs/heads/dev"], exclude: [] } },
+        },
+      },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toEqual([...BRANCH_PROTECTION_SETTINGS]);
+  });
+
+  it("mutation: 0 approvals", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: {
+        status: 200,
+        body: {
+          ...CLASSIC_FULL,
+          required_pull_request_reviews: {
+            ...CLASSIC_FULL.required_pull_request_reviews,
+            required_approving_review_count: 0,
+          },
+        },
+      },
+      [api("/rulesets")]: { status: 200, body: [] },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toContain("PR required with >=1 approval");
+  });
+
+  it("mutation: evaluate mode", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "evaluate" }] },
+      [api("/rulesets/11")]: { status: 200, body: { ...RULESET_FULL, enforcement: "evaluate" } },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toEqual([...BRANCH_PROTECTION_SETTINGS]);
+  });
+
+  it("non-admin 404 is couldn't verify", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Not Found" } },
+      [api("/rulesets")]: { status: 200, body: [] },
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toBe("couldn't verify (404)");
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
+  });
+
+  it("rate-limit 403 is couldn't verify", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 403, body: { message: "API rate limit exceeded" } },
+      [api("/rulesets")]: { status: 403, body: { message: "API rate limit exceeded" } },
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toBe("couldn't verify (rate limit)");
+    expect(JSON.stringify(report)).not.toMatch(/protected/i);
+  });
+
+  it("labels 401 correctly", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 401, body: { message: "Bad credentials" } },
+      [api("/rulesets")]: { status: 401, body: { message: "Bad credentials" } },
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toBe("couldn't verify (401)");
+  });
+
+  it("labels 429 correctly", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 429, body: { message: "Too many requests" } },
+      [api("/rulesets")]: { status: 429, body: { message: "Too many requests" } },
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toBe("couldn't verify (429)");
+  });
+
+  it("labels 500 correctly", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 500, body: { message: "Internal Server Error" } },
+      [api("/rulesets")]: { status: 500, body: { message: "Internal Server Error" } },
+    });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toBe("couldn't verify (500)");
+  });
+
+  it("unparseable remote is couldn't verify", async () => {
+    const report = await reportFor({}, { originUrl: "not-a-remote" });
+    expect(report.status).toBe("couldn't verify");
+    expect(report.detail).toMatch(/couldn't verify \(not a GitHub remote\)/);
+  });
+});
+
+describe("parseGithubOrigin", () => {
+  it("accepts exact github.com hosts", () => {
+    expect(parseGithubOrigin("git@github.com:acme/shop.git")).toBe("acme/shop");
+    expect(parseGithubOrigin("https://github.com/acme/shop.git")).toBe("acme/shop");
+    expect(parseGithubOrigin("https://github.com/acme/shop")).toBe("acme/shop");
+    expect(parseGithubOrigin("ssh://git@github.com/acme/shop.git")).toBe("acme/shop");
+  });
+
+  it("rejects evil.com/github.com/o/r and notgithub.com", () => {
+    expect(parseGithubOrigin("https://evil.com/github.com/o/r")).toBeNull();
+    expect(parseGithubOrigin("https://notgithub.com/o/r")).toBeNull();
+    expect(parseGithubOrigin("https://github.com.evil.com/o/r")).toBeNull();
+    expect(parseGithubOrigin("git@notgithub.com:o/r.git")).toBeNull();
+  });
 });
 
 /** user:literal@ or password: literal — ${VAR} placeholders are allowed. */
 function literalSecretInSharedExample(text: string): boolean {
   if (/:\/\/[^/\s:]+:(?!\$\{)[^/\s@]+@/.test(text)) return true;
-  if (/\bpassword\s*[:=]\s*['"]?(?!\$\{)[^\s'"]+/i.test(text)) return true;
-  if (/\b(P|GRANE_DB_)?PASSWORD\s*=\s*['"]?(?!\$\{)[^\s'"]+/i.test(text)) return true;
+  if (/"((?:PG)?PASSWORD|GRANE_DB_PASSWORD)"\s*:\s*"(?!\$\{)[^"]+"/i.test(text)) return true;
+  if (/\bpassword\s*[:=]\s*['"](?!\$\{)[^'"]+/i.test(text)) return true;
   return false;
 }

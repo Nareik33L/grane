@@ -1352,11 +1352,31 @@ export function listProposals(projectDir: string): Proposal[] {
     .map((branch) => readProposal(root, branch));
 }
 
-/** `owner/repo` from a GitHub remote URL, or null for GitLab / SSH hosts that are not github.com. */
+/**
+ * `owner/repo` from a GitHub remote URL, or null for anything whose host is
+ * not exactly `github.com` (GitLab, `notgithub.com`, `evil.com/github.com/…`).
+ */
 export function parseGithubOrigin(url: string): string | null {
-  const match = url.trim().match(/github\.com[:/](?<owner>[^/]+)\/(?<repo>[^/]+?)(?:\.git)?\/?$/i);
-  if (!match?.groups) return null;
-  return `${match.groups.owner}/${match.groups.repo}`;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  const scp = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(trimmed);
+  if (scp?.[1] && scp[2]) return `${scp[1]}/${scp[2]}`;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname.toLowerCase() !== "github.com") return null;
+  const parts = parsed.pathname
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .split("/");
+  if (parts.length < 2 || !parts[0] || !parts[1]) return null;
+  return `${parts[0]}/${parts[1]}`;
 }
 
 export function githubRepoFromOrigin(root: string): string | null {

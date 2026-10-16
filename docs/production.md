@@ -105,7 +105,7 @@ includes `active.commit` and `config_hash`. `grane doctor --json` also
 returns `config_hash`, `pin_warnings` (serve prints the same warnings
 on stderr), and `branch_protection` (read-only GitHub GET; **couldn't
 verify** on no token / 403 / 404 / network / `--offline` / non-GitHub
-remote). Pin warnings and T2 do not change doctor's exit code. Team
+remote / partial ruleset / unreadable settings). Pin warnings and T2 do not change doctor's exit code. Team
 guide: [team-setup.md](team-setup.md). Without a pin, serve is unchanged unless origin has a tracked pin — then serve warns and keeps the working tree. The pin `ref`
 must be the configured base branch under `refs/heads/` (not `HEAD`, a tag,
 another branch, or a proposal ref) and `commit` must be a full 40-character

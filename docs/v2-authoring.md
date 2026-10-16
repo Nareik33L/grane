@@ -209,7 +209,8 @@ see it after the pin PR is merged. It is not gitignored.
   protection on `origin`). Those fields are informational; the process
   exit code follows production lint (`ok`), not pin warnings or T2
   (fail-open). `--offline` skips the live GitHub GET and reports
-  **couldn't verify**. A missing local pin while
+  **couldn't verify**, as do partial rulesets and settings the API did
+  not return (never "protected"). A missing local pin while
   `origin/<base>:grane.pin.json` exists is a warning, not a refuse.
 - **`grane validate`, `grane query`, `grane certify`, `loadConfig`** read the
   working tree.

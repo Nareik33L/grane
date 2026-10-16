@@ -499,7 +499,7 @@ async function runOwnPath(opts: {
   }
 
   const live = !opts.offline;
-  const validated = await validateOwnProject(opts.io, projectDir, live, opts.prompt, opts.yes);
+  const validated = await validateOwnProject(opts.io, projectDir, live, opts.prompt, opts.yes, opts.env);
 
   const connected = connectIfRequested(opts, projectDir);
   printReady(
@@ -568,7 +568,7 @@ async function runImportPath(opts: {
       if (!message.includes("No git repository")) throw err;
     }
   }
-  const loaded = loadConfig(projectDir);
+  const loaded = loadConfig(projectDir, { env: opts.env });
   const kernel = new GraneKernel(loaded.config, {
     projectDir,
     providerWarnings: loaded.warnings,
@@ -734,8 +734,9 @@ async function validateOwnProject(
   live: boolean,
   prompt: Prompter,
   yes: boolean,
+  env?: NodeJS.ProcessEnv,
 ): Promise<boolean> {
-  const loaded = loadConfig(projectDir);
+  const loaded = loadConfig(projectDir, { env });
   const kernel = new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
     providerWarnings: loaded.warnings,

@@ -28,9 +28,7 @@ export function createPgPool(connection: ConnectionConfig): pg.Pool {
   const max = connectionPoolSize(connection);
   if (connection.url) {
     if (connection.url.includes("${")) {
-      throw configError(
-        `Connection URL contains an unresolved environment variable: ${connection.url.replace(/:[^:@/]+@/, ":***@")}`,
-      );
+      throw configError("Connection URL contains an unresolved environment variable.");
     }
     return new Pool({
       connectionString: connection.url,

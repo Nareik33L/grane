@@ -53,9 +53,12 @@ will not invent that coverage.
 what to enable. They never turn the settings on.
 
 If there is no token (`GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`), a
-403, a 404, a network error, `--offline`, or a non-GitHub remote, the check
-reports **couldn't verify** and never claims the branch is protected. The
-doctor exit code still follows production lint, not this check.
+403, a 404, a network error, `--offline`, a non-GitHub remote, a partial
+ruleset (list without readable details), unknown bypass actors, or any
+setting the GitHub API did not actually return, the check reports
+**couldn't verify** or **missing** — never that the branch is protected.
+`ok` means the API returned every required setting as on. The doctor exit
+code still follows production lint, not this check.
 
 ## 3. Invite people
 
@@ -102,8 +105,13 @@ not copied out of the operator's shell.
 **That shared file must contain no secrets.** Each person's read-only
 password or key stays on their machine. Grane does **not** parse the MCP
 JSON; the client launches `grane` and copies `env` onto the process. Grane
-then expands `${VAR}` in `grane.yml` `connection.*` (including a
-`${DATABASE_URL}` whose value still contains `${GRANE_DB_PASSWORD}`).
+then expands `${VAR}` in `grane.yml` `connection.*` only (not metric SQL
+or other keys). Expansion is a single pass: a substituted value that
+itself contains `${…}` is not expanded again. A template URL in env
+(`${DATABASE_URL}=postgres://u:${GRANE_DB_PASSWORD}@h/db`) is expanded
+by scanning that template's own text once, never the substituted
+password. Substitutions in URL userinfo are URL-encoded. An unset
+variable refuses with an error that names only that variable.
 
 Committed `grane.yml` already uses this (from `grane init`):
 
@@ -137,8 +145,10 @@ MDM user secret) — not in the shared file:
 export GRANE_DB_PASSWORD='…their own read-only password…'
 ```
 
-The MCP client inherits that environment. After substituting
-`${DATABASE_URL}`, Grane expands `${GRANE_DB_PASSWORD}` in the resulting URL.
+The MCP client inherits that environment. Grane expands the
+`DATABASE_URL` template's own text once (so `${GRANE_DB_PASSWORD}` in
+that template is substituted and URL-encoded). It does not re-scan the
+password or any other substituted value.
 
 Also supported (no MCP `env` DATABASE_URL at all): omit `env` from the
 shared file, keep `url: ${DATABASE_URL}` in `grane.yml`, and have each
@@ -171,7 +181,8 @@ will bake a password into the file.
 
 Docs here do not claim GitHub is enforcing a setting unless that setting is
 actually on. `grane doctor` saying **couldn't verify** means it did not see
-the API — it is not a pass.
+a complete API response (including partial rulesets or unreadable
+settings) — it is not a pass.
 
 **Known limit:** identical YAML committed straight to `main` (no PR) matches
 as if squash-merged. That is closed only when GitHub blocks direct pushes

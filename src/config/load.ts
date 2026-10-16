@@ -32,6 +32,8 @@ export interface LoadConfigOptions {
    * read the working tree (used to serve a pinned commit).
    */
   yamlContents?: Record<string, string>;
+  /** Env for `${VAR}` interpolation. Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
 }
 
 const MERGEABLE_MAPS = ["entities", "metrics", "dimensions", "relationships"] as const;
@@ -87,34 +89,131 @@ function applyAuditEnvOverrides(config: GraneConfig): void {
   }
 }
 
+const PLACEHOLDER = /\$\{([A-Z0-9_]+)(?::-([^}]*))?\}/g;
+const PLACEHOLDER_PRESENT = /\$\{[A-Z0-9_]+(?::-[^}]*)?\}/;
+const URL_SCHEME = /[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
+export interface InterpolateEnvOptions {
+  /** Connection field name (`url`, `password`, …). Audit/auth omit this. */
+  field?: string;
+  /**
+   * `refuse` (default): an unset referenced variable throws, naming only
+   * that variable. `leave`: keep `${VAR}` — historical behaviour for
+   * audit.path / auth tokens; not used for connection fields.
+   */
+  unset?: "refuse" | "leave";
+  /**
+   * When the YAML value is exactly `${VAR}` and that env value is itself a
+   * URL template, expand that template's original text once. Never re-scan
+   * substituted values. Default true unless `unset` is `leave`.
+   */
+  expandUrlTemplates?: boolean;
+}
+
+function hasPlaceholder(text: string): boolean {
+  return PLACEHOLDER_PRESENT.test(text);
+}
+
+function isUrlTemplate(text: string): boolean {
+  return URL_SCHEME.test(text) && hasPlaceholder(text);
+}
+
+/** Byte range of URL userinfo (`user:password` before the first `@`). */
+function userinfoSpan(template: string): { start: number; end: number } | null {
+  const scheme = URL_SCHEME.exec(template);
+  if (!scheme || scheme.index === undefined) return null;
+  const start = scheme.index + scheme[0].length;
+  const at = template.indexOf("@", start);
+  if (at < 0) return null;
+  return { start, end: at };
+}
+
+function unsetVariableError(name: string): never {
+  throw configError(`Unset environment variable: ${name}`);
+}
+
+/**
+ * One pass over `template`'s original text. Substituted env values are
+ * inserted as-is (URL-encoded when they sit in userinfo) and are never
+ * scanned for further `${…}`.
+ */
+function expandOnce(
+  template: string,
+  env: NodeJS.ProcessEnv,
+  unset: "refuse" | "leave",
+  encodeUserinfo: boolean,
+): string {
+  const span = encodeUserinfo ? userinfoSpan(template) : null;
+  let out = "";
+  let last = 0;
+  for (const match of template.matchAll(new RegExp(PLACEHOLDER.source, "g"))) {
+    const index = match.index ?? 0;
+    out += template.slice(last, index);
+    const name = match[1]!;
+    const fallback = match[2];
+    const found = env[name];
+    let replacement: string;
+    if (found !== undefined) {
+      replacement = found;
+    } else if (fallback !== undefined) {
+      replacement = fallback;
+    } else if (unset === "leave") {
+      replacement = match[0];
+    } else {
+      unsetVariableError(name);
+    }
+    const substituted = found !== undefined || fallback !== undefined;
+    if (substituted && span && index >= span.start && index < span.end) {
+      replacement = encodeURIComponent(replacement);
+    }
+    out += replacement;
+    last = index + match[0].length;
+  }
+  return out + template.slice(last);
+}
+
 /**
  * Interpolates `${VAR}` and `${VAR:-default}` in connection settings.
- * Repeats so a value like `${DATABASE_URL}` whose env contents are
- * `postgres://user:${GRANE_DB_PASSWORD}@host/db` is fully expanded.
+ * Single pass: a substituted value that itself contains `${…}` is not
+ * expanded again (no recursion, no injection from env values).
+ *
+ * A template URL in env is still supported — `DATABASE_URL=postgres://u:${GRANE_DB_PASSWORD}@h/db`
+ * — by expanding that env value's own text once, never the substituted
+ * password. Substitutions inside URL userinfo are URL-encoded.
+ *
  * Grane does not read the MCP client's JSON; the client copies `env`
  * onto the process, then this runs when loading `grane.yml`.
  */
 export function interpolateEnv(
   value: unknown,
   env: NodeJS.ProcessEnv = process.env,
-  depth = 8,
+  options: InterpolateEnvOptions | number = {},
 ): unknown {
   if (typeof value !== "string") return value;
-  let current = value;
-  for (let i = 0; i < depth; i++) {
-    const next = current.replace(
-      /\$\{([A-Z0-9_]+)(?::-([^}]*))?\}/g,
-      (whole, name: string, fallback: string | undefined) => {
-        const found = env[name];
-        if (found !== undefined) return found;
-        if (fallback !== undefined) return fallback;
-        return whole;
-      },
-    );
-    if (next === current) return next;
-    current = next;
+  const opts: InterpolateEnvOptions = typeof options === "number" ? {} : options;
+  const unset = opts.unset ?? "refuse";
+  const expandUrlTemplates = opts.expandUrlTemplates ?? unset === "refuse";
+  const field = opts.field;
+  const encodeUserinfo = field === "url" || (field === undefined && URL_SCHEME.test(value));
+
+  if (expandUrlTemplates && (field === "url" || field === undefined)) {
+    const whole = /^\$\{([A-Z0-9_]+)(?::-([^}]*))?\}$/.exec(value);
+    if (whole) {
+      const name = whole[1]!;
+      const fallback = whole[2];
+      const found = env[name];
+      if (found === undefined && fallback === undefined) {
+        if (unset === "refuse") unsetVariableError(name);
+      } else {
+        const raw = found !== undefined ? found : (fallback as string);
+        if (isUrlTemplate(raw)) {
+          return expandOnce(raw, env, unset, true);
+        }
+      }
+    }
   }
-  return current;
+
+  return expandOnce(value, env, unset, encodeUserinfo);
 }
 
 function nativeContribution(config: GraneConfig): SemanticContribution {
@@ -184,6 +283,7 @@ export function loadConfig(projectDir: string, options: LoadConfigOptions = {}):
   }
 
   // Environment interpolation for connection secrets.
+  const env = options.env ?? process.env;
   const connection = merged["connection"] as Record<string, unknown> | undefined;
   if (connection) {
     for (const field of [
@@ -204,13 +304,15 @@ export function loadConfig(projectDir: string, options: LoadConfigOptions = {}):
       "http_path",
       "token",
     ]) {
-      if (field in connection) connection[field] = interpolateEnv(connection[field]);
+      if (field in connection) {
+        connection[field] = interpolateEnv(connection[field], env, { field });
+      }
     }
   }
 
   const audit = merged["audit"] as Record<string, unknown> | undefined;
   if (audit && "path" in audit) {
-    audit.path = interpolateEnv(audit.path);
+    audit.path = interpolateEnv(audit.path, env, { unset: "leave", expandUrlTemplates: false });
   }
 
   const auth = merged["auth"] as Record<string, unknown> | undefined;
@@ -218,8 +320,11 @@ export function loadConfig(projectDir: string, options: LoadConfigOptions = {}):
   for (const agent of agents) {
     if (agent && typeof agent === "object" && !Array.isArray(agent)) {
       const record = agent as Record<string, unknown>;
-      if ("token" in record) record.token = interpolateEnv(record.token);
-      if ("token_sha256" in record) record.token_sha256 = interpolateEnv(record.token_sha256);
+      const leave = { unset: "leave" as const, expandUrlTemplates: false };
+      if ("token" in record) record.token = interpolateEnv(record.token, env, leave);
+      if ("token_sha256" in record) {
+        record.token_sha256 = interpolateEnv(record.token_sha256, env, leave);
+      }
     }
   }
 
