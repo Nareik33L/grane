@@ -9,6 +9,30 @@ import { WAREHOUSE_CERTIFICATION } from "../../src/connectors/certification.js";
 import { ddl } from "../certification/ddl.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
+const WORKFLOW = join(ROOT, ".github/workflows/certify-cloud.yml");
+
+function workflowText(): string {
+  return readFileSync(WORKFLOW, "utf8");
+}
+
+function trimmedLines(text: string): string[] {
+  return text.split("\n").map((line) => line.trimEnd().trimStart());
+}
+
+function sliceStep(wf: string, name: string, nextName: string): string {
+  const start = wf.indexOf(`- name: ${name}`);
+  const end = wf.indexOf(`- name: ${nextName}`);
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error(`workflow step "${name}" .. "${nextName}" not found`);
+  }
+  return wf.slice(start, end);
+}
+
+function cleanupCertKeysBody(wf: string): string {
+  const match = wf.match(/cleanup_cert_keys\(\) \{([\s\S]*?)\n          \}/);
+  if (!match?.[1]) throw new Error("cleanup_cert_keys() not found");
+  return match[1];
+}
 
 describe("certify env-var contract", () => {
   it("docs/certify.md is the single source rendered from src/certify/env.ts", () => {
@@ -42,11 +66,15 @@ describe("certify env-var contract", () => {
     expect(docs).toMatch(/silently fails to authenticate/);
     expect(docs).toMatch(/service-account JSON document/);
     expect(wf).toMatch(/mktemp -p "\$\{RUNNER_TEMP:-\/tmp\}" grane-bq-XXXXXX/);
-    expect(wf).toMatch(/chmod 0600/);
+    expect(trimmedLines(wf)).toContain('chmod 0600 "$GRANE_BQ_KEY_FILE"');
+    expect(wf).not.toMatch(/chmod 0644 "\$GRANE_BQ_KEY_FILE"/);
     expect(wf).toMatch(/cleanup_bq_key\(\)/);
     expect(wf).toMatch(/trap cleanup_cert_keys EXIT/);
+    expect(cleanupCertKeysBody(wf)).toMatch(/^\s*cleanup_bq_key\s*$/m);
     expect(wf).toMatch(/name: Remove Snowflake and BigQuery key files\n {8}if: always\(\)/);
-    expect(wf).toMatch(/rm -f -- "\$GRANE_BQ_KEY_FILE"/);
+    expect(trimmedLines(sliceStep(wf, "Remove Snowflake and BigQuery key files", "Upload certification report"))).toContain(
+      'rm -f -- "$GRANE_BQ_KEY_FILE"',
+    );
     expect(wf).toMatch(/printf '%s' "\$GRANE_CERT_BIGQUERY_JSON"/);
     expect(wf).toMatch(/unset GRANE_CERT_BIGQUERY_JSON/);
     expect(wf).toMatch(/GRANE_CERT_BIGQUERY_JSON:/);
@@ -139,13 +167,17 @@ describe("certify env-var contract", () => {
     expect(grants).toMatch(/MANAGED LOCATION/);
     expect(grants).toMatch(/databricks-sql-access/);
     expect(wf).toMatch(/mktemp -p "\$\{RUNNER_TEMP:-\/tmp\}" grane-sf-XXXXXX/);
-    expect(wf).toMatch(/chmod 0600/);
+    expect(trimmedLines(wf)).toContain('chmod 0600 "$GRANE_SF_KEY_FILE"');
+    expect(wf).not.toMatch(/chmod 0644 "\$GRANE_SF_KEY_FILE"/);
     expect(wf).toMatch(/cleanup_sf_key\(\)/);
     expect(wf).toMatch(/trap cleanup_cert_keys EXIT/);
+    expect(cleanupCertKeysBody(wf)).toMatch(/^\s*cleanup_sf_key\s*$/m);
     expect(wf).toMatch(/name: Remove Snowflake and BigQuery key files\n {8}if: always\(\)/);
     expect(wf).toMatch(/printf '%s' "\$GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM"/);
     expect(wf).toMatch(/unset GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM/);
-    expect(wf).toMatch(/rm -f -- "\$GRANE_SF_KEY_FILE"/);
+    expect(trimmedLines(sliceStep(wf, "Remove Snowflake and BigQuery key files", "Upload certification report"))).toContain(
+      'rm -f -- "$GRANE_SF_KEY_FILE"',
+    );
     expect(grants).toMatch(
       /openssl genrsa 2048 \| openssl pkcs8 -topk8 -v2 aes-256-cbc -inform PEM -out rsa_key\.p8/,
     );
@@ -164,9 +196,47 @@ describe("certify env-var contract", () => {
   });
 
   it("forks do not receive GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM", () => {
-    const wf = readFileSync(join(ROOT, ".github/workflows/certify-cloud.yml"), "utf8");
+    const wf = workflowText();
     expect(wf).toMatch(
       /GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM:\s*\$\{\{ \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && secrets\.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY \|\| '' \}\}/,
+    );
+  });
+
+  it("forks do not receive GRANE_CERT_BIGQUERY_JSON", () => {
+    const wf = workflowText();
+    expect(wf).toMatch(
+      /GRANE_CERT_BIGQUERY_JSON:\s*\$\{\{ \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && secrets\.GRANE_CERT_BIGQUERY_CREDENTIALS \|\| '' \}\}/,
+    );
+  });
+
+  it("certify-cloud key handling: exact chmod, trap, always() rm, fork guard, set +x", () => {
+    // Mutations this test must catch: chmod 0644 or removed per engine,
+    // trap dropping cleanup_sf_key or cleanup_bq_key, always() dropping an rm,
+    // missing BigQuery fork guard, missing set +x.
+    const wf = workflowText();
+    const lines = trimmedLines(wf);
+    expect(lines, "Snowflake chmod 0600 removed or not 0600").toContain('chmod 0600 "$GRANE_SF_KEY_FILE"');
+    expect(lines, "BigQuery chmod 0600 removed or not 0600").toContain('chmod 0600 "$GRANE_BQ_KEY_FILE"');
+    expect(wf).not.toMatch(/chmod 0644 "\$GRANE_SF_KEY_FILE"/);
+    expect(wf).not.toMatch(/chmod 0644 "\$GRANE_BQ_KEY_FILE"/);
+
+    expect(wf).toContain("trap cleanup_cert_keys EXIT");
+    const trapBody = cleanupCertKeysBody(wf);
+    expect(trapBody, "trap/cleanup_cert_keys dropped cleanup_sf_key").toMatch(/^\s*cleanup_sf_key\s*$/m);
+    expect(trapBody, "trap/cleanup_cert_keys dropped cleanup_bq_key").toMatch(/^\s*cleanup_bq_key\s*$/m);
+
+    const always = sliceStep(wf, "Remove Snowflake and BigQuery key files", "Upload certification report");
+    expect(always).toMatch(/if: always\(\)/);
+    const alwaysLines = trimmedLines(always);
+    expect(alwaysLines, "always() missing Snowflake rm").toContain('rm -f -- "$GRANE_SF_KEY_FILE"');
+    expect(alwaysLines, "always() missing BigQuery rm").toContain('rm -f -- "$GRANE_BQ_KEY_FILE"');
+    expect(alwaysLines, "always() missing set +x").toContain("set +x");
+
+    const certify = sliceStep(wf, "Certify ${{ matrix.engine }}", "Remove Snowflake and BigQuery key files");
+    expect(trimmedLines(certify), "certify step missing set +x").toContain("set +x");
+
+    expect(wf).toMatch(
+      /GRANE_CERT_BIGQUERY_JSON:\s*\$\{\{ \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && secrets\.GRANE_CERT_BIGQUERY_CREDENTIALS \|\| '' \}\}/,
     );
   });
 
