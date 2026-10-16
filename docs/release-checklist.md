@@ -18,15 +18,19 @@ step below has actually passed **and** `WAREHOUSE_CERTIFICATION` is updated.
 
 ### 5. Credentialed `certify-cloud` on the exact RC commit
 
-Kieran adds `GRANE_CERT_*` secrets and dispatches
-`.github/workflows/certify-cloud.yml` against the exact release-candidate
-commit (not a later tip). A pending or skipped dispatch does not change
-the matrix. See [certify.md](certify.md).
+Kieran adds `GRANE_CERT_*` secrets (least-privilege accounts — not the
+runtime read-only user — in [certify-grants.md](certify-grants.md)) and
+dispatches `.github/workflows/certify-cloud.yml` against the exact
+release-candidate commit (not a later tip). A pending or skipped dispatch
+does not change the matrix. See [certify.md](certify.md).
 
 ### 8. QA independent RC certification
 
-QA runs an independent certification of that same RC commit (separate
-credentials / environment from step 5). A green public OSS CI run is not
+QA runs an independent certification of that same RC commit with a
+**separate credential set** from step 5 (different Snowflake user, BigQuery
+service account, Databricks token / service principal, and Redshift user —
+same grants, never the same passwords/keys/PATs). Recipe:
+[certify-grants.md](certify-grants.md). A green public OSS CI run is not
 this step.
 
 ## Also on hold

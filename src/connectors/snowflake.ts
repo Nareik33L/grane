@@ -1,3 +1,5 @@
+import { createPrivateKey } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import type { ConnectionConfig, LimitsConfig, Scalar } from "../config/schema.js";
 import { configError } from "../errors.js";
 import { snowflakeDialect } from "./dialect.js";
@@ -7,6 +9,70 @@ import { unsafeQuery } from "../errors.js";
 
 /** Warehouse QUERY_TAG so certify / MCP work is attributable in Snowflake history. */
 export const SNOWFLAKE_QUERY_TAG = "grane";
+
+function looksLikePem(value: string): boolean {
+  return /BEGIN [A-Z ]*PRIVATE KEY/.test(value);
+}
+
+/** Runtime PKCS8 from connection.private_key only — never process.env. */
+function runtimePrivateKey(value: string, passphrase?: string): string {
+  const normalized = looksLikePem(value) ? value.replace(/\\n/g, "\n") : value;
+  const pem = looksLikePem(normalized)
+    ? normalized
+    : (() => {
+        try {
+          if (!statSync(value).isFile()) {
+            throw configError("Snowflake connection.private_key is not a PEM document or a key file path.");
+          }
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+            throw configError("Snowflake connection.private_key is not a PEM document or a readable key file path.");
+          }
+          throw err;
+        }
+        return readFileSync(value, "utf8");
+      })();
+  const key = createPrivateKey({
+    key: pem,
+    format: "pem",
+    passphrase: passphrase || undefined,
+  });
+  return key.export({ format: "pem", type: "pkcs8" }).toString();
+}
+
+/**
+ * snowflake-sdk createConnection options for the runtime connector.
+ * Existing password users stay byte-identical to main (password field, no
+ * authenticator). Optional connection.private_key / private_key_passphrase
+ * enable key-pair. Never reads process.env.
+ */
+export function snowflakeRuntimeCreateOptions(connection: ConnectionConfig): Record<string, unknown> {
+  const schemaName = connection.schema || "PUBLIC";
+  const key = connection.private_key?.trim();
+  if (key) {
+    return {
+      account: connection.account,
+      username: connection.user,
+      warehouse: connection.warehouse,
+      database: connection.database,
+      schema: schemaName,
+      role: connection.role,
+      application: "Grane",
+      authenticator: "SNOWFLAKE_JWT",
+      privateKey: runtimePrivateKey(key, connection.private_key_passphrase),
+    };
+  }
+  return {
+    account: connection.account,
+    username: connection.user,
+    password: connection.password,
+    warehouse: connection.warehouse,
+    database: connection.database,
+    schema: schemaName,
+    role: connection.role,
+    application: "Grane",
+  };
+}
 
 /** Session SQL applied before every Snowflake query. */
 export function snowflakeSessionSetupSql(timeoutMs: number): {
@@ -60,16 +126,7 @@ export class SnowflakeConnector implements WarehouseConnector {
     if (!account && !this.connection.url) {
       throw configError("Snowflake connection requires connection.account (and user/password/warehouse/database).");
     }
-    const conn = create({
-      account,
-      username: this.connection.user,
-      password: this.connection.password,
-      warehouse: this.connection.warehouse,
-      database: this.connection.database,
-      schema: this.schemaName,
-      role: this.connection.role,
-      application: "Grane",
-    });
+    const conn = create(snowflakeRuntimeCreateOptions(this.connection));
     await new Promise<void>((resolve, reject) => {
       conn.connect((err) => (err ? reject(err) : resolve()));
     });

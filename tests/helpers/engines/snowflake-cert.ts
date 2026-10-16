@@ -3,6 +3,11 @@ import type { ExecutedRows } from "../../../src/connectors/types.js";
 import { cloudCertCredentialsAvailable } from "../../../src/certify/env.js";
 import { rethrowCreateNamespaceFailure } from "../../../src/certify/errors.js";
 import { newCertifySchemaName } from "../../../src/certify/schema.js";
+import {
+  resolveSnowflakeCertAuth,
+  snowflakeSdkAuthFields,
+  warnSnowflakePasswordAuth,
+} from "../../../src/certify/snowflake-auth.js";
 import { certConfig } from "../../fixtures/pg-cert.js";
 import { ddl } from "../../certification/ddl.js";
 import type { CertCapabilities, CertEngine, CertSession } from "../cert-engine.js";
@@ -69,14 +74,22 @@ export const snowflakeCertEngine: CertEngine = {
     if (!createConnection) throw new Error("snowflake-sdk did not export createConnection.");
     const schemaName = newCertifySchemaName();
     const database = process.env.GRANE_CERT_SNOWFLAKE_DATABASE!;
+    const auth = resolveSnowflakeCertAuth();
+    if (auth.kind === "missing") {
+      throw new Error(
+        "Snowflake cert env missing: GRANE_CERT_SNOWFLAKE_PASSWORD or GRANE_CERT_SNOWFLAKE_PRIVATE_KEY",
+      );
+    }
+    warnSnowflakePasswordAuth(auth);
+    const keyPath = process.env.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY?.trim();
     const conn = createConnection({
       account: process.env.GRANE_CERT_SNOWFLAKE_ACCOUNT,
       username: process.env.GRANE_CERT_SNOWFLAKE_USER,
-      password: process.env.GRANE_CERT_SNOWFLAKE_PASSWORD,
       warehouse: process.env.GRANE_CERT_SNOWFLAKE_WAREHOUSE,
       database,
       role: process.env.GRANE_CERT_SNOWFLAKE_ROLE,
       application: "GraneCertify",
+      ...snowflakeSdkAuthFields(auth),
     });
     await new Promise<void>((resolve, reject) => {
       conn.connect((err) => (err ? reject(err) : resolve()));
@@ -104,7 +117,9 @@ export const snowflakeCertEngine: CertEngine = {
       type: "snowflake",
       account: process.env.GRANE_CERT_SNOWFLAKE_ACCOUNT,
       user: process.env.GRANE_CERT_SNOWFLAKE_USER,
-      password: process.env.GRANE_CERT_SNOWFLAKE_PASSWORD,
+      password: auth.kind === "password" ? process.env.GRANE_CERT_SNOWFLAKE_PASSWORD : undefined,
+      private_key: auth.kind === "jwt" ? keyPath : undefined,
+      private_key_passphrase: process.env.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE,
       warehouse: process.env.GRANE_CERT_SNOWFLAKE_WAREHOUSE,
       database,
       schema: schemaName,

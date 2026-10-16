@@ -30,27 +30,33 @@ the map exactly (`certified` vs `self_certifiable`).
 
 Cloud adapters call `available()` false (and `grane certify` skips) when the
 required `GRANE_CERT_*` variables below are unset. They are **in-repo**, not
-live in OSS CI. Do not point these at a production read-only user; the cert
-role must be allowed to create and drop `grane_cert_<runid>` only.
+live in OSS CI. Do not point these at a production read-only user — this
+certification account is **not** the runtime read-only user. Exact
+least-privilege GRANT SQL and IAM roles (Snowflake, BigQuery, Databricks
+Unity Catalog, Redshift), plus gate 8’s separate QA credentials, are in
+[certify-grants.md](certify-grants.md). The cert role must be allowed to
+create and drop `grane_cert_<runid>` only.
 
 | Engine | Required | Optional | Isolated namespace |
 | --- | --- | --- | --- |
-| `snowflake` | `GRANE_CERT_SNOWFLAKE_ACCOUNT`, `GRANE_CERT_SNOWFLAKE_USER`, `GRANE_CERT_SNOWFLAKE_PASSWORD`, `GRANE_CERT_SNOWFLAKE_WAREHOUSE`, `GRANE_CERT_SNOWFLAKE_DATABASE` | `GRANE_CERT_SNOWFLAKE_ROLE` | schema `grane_cert_<runid>` |
+| `snowflake` | `GRANE_CERT_SNOWFLAKE_ACCOUNT`, `GRANE_CERT_SNOWFLAKE_USER`, `GRANE_CERT_SNOWFLAKE_WAREHOUSE`, `GRANE_CERT_SNOWFLAKE_DATABASE` | `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY`, `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE`, `GRANE_CERT_SNOWFLAKE_PASSWORD`, `GRANE_CERT_SNOWFLAKE_ROLE` | schema `grane_cert_<runid>` |
 | `bigquery` | `GRANE_CERT_BIGQUERY_PROJECT` | `GRANE_CERT_BIGQUERY_LOCATION`, `GRANE_CERT_BIGQUERY_CREDENTIALS` | dataset `grane_cert_<runid>` |
 | `databricks` | `GRANE_CERT_DATABRICKS_HOST`, `GRANE_CERT_DATABRICKS_HTTP_PATH`, `GRANE_CERT_DATABRICKS_TOKEN` | `GRANE_CERT_DATABRICKS_CATALOG` | schema `grane_cert_<runid>` |
 | `redshift` | `GRANE_CERT_REDSHIFT_URL` | — | schema `grane_cert_<runid>` |
 
 ### `snowflake`
 
-Creates and drops schema `grane_cert_<runid>`. QUERY_TAG=grane and STATEMENT_TIMEOUT come from limits.
+Creates and drops schema `grane_cert_<runid>`. Prefer TYPE=SERVICE key-pair (`GRANE_CERT_SNOWFLAKE_PRIVATE_KEY`); a user with no TYPE is human/PERSON and needs MFA, so an automated certify run will fail. Password auth is kept for compatibility and prints a warning. QUERY_TAG=grane and STATEMENT_TIMEOUT come from limits.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `GRANE_CERT_SNOWFLAKE_ACCOUNT` | yes | Account identifier (e.g. xy12345.us-east-1) |
-| `GRANE_CERT_SNOWFLAKE_USER` | yes | User that can CREATE SCHEMA |
-| `GRANE_CERT_SNOWFLAKE_PASSWORD` | yes | Password |
+| `GRANE_CERT_SNOWFLAKE_USER` | yes | TYPE=SERVICE user that can CREATE SCHEMA |
 | `GRANE_CERT_SNOWFLAKE_WAREHOUSE` | yes | Warehouse |
 | `GRANE_CERT_SNOWFLAKE_DATABASE` | yes | Database that will own `grane_cert_<runid>` |
+| `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY` | no | PKCS8 PEM path or PEM body for key-pair auth (preferred). GitHub secret is the PEM; the workflow writes a 0600 temp file under RUNNER_TEMP. |
+| `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | no | Passphrase if the private key is encrypted |
+| `GRANE_CERT_SNOWFLAKE_PASSWORD` | no | Legacy password or PAT (warns as password/PAT; password-only sign-in is being phased out) |
 | `GRANE_CERT_SNOWFLAKE_ROLE` | no | Role (optional) |
 
 ### `bigquery`
@@ -72,7 +78,7 @@ Creates and drops schema `grane_cert_<runid>`. queryTimeout is limits.timeout_ms
 | `GRANE_CERT_DATABRICKS_HOST` | yes | Workspace host (xxx.cloud.databricks.com) |
 | `GRANE_CERT_DATABRICKS_HTTP_PATH` | yes | SQL warehouse HTTP path |
 | `GRANE_CERT_DATABRICKS_TOKEN` | yes | PAT / service-principal token that can CREATE SCHEMA |
-| `GRANE_CERT_DATABRICKS_CATALOG` | no | Unity Catalog (default main) |
+| `GRANE_CERT_DATABRICKS_CATALOG` | no | Unity Catalog name; set this — unset falls back to main |
 
 ### `redshift`
 
@@ -132,10 +138,11 @@ Locally, keep setting `GRANE_CERT_BIGQUERY_CREDENTIALS` to a key file path
 (or omit it and use ADC / `GOOGLE_APPLICATION_CREDENTIALS`).
 
 **Pending release step:** do not dispatch this workflow with real warehouse
-secrets from a public PR. Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
+secrets from a public PR. Kieran adds `GRANE_CERT_*` (least-privilege
+accounts in [certify-grants.md](certify-grants.md)) and runs `certify-cloud`
 once before the V2 tag. Listed on [release-checklist.md](release-checklist.md)
-together with QA's independent RC cert. Do not run those steps from this PR.
-npm publish stays on hold.
+together with QA's independent RC cert, which needs a **separate credential
+set**. Do not run those steps from this PR. npm publish stays on hold.
 
 Cloud engines are compile-supported (`self_certifiable`), not
 runtime-certified. See [warehouses.md](warehouses.md#runtime-certified).
