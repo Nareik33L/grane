@@ -9,7 +9,9 @@
   / “do not …” deny certified only in the same sentence or negation window
   (a later Self-certify sentence does not excuse an earlier certified
   claim). Negation stops at and / or / but. Checks split on sentences and
-  list markers. No publish, tag, or tokens.
+  list markers. Sentence splits skip e.g. / i.e. / etc. / vs. A
+  parenthetical self-certify does not deny certified. No publish, tag, or
+  tokens.
 - **Honest OSS README (Release 1 item 3).** README warehouse matrix matches
   `WAREHOUSE_CERTIFICATION`: PostgreSQL 16, MySQL 8, DuckDB 1.5, and
   ClickHouse 24 are certified.

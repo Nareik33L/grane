@@ -98,20 +98,54 @@ function findClaims(text: string): Array<{ kind: ClaimKind; start: number; end: 
 const NEGATION_BEFORE =
   /(?:^|[^A-Za-z])(?:isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|doesn['’]?t|don['’]?t|won['’]?t|do\s+not|does\s+not|not|never)(?:[\s/*-]+(?!(?:and|or|but)\b)\w+){0,4}[\s/*-]*$/i;
 
+function isAbbrevPeriod(text: string, periodIndex: number): boolean {
+  return /(?:^|[^A-Za-z])(?:e\.g|i\.e|etc|vs)$/i.test(text.slice(Math.max(0, periodIndex - 5), periodIndex));
+}
+
+function nextBoundary(text: string, from: number): { index: number; length: number } | null {
+  const slice = text.slice(from);
+  const re = /[.!?]\s+(?=[A-Z`"'(])|\s+[-*+]\s+/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(slice)) !== null) {
+    const abs = from + match.index;
+    if (match[0].startsWith(".") && isAbbrevPeriod(text, abs)) continue;
+    return { index: abs, length: match[0].length };
+  }
+  return null;
+}
+
 /** Sentence or list item that contains `index` (claimIsDenied scope). */
 function unitSlice(text: string, index: number): string {
   let start = 0;
-  const bound = /[.!?]\s+(?=[A-Z`"'(])|\s+[-*+]\s+/g;
-  let match: RegExpExecArray | null;
-  while ((match = bound.exec(text)) !== null) {
-    const next = match.index + match[0].length;
-    if (next <= index) start = next;
-    else break;
+  let from = 0;
+  for (;;) {
+    const boundary = nextBoundary(text, from);
+    if (!boundary) return text.slice(start);
+    const next = boundary.index + boundary.length;
+    if (next <= index) {
+      start = next;
+      from = next;
+      continue;
+    }
+    return text.slice(start, boundary.index);
   }
-  const after = text.slice(index);
-  const endRel = after.search(/[.!?]\s+(?=[A-Z`"'(])|\s+[-*+]\s+/);
-  const end = endRel === -1 ? text.length : index + endRel;
-  return text.slice(start, end);
+}
+
+function splitSentences(chunk: string): string[] {
+  const parts: string[] = [];
+  let last = 0;
+  let from = 0;
+  for (;;) {
+    const boundary = nextBoundary(chunk, from);
+    if (!boundary) break;
+    const includePunct = /[.!?]/.test(chunk[boundary.index] ?? "");
+    parts.push(chunk.slice(last, boundary.index + (includePunct ? 1 : 0)).trim());
+    last = boundary.index + boundary.length;
+    from = last;
+  }
+  const tail = chunk.slice(last).trim();
+  if (tail) parts.push(tail);
+  return parts.length > 0 ? parts : [chunk.trim()].filter(Boolean);
 }
 
 function splitCheckUnits(text: string): string[] {
@@ -120,9 +154,13 @@ function splitCheckUnits(text: string): string[] {
   const items = flat.split(/(?:^|\s+)(?:[-*+]|\d+\.)\s+/).map((part) => part.trim()).filter(Boolean);
   const chunks = items.length > 0 ? items : [flat];
   return chunks.flatMap((chunk) => {
-    const sentences = chunk.split(/(?<=[.!?])\s+(?=[A-Z`"'(])/).map((part) => part.trim()).filter(Boolean);
+    const sentences = splitSentences(chunk);
     return sentences.length > 0 ? sentences : [chunk];
   });
+}
+
+function stripParentheticals(text: string): string {
+  return text.replace(/\([^()]*\)/g, " ");
 }
 
 function claimIsDenied(text: string, claim: { kind: ClaimKind; start: number; end: number }): boolean {
@@ -131,7 +169,7 @@ function claimIsDenied(text: string, claim: { kind: ClaimKind; start: number; en
   if (claim.kind !== "certified") return false;
   const token = text.slice(Math.max(0, claim.start - 1), claim.end + 1);
   if (/^`certified`$/i.test(token)) return true;
-  const sentence = unitSlice(text, claim.start);
+  const sentence = stripParentheticals(unitSlice(text, claim.start));
   if (/self_certifiable|self-certify/i.test(sentence)) return true;
   if (/do not (?:write|call|claim|say|treat)/i.test(sentence)) return true;
   return false;
@@ -576,6 +614,29 @@ describe("warehouse certification map", () => {
       ]),
     ).toEqual([]);
     expect(lineOverclaimsUncertified("- Snowflake is production-ready\n- PostgreSQL is fine.", snowflake)).toBe(true);
+  });
+
+  it("does not split sentences after e.g., i.e., etc., or vs.", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    const bigquery = engineAliases(WAREHOUSE_CERTIFICATION.bigquery);
+    expect(lineOverclaimsUncertified("Some engines are production-ready, e.g. Snowflake.", snowflake)).toBe(true);
+    expect(
+      lineOverclaimsUncertified("Production-ready engines, e.g. Snowflake and BigQuery, are listed.", snowflake),
+    ).toBe(true);
+    expect(
+      lineOverclaimsUncertified("Production-ready engines, e.g. Snowflake and BigQuery, are listed.", bigquery),
+    ).toBe(true);
+    expect(lineOverclaimsUncertified("Grane is production-ready, i.e. Snowflake.", snowflake)).toBe(true);
+    expect(lineOverclaimsUncertified("Certified warehouses vs. Snowflake are listed.", snowflake)).toBe(true);
+  });
+
+  it("does not treat a parenthetical self-certify as denying certified", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    const sample = "Snowflake is certified (`grane certify` to self-certify).";
+    expect(lineOverclaimsUncertified(sample, snowflake)).toBe(true);
+    const certified = findClaims(sample).find((claim) => claim.kind === "certified");
+    expect(certified).toBeTruthy();
+    expect(claimIsDenied(sample, certified!)).toBe(false);
   });
 
   it("every warehouse state table in docs/README matches the certified matrix", () => {
