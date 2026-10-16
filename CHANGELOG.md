@@ -12,7 +12,9 @@
   commit whose metric YAML matches), **not** the moving base tip. The pinned
   commit must be reachable from the configured base branch. If the
   proposal is not merged (or squash/rebase YAML does not match), approve
-  refuses with a clear message — it never pins silently. When a tracked
+  refuses with a clear message — it never pins silently. Known limit:
+  identical YAML pushed straight to the base counts as merged (YAML match);
+  close that with branch protection and T2. When a tracked
   pin exists, **rollback** prepares a `grane/pin/*` branch and `gh pr
   create` like approve (it never pushes or merges); writing only
   `.grane/active.json` would be ignored because `grane.pin.json` wins.

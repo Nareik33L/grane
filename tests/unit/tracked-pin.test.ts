@@ -552,6 +552,39 @@ describe("tracked pin (T1)", () => {
     expect(pinBranches(dir)).toEqual([]);
     expect(git(dir, ["rev-parse", "main"])).toBe(tip);
   });
+
+  it("identical YAML pushed straight to main counts as merged (known limit; branch protection / T2)", () => {
+    // Known limit: squash/rebase detection is YAML equality on the base, so a
+    // direct push of the same metrics.yml is indistinguishable from a squash.
+    // Closed by GitHub branch protection (no direct pushes to main) and T2.
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    expect(isReachableFromBase(dir, proposal.commit)).toBe(false);
+    writeFileSync(join(dir, "metrics.yml"), REVENUE);
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "identical YAML pushed straight to main"]);
+    const direct = git(dir, ["rev-parse", "HEAD"]);
+    const later = laterUnrelatedCommit(dir, "docs after direct push");
+    expect(isReachableFromBase(dir, proposal.commit)).toBe(false);
+    const approval = readMergedApproval(dir, proposal.id, { against: "base" });
+    expect(approval.merged).toBe(true);
+    expect(approval.merge_commit).toBe(direct);
+    expect(approval.merge_commit).not.toBe(proposal.commit);
+    expect(approval.merge_commit).not.toBe(later);
+    expect(resolveProposalMergedCommit(dir, proposal.commit, later)).toBe(direct);
+    const result = approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
+    expect(result.commit).toBe(direct);
+    expect(isReachableFromBase(dir, result.commit)).toBe(true);
+  });
 });
 
 describe("tracked pin two-clone (real CLI, no network)", () => {

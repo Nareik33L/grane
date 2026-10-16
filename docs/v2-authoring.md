@@ -166,7 +166,9 @@ grane proposals rollback [--to <sha>] [--approved-by NAME]
   `grane/pin/*` and prints `gh pr create`. Does not merge or push the base.
   `approved_by` defaults to `git user.name`. Legacy `.grane/active.json`
   users: approve used to pin the base tip; it now pins the proposal's merged
-  commit.
+  commit. Known limit: identical YAML committed straight to the base (no PR)
+  matches as if squash-merged. Close that with branch protection (no direct
+  pushes to `main`) and T2.
 - **reject** — deletes the proposal ref after the audit line (restores the SHA
   if that write fails). TTY prompts `y/N` unless `--yes`. Does not write the pin.
 - **rollback** — re-pins `previous_commit`, or `--to` of a previously approved
