@@ -17,10 +17,13 @@
   settings. Guide: [docs/team-setup.md](docs/team-setup.md) (org-wide MCP
   template: host/port/db/user, password via `${GRANE_DB_PASSWORD}` /
   `${DATABASE_URL}`, never a literal in the shared file). `connection.*`
-  interpolates `${VAR}` in a single pass (a template `DATABASE_URL` is
-  expanded once; substituted values are not re-scanned; userinfo is
-  URL-encoded; unset variables name only the variable). Origin parsing
-  requires host `github.com` exactly.
+  interpolates `${VAR}` in a single pass (env values are never treated as
+  templates; YAML URL userinfo `${VAR}` is always `encodeURIComponent`'d
+  from the raw bytes — never decode-then-re-encode; a complete env DSN is
+  the opt-out and is inserted as-is; unset variables stay at load so
+  offline validate / doctor / mcp doctor can run, and are refused at
+  connect naming only the variable). Origin parsing requires host
+  `github.com` exactly.
 - **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
   same claim: “Snowflake is production-ready, not certified by us yet”
   fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase

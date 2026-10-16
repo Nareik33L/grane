@@ -52,9 +52,8 @@ function tempDir(): string {
   return dir;
 }
 
-const SETUP_TEST_DATABASE_URL = "postgres://ro@localhost/app";
 function setupEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? SETUP_TEST_DATABASE_URL, ...extra };
+  return { ...process.env, ...extra };
 }
 
 function runGraneCli(args: string[]): { status: number; stdout: string; stderr: string } {

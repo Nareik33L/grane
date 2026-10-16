@@ -10,8 +10,10 @@ import { DatabricksConnector, databricksSchemaNamespace } from "./databricks.js"
 import type { WarehouseConnector } from "./types.js";
 import type { WarehouseType } from "./dialect.js";
 import { getDialect } from "./dialect.js";
+import { assertConnectionResolved } from "../config/load.js";
 
 export function createConnector(connection: ConnectionConfig): WarehouseConnector {
+  assertConnectionResolved(connection);
   const type = connection.type as WarehouseType;
   switch (type) {
     case "postgres":

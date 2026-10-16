@@ -90,32 +90,43 @@ function applyAuditEnvOverrides(config: GraneConfig): void {
 }
 
 const PLACEHOLDER = /\$\{([A-Z0-9_]+)(?::-([^}]*))?\}/g;
-const PLACEHOLDER_PRESENT = /\$\{[A-Z0-9_]+(?::-[^}]*)?\}/;
 const URL_SCHEME = /[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
+/** Connection keys that interpolate `${VAR}` (and that live connect may refuse). */
+export const CONNECTION_ENV_FIELDS = [
+  "url",
+  "host",
+  "database",
+  "user",
+  "password",
+  "account",
+  "warehouse",
+  "role",
+  "project",
+  "dataset",
+  "location",
+  "credentials",
+  "path",
+  "catalog",
+  "http_path",
+  "token",
+] as const;
 
 export interface InterpolateEnvOptions {
   /** Connection field name (`url`, `password`, …). Audit/auth omit this. */
   field?: string;
   /**
-   * `refuse` (default): an unset referenced variable throws, naming only
-   * that variable. `leave`: keep `${VAR}` — historical behaviour for
-   * audit.path / auth tokens; not used for connection fields.
+   * `refuse` (default for the interpolator): an unset referenced variable
+   * throws, naming only that variable. `leave`: keep `${VAR}` (load-time
+   * for connection fields so `validate --offline` / `doctor` can run).
    */
   unset?: "refuse" | "leave";
   /**
-   * When the YAML value is exactly `${VAR}` and that env value is itself a
-   * URL template, expand that template's original text once. Never re-scan
-   * substituted values. Default true unless `unset` is `leave`.
+   * When `unset` is `leave`, YAML placeholders that were not substituted
+   * are appended here. Used so connect-time refusal names the variable
+   * without guessing whether a later env DSN contained `${…}`.
    */
-  expandUrlTemplates?: boolean;
-}
-
-function hasPlaceholder(text: string): boolean {
-  return PLACEHOLDER_PRESENT.test(text);
-}
-
-function isUrlTemplate(text: string): boolean {
-  return URL_SCHEME.test(text) && hasPlaceholder(text);
+  unresolved?: string[];
 }
 
 /** Byte range of URL userinfo (`user:password` before the first `@`). */
@@ -133,15 +144,21 @@ function unsetVariableError(name: string): never {
 }
 
 /**
- * One pass over `template`'s original text. Substituted env values are
- * inserted as-is (URL-encoded when they sit in userinfo) and are never
- * scanned for further `${…}`.
+ * One pass over `template`'s original YAML text. Substituted env values are
+ * inserted as-is and never scanned for further `${…}`.
+ *
+ * Encoding rule (predictable; never decode-then-re-encode):
+ * - `${VAR}` that sits in a YAML URL's userinfo is always
+ *   `encodeURIComponent`'d from the raw env/default bytes.
+ * - A complete DSN substituted for a whole-value `${DATABASE_URL}` (no
+ *   scheme in the YAML itself) is the opt-out: inserted raw, not encoded.
  */
 function expandOnce(
   template: string,
   env: NodeJS.ProcessEnv,
   unset: "refuse" | "leave",
   encodeUserinfo: boolean,
+  unresolved?: string[],
 ): string {
   const span = encodeUserinfo ? userinfoSpan(template) : null;
   let out = "";
@@ -159,6 +176,7 @@ function expandOnce(
       replacement = fallback;
     } else if (unset === "leave") {
       replacement = match[0];
+      unresolved?.push(name);
     } else {
       unsetVariableError(name);
     }
@@ -175,11 +193,11 @@ function expandOnce(
 /**
  * Interpolates `${VAR}` and `${VAR:-default}` in connection settings.
  * Single pass: a substituted value that itself contains `${…}` is not
- * expanded again (no recursion, no injection from env values).
+ * expanded again (env values are never treated as templates).
  *
- * A template URL in env is still supported — `DATABASE_URL=postgres://u:${GRANE_DB_PASSWORD}@h/db`
- * — by expanding that env value's own text once, never the substituted
- * password. Substitutions inside URL userinfo are URL-encoded.
+ * Userinfo encoding applies only to `${VAR}` fragments in a YAML URL
+ * template, always of the raw value (`100%40off` → `100%2540off`). A
+ * complete DSN from env (`url: ${DATABASE_URL}`) is inserted as-is.
  *
  * Grane does not read the MCP client's JSON; the client copies `env`
  * onto the process, then this runs when loading `grane.yml`.
@@ -192,28 +210,45 @@ export function interpolateEnv(
   if (typeof value !== "string") return value;
   const opts: InterpolateEnvOptions = typeof options === "number" ? {} : options;
   const unset = opts.unset ?? "refuse";
-  const expandUrlTemplates = opts.expandUrlTemplates ?? unset === "refuse";
   const field = opts.field;
   const encodeUserinfo = field === "url" || (field === undefined && URL_SCHEME.test(value));
+  return expandOnce(value, env, unset, encodeUserinfo, opts.unresolved);
+}
 
-  if (expandUrlTemplates && (field === "url" || field === undefined)) {
-    const whole = /^\$\{([A-Z0-9_]+)(?::-([^}]*))?\}$/.exec(value);
-    if (whole) {
-      const name = whole[1]!;
-      const fallback = whole[2];
-      const found = env[name];
-      if (found === undefined && fallback === undefined) {
-        if (unset === "refuse") unsetVariableError(name);
-      } else {
-        const raw = found !== undefined ? found : (fallback as string);
-        if (isUrlTemplate(raw)) {
-          return expandOnce(raw, env, unset, true);
-        }
-      }
-    }
+/** YAML `${VAR}` names that `loadConfig` left unsubstituted on this connection. */
+const unresolvedYamlVars = new WeakMap<object, string[]>();
+
+export function rememberUnresolvedConnectionVars(connection: object, names: string[]): void {
+  unresolvedYamlVars.set(connection, names);
+}
+
+export function firstUnresolvedPlaceholder(text: string): string | null {
+  const match = new RegExp(PLACEHOLDER.source).exec(text);
+  return match ? match[1]! : null;
+}
+
+/**
+ * Refuse leftover YAML `${VAR}` at connect / live warehouse paths.
+ * Names only that variable; never echoes the URL or other field values.
+ *
+ * When `connection` came from `loadConfig`, only YAML-referenced names
+ * that were unset are refused — an env DSN whose password happens to
+ * contain `${UPPER}` stays literal. Direct callers without that memory
+ * refuse the first `${VAR}` in a connection env field.
+ */
+export function assertConnectionResolved(connection: object): void {
+  const tracked = unresolvedYamlVars.get(connection);
+  if (tracked) {
+    if (tracked.length > 0) unsetVariableError(tracked[0]!);
+    return;
   }
-
-  return expandOnce(value, env, unset, encodeUserinfo);
+  const record = connection as Record<string, unknown>;
+  for (const field of CONNECTION_ENV_FIELDS) {
+    const value = record[field];
+    if (typeof value !== "string") continue;
+    const name = firstUnresolvedPlaceholder(value);
+    if (name) unsetVariableError(name);
+  }
 }
 
 function nativeContribution(config: GraneConfig): SemanticContribution {
@@ -282,37 +317,26 @@ export function loadConfig(projectDir: string, options: LoadConfigOptions = {}):
     }
   }
 
-  // Environment interpolation for connection secrets.
+  // Environment interpolation for connection secrets. Unset `${VAR}` stays
+  // so offline validate / doctor can load init YAML; live connect refuses.
   const env = options.env ?? process.env;
+  const unresolved: string[] = [];
   const connection = merged["connection"] as Record<string, unknown> | undefined;
   if (connection) {
-    for (const field of [
-      "url",
-      "host",
-      "database",
-      "user",
-      "password",
-      "account",
-      "warehouse",
-      "role",
-      "project",
-      "dataset",
-      "location",
-      "credentials",
-      "path",
-      "catalog",
-      "http_path",
-      "token",
-    ]) {
+    for (const field of CONNECTION_ENV_FIELDS) {
       if (field in connection) {
-        connection[field] = interpolateEnv(connection[field], env, { field });
+        connection[field] = interpolateEnv(connection[field], env, {
+          field,
+          unset: "leave",
+          unresolved,
+        });
       }
     }
   }
 
   const audit = merged["audit"] as Record<string, unknown> | undefined;
   if (audit && "path" in audit) {
-    audit.path = interpolateEnv(audit.path, env, { unset: "leave", expandUrlTemplates: false });
+    audit.path = interpolateEnv(audit.path, env, { unset: "leave" });
   }
 
   const auth = merged["auth"] as Record<string, unknown> | undefined;
@@ -320,7 +344,7 @@ export function loadConfig(projectDir: string, options: LoadConfigOptions = {}):
   for (const agent of agents) {
     if (agent && typeof agent === "object" && !Array.isArray(agent)) {
       const record = agent as Record<string, unknown>;
-      const leave = { unset: "leave" as const, expandUrlTemplates: false };
+      const leave = { unset: "leave" as const };
       if ("token" in record) record.token = interpolateEnv(record.token, env, leave);
       if ("token_sha256" in record) {
         record.token_sha256 = interpolateEnv(record.token_sha256, env, leave);
@@ -358,6 +382,7 @@ export function loadConfig(projectDir: string, options: LoadConfigOptions = {}):
   }
 
   const config = finalParsed.data;
+  rememberUnresolvedConnectionVars(config.connection, unresolved);
   applyAuditEnvOverrides(config);
   validateAuthConfig(config);
   for (const agent of config.auth.agents) {

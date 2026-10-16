@@ -11,6 +11,7 @@ import {
   connectionPoolSize,
 } from "../types.js";
 import { unsafeQuery } from "../../errors.js";
+import { assertConnectionResolved } from "../../config/load.js";
 
 export const POSTGRES_READ_ONLY_BEGIN = "BEGIN TRANSACTION READ ONLY";
 export const POSTGRES_SESSION_UTC = "SET LOCAL TIME ZONE 'UTC'";
@@ -24,12 +25,10 @@ export function postgresStatementTimeoutSql(timeoutMs: number): string {
 const { Pool } = pg;
 
 export function createPgPool(connection: ConnectionConfig): pg.Pool {
+  assertConnectionResolved(connection);
   const ssl = warehouseSslOptions(connection);
   const max = connectionPoolSize(connection);
   if (connection.url) {
-    if (connection.url.includes("${")) {
-      throw configError("Connection URL contains an unresolved environment variable.");
-    }
     return new Pool({
       connectionString: connection.url,
       ssl,

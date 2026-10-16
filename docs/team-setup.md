@@ -107,32 +107,39 @@ password or key stays on their machine. Grane does **not** parse the MCP
 JSON; the client launches `grane` and copies `env` onto the process. Grane
 then expands `${VAR}` in `grane.yml` `connection.*` only (not metric SQL
 or other keys). Expansion is a single pass: a substituted value that
-itself contains `${…}` is not expanded again. A template URL in env
-(`${DATABASE_URL}=postgres://u:${GRANE_DB_PASSWORD}@h/db`) is expanded
-by scanning that template's own text once, never the substituted
-password. Substitutions in URL userinfo are URL-encoded. An unset
-variable refuses with an error that names only that variable.
+itself contains `${…}` is not expanded again, and **env values are never
+treated as templates**.
 
-Committed `grane.yml` already uses this (from `grane init`):
+Encoding is one predictable rule, never a guess about “already encoded”:
+
+- `${VAR}` fragments that sit in a **YAML URL's userinfo** (the
+  `user:password` before `@`) are always `encodeURIComponent`'d from the
+  raw env/default bytes. A password `100%40off` becomes `100%2540off`;
+  `p%40ss` becomes `p%2540ss`. Grane does not decode first.
+- A **complete DSN** substituted for `url: ${DATABASE_URL}` is the
+  opt-out: inserted as-is, so an already-encoded password in that DSN is
+  not encoded again.
+
+Unset `${VAR}` is left in the loaded config so `grane validate --offline`,
+`grane doctor --json`, and `grane mcp doctor` can run. Connecting (or any
+live warehouse path) refuses with an error that names only that variable.
+
+Put the URL **template in YAML**, not in MCP `env`. Committed `grane.yml`:
 
 ```yaml
 connection:
   type: postgres
-  url: ${DATABASE_URL}
+  url: postgres://grane_ro:${GRANE_DB_PASSWORD}@warehouse.example.com:5432/analytics
 ```
 
-Shared MCP template — host, port, database, and a user name; password is
-an env reference, not a literal:
+Shared MCP config — command and args only; no DSN, no password:
 
 ```json
 {
   "mcpServers": {
     "grane": {
       "command": "grane",
-      "args": ["-p", "/opt/analytics", "serve", "--stdio"],
-      "env": {
-        "DATABASE_URL": "postgres://grane_ro:${GRANE_DB_PASSWORD}@warehouse.example.com:5432/analytics"
-      }
+      "args": ["-p", "/opt/analytics", "serve", "--stdio"]
     }
   }
 }
@@ -145,20 +152,21 @@ MDM user secret) — not in the shared file:
 export GRANE_DB_PASSWORD='…their own read-only password…'
 ```
 
-The MCP client inherits that environment. Grane expands the
-`DATABASE_URL` template's own text once (so `${GRANE_DB_PASSWORD}` in
-that template is substituted and URL-encoded). It does not re-scan the
+The MCP client inherits that environment. Grane substitutes `${GRANE_DB_PASSWORD}`
+from YAML and URL-encodes the raw password. It does not re-scan the
 password or any other substituted value.
 
-Also supported (no MCP `env` DATABASE_URL at all): omit `env` from the
-shared file, keep `url: ${DATABASE_URL}` in `grane.yml`, and have each
-person export a full `DATABASE_URL` only on their machine. Discrete
+Also supported: keep `url: ${DATABASE_URL}` in `grane.yml` (the `grane init`
+default) and have each person export a **complete** `DATABASE_URL` on their
+machine. That DSN is inserted as-is (the encoding opt-out). Discrete
 `connection.password: ${GRANE_DB_PASSWORD}` (with shared host / user /
-database in YAML) is the same interpolation.
+database in YAML) interpolates the password as a raw field, not URL-encoded.
 
-Do **not** run `grane mcp connect` without `--no-env` when building the
-template — that copies the current process `DATABASE_URL` as a literal and
-will bake a password into the file.
+Do **not** put `postgres://…:${GRANE_DB_PASSWORD}@…` in MCP `env` and expect
+Grane to expand it — env values stay literal. Do **not** run
+`grane mcp connect` without `--no-env` when building the template — that
+copies the current process `DATABASE_URL` as a literal and will bake a
+password into the file.
 
 ## What Grane enforces vs what GitHub enforces
 

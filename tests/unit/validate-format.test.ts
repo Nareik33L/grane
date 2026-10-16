@@ -20,9 +20,7 @@ describe("formatValidateReport", () => {
     const dir = mkdtempSync(join(tmpdir(), "grane-validate-golden-"));
     temps.push(dir);
     writeInitProject(dir);
-    const loaded = loadConfig(dir, {
-      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? "postgres://ro@localhost/app" },
-    });
+    const loaded = loadConfig(dir);
     const kernel = new GraneKernel(loaded.config, {
       projectDir: loaded.projectDir,
       providerWarnings: loaded.warnings,
@@ -56,9 +54,7 @@ describe("formatValidateReport", () => {
     sql: "\${orders.country}"
 `,
     );
-    const loaded = loadConfig(dir, {
-      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? "postgres://ro@localhost/app" },
-    });
+    const loaded = loadConfig(dir);
     const kernel = new GraneKernel(loaded.config, {
       projectDir: loaded.projectDir,
       providerWarnings: loaded.warnings,

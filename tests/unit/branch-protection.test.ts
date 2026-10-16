@@ -540,21 +540,19 @@ describe("branch protection check (T2)", () => {
     expect(docs).toMatch(/## 6\. Org-wide rollout/);
     const fences = [...docs.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1] ?? "");
     expect(fences.length).toBeGreaterThanOrEqual(1);
-    const example = fences.find((block) => block.includes("mcpServers") && block.includes("DATABASE_URL"));
+    const example = fences.find((block) => block.includes("mcpServers"));
     expect(example, "org-wide MCP JSON example").toBeTruthy();
     const parsed = JSON.parse(example!) as {
-      mcpServers: { grane: { command: string; args: string[]; env: { DATABASE_URL: string } } };
+      mcpServers: { grane: { command: string; args: string[]; env?: Record<string, string> } };
     };
-    const url = parsed.mcpServers.grane.env.DATABASE_URL;
     expect(parsed.mcpServers.grane.command).toBe("grane");
     expect(parsed.mcpServers.grane.args).toContain("serve");
-    expect(url).toContain("warehouse.example.com");
-    expect(url).toContain("5432");
-    expect(url).toContain("analytics");
-    expect(url).toContain("grane_ro");
-    expect(url).toContain("${GRANE_DB_PASSWORD}");
+    expect(parsed.mcpServers.grane.env?.DATABASE_URL).toBeUndefined();
+    expect(docs).toMatch(
+      /url:\s*postgres:\/\/grane_ro:\$\{GRANE_DB_PASSWORD\}@warehouse\.example\.com:5432\/analytics/,
+    );
     expect(literalSecretInSharedExample(example!)).toBe(false);
-    expect(literalSecretInSharedExample(url)).toBe(false);
+    expect(literalSecretInSharedExample(docs)).toBe(false);
   });
 
   it("docs secret scanner catches a JSON PGPASSWORD hunter2 entry", () => {
@@ -692,6 +690,56 @@ describe("branch protection check (T2)", () => {
     });
     expectNotOkOrUnverified(report);
     expect(report.missing).toEqual([...BRANCH_PROTECTION_SETTINGS]);
+  });
+
+  it("mutation: ruleset non_fast_forward OR deletion where both are required", async () => {
+    const forceOnly = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: {
+          ...RULESET_FULL,
+          rules: RULESET_FULL.rules.filter((rule) => rule.type !== "deletion"),
+        },
+      },
+    });
+    expectNotOkOrUnverified(forceOnly);
+    expect(forceOnly.missing).toContain("no force-push/deletion");
+
+    const delOnly = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: {
+          ...RULESET_FULL,
+          rules: RULESET_FULL.rules.filter((rule) => rule.type !== "non_fast_forward"),
+        },
+      },
+    });
+    expectNotOkOrUnverified(delOnly);
+    expect(delOnly.missing).toContain("no force-push/deletion");
+  });
+
+  it("mutation: ruleset required_approving_review_count 0", async () => {
+    const report = await reportFor({
+      [api("/branches/main/protection")]: { status: 404, body: { message: "Branch not protected" } },
+      [api("/rulesets?")]: { status: 200, body: [{ id: 11, target: "branch", enforcement: "active" }] },
+      [api("/rulesets/11")]: {
+        status: 200,
+        body: {
+          ...RULESET_FULL,
+          rules: RULESET_FULL.rules.map((rule) =>
+            rule.type === "pull_request"
+              ? { ...rule, parameters: { ...rule.parameters, required_approving_review_count: 0 } }
+              : rule,
+          ),
+        },
+      },
+    });
+    expectNotOkOrUnverified(report);
+    expect(report.missing).toContain("PR required with >=1 approval");
   });
 
   it("mutation: 0 approvals", async () => {
