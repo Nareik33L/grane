@@ -73,6 +73,8 @@ key. Replace `CERT_DB`, `CERT_WH`, `GRANE_CERT`, and the public-key body
 ```bash
 openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key.p8 -nocrypt
 openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
+# Encrypted PKCS8 (set GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE to the passphrase)
+openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes-256-cbc -inform PEM -out rsa_key.p8
 ```
 
 ```sql

@@ -56,7 +56,7 @@ Creates and drops schema `grane_cert_<runid>`. Prefer TYPE=SERVICE key-pair (`GR
 | `GRANE_CERT_SNOWFLAKE_DATABASE` | yes | Database that will own `grane_cert_<runid>` |
 | `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY` | no | PKCS8 PEM path or PEM body for key-pair auth (preferred). GitHub secret is the PEM; the workflow writes a 0600 temp file under RUNNER_TEMP. |
 | `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | no | Passphrase if the private key is encrypted |
-| `GRANE_CERT_SNOWFLAKE_PASSWORD` | no | Legacy password or PAT (warns; password-only sign-in is being phased out) |
+| `GRANE_CERT_SNOWFLAKE_PASSWORD` | no | Legacy password or PAT (warns as password/PAT; password-only sign-in is being phased out) |
 | `GRANE_CERT_SNOWFLAKE_ROLE` | no | Role (optional) |
 
 ### `bigquery`

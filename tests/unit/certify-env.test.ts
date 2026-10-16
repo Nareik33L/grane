@@ -146,6 +146,9 @@ describe("certify env-var contract", () => {
     expect(wf).toMatch(/printf '%s' "\$GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM"/);
     expect(wf).toMatch(/unset GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM/);
     expect(wf).toMatch(/rm -f -- "\$GRANE_SF_KEY_FILE"/);
+    expect(grants).toMatch(
+      /openssl genrsa 2048 \| openssl pkcs8 -topk8 -v2 aes-256-cbc -inform PEM -out rsa_key\.p8/,
+    );
     expect(wf).not.toMatch(
       /GRANE_CERT_SNOWFLAKE_PRIVATE_KEY:\s*\$\{\{\s*secrets\.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY/,
     );
@@ -153,6 +156,18 @@ describe("certify env-var contract", () => {
     const withoutComments = wf.replace(/^\s*#.*$/gm, "");
     expect(withoutComments).not.toMatch(/pull_request_target/);
     expect(wf.indexOf("Remove Snowflake and BigQuery key files")).toBeLessThan(wf.indexOf("Upload certification report"));
+  });
+
+  it("unsets GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM after writing the 0600 file", () => {
+    const wf = readFileSync(join(ROOT, ".github/workflows/certify-cloud.yml"), "utf8");
+    expect(wf).toMatch(/unset GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM/);
+  });
+
+  it("forks do not receive GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM", () => {
+    const wf = readFileSync(join(ROOT, ".github/workflows/certify-cloud.yml"), "utf8");
+    expect(wf).toMatch(
+      /GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM:\s*\$\{\{ \(github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && secrets\.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY \|\| '' \}\}/,
+    );
   });
 
   it("cloud engines stay self_certifiable (no CI-certified flip)", () => {

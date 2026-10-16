@@ -15,7 +15,9 @@
   certify run will fail. Password/PAT remains as a warning path. The
   private key is materialized like the BigQuery JSON (mktemp 0600 under
   `$RUNNER_TEMP`, deleted on every exit, never logged, not given to
-  forks). Cited from each vendor’s official docs.
+  forks). The runtime Snowflake connector never reads `GRANE_CERT_*`;
+  cert-only resolution lives in `src/certify/snowflake-auth.ts`. Cited
+  from each vendor’s official docs.
 - **BigQuery certify-cloud credentials (P0-1).** The GitHub secret
   `GRANE_CERT_BIGQUERY_CREDENTIALS` is a service-account JSON document, but
   the cert client treats that env var as a `keyFilename` path. Passing the

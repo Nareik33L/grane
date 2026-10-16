@@ -7,7 +7,7 @@ import {
   resolveSnowflakeCertAuth,
   snowflakeSdkAuthFields,
   warnSnowflakePasswordAuth,
-} from "../../../src/connectors/snowflake-auth.js";
+} from "../../../src/certify/snowflake-auth.js";
 import { certConfig } from "../../fixtures/pg-cert.js";
 import { ddl } from "../../certification/ddl.js";
 import type { CertCapabilities, CertEngine, CertSession } from "../cert-engine.js";
@@ -118,7 +118,7 @@ export const snowflakeCertEngine: CertEngine = {
       account: process.env.GRANE_CERT_SNOWFLAKE_ACCOUNT,
       user: process.env.GRANE_CERT_SNOWFLAKE_USER,
       password: auth.kind === "password" ? process.env.GRANE_CERT_SNOWFLAKE_PASSWORD : undefined,
-      private_key: auth.kind === "jwt" && keyPath && !/BEGIN [A-Z ]*PRIVATE KEY/.test(keyPath) ? keyPath : undefined,
+      private_key: auth.kind === "jwt" ? keyPath : undefined,
       private_key_passphrase: process.env.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE,
       warehouse: process.env.GRANE_CERT_SNOWFLAKE_WAREHOUSE,
       database,

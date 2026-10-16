@@ -32,7 +32,7 @@ const snowflake: CertEngineEnvContract = {
     { name: "GRANE_CERT_SNOWFLAKE_DATABASE", required: true, description: "Database that will own `grane_cert_<runid>`" },
     { name: "GRANE_CERT_SNOWFLAKE_PRIVATE_KEY", required: false, description: "PKCS8 PEM path or PEM body for key-pair auth (preferred). GitHub secret is the PEM; the workflow writes a 0600 temp file under RUNNER_TEMP." },
     { name: "GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", required: false, description: "Passphrase if the private key is encrypted" },
-    { name: "GRANE_CERT_SNOWFLAKE_PASSWORD", required: false, description: "Legacy password or PAT (warns; password-only sign-in is being phased out)" },
+    { name: "GRANE_CERT_SNOWFLAKE_PASSWORD", required: false, description: "Legacy password or PAT (warns as password/PAT; password-only sign-in is being phased out)" },
     { name: "GRANE_CERT_SNOWFLAKE_ROLE", required: false, description: "Role (optional)" },
   ],
   notes: "Creates and drops schema `grane_cert_<runid>`. Prefer TYPE=SERVICE key-pair (`GRANE_CERT_SNOWFLAKE_PRIVATE_KEY`); a user with no TYPE is human/PERSON and needs MFA, so an automated certify run will fail. Password auth is kept for compatibility and prints a warning. QUERY_TAG=grane and STATEMENT_TIMEOUT come from limits.",
