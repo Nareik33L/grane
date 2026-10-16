@@ -9,7 +9,7 @@ This certification account is **not** the runtime read-only user.
 | Account | Used by | Privileges |
 | --- | --- | --- |
 | Runtime read-only user | `grane serve` / MCP against adopter tables | `SELECT` (or equivalent) on existing schemas. See [warehouses.md](warehouses.md) and [first-week.md](first-week.md). **Never** `CREATE SCHEMA`. |
-| Certification account | `grane certify` / `certify-cloud` / QA RC cert | Create, seed, query, and drop **only** isolated `grane_cert_*` schemas or datasets. **Never** pointed at production data or at the runtime user. |
+| Certification account | `grane certify` / `certify-cloud` / QA RC cert | Create, seed, query, and drop **only objects it created inside the isolated parent**. **Never** pointed at production data or at the runtime user. |
 
 `grane certify` creates `grane_cert_<runid>`, runs `CREATE TABLE` + `INSERT` +
 corpus `SELECT`s, then `DROP … CASCADE` (BigQuery: delete dataset). Existing
@@ -60,21 +60,34 @@ Run the setup as `USERADMIN` / `SECURITYADMIN` (or a custom role with
 `CREATE USER` / `CREATE ROLE` / `MANAGE GRANTS`). **Do not** grant
 `ACCOUNTADMIN` or `SYSADMIN` to the cert role.
 
-Replace `CERT_DB`, `CERT_WH`, `GRANE_CERT`, and the password.
+**Sign-in:** password-only sign-in is being phased out. `CREATE USER`
+without `TYPE` creates a `PERSON` user; a user with no `TYPE` counts as
+human and needs MFA, so an **automated certify run will fail**. Create
+`TYPE=SERVICE` and use **key-pair** auth. Do not use `LEGACY_SERVICE`
+(password without MFA; that type is being deprecated).
+
+Generate a 2048-bit PKCS8 key (optional passphrase) and assign the public
+key. Replace `CERT_DB`, `CERT_WH`, `GRANE_CERT`, and the public-key body
+(no `BEGIN`/`END` lines).
+
+```bash
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key.p8 -nocrypt
+openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
+```
 
 ```sql
 -- USERADMIN
 CREATE USER IF NOT EXISTS GRANE_CERT
-  PASSWORD = '<rotate>'
+  TYPE = SERVICE
   DEFAULT_ROLE = GRANE_CERT
   DEFAULT_WAREHOUSE = CERT_WH
   DEFAULT_NAMESPACE = CERT_DB
-  MUST_CHANGE_PASSWORD = FALSE
+  RSA_PUBLIC_KEY = '<rsa_key.pub body>'
   COMMENT = 'grane certify only; not the runtime read-only user';
 
 -- SECURITYADMIN
 CREATE ROLE IF NOT EXISTS GRANE_CERT
-  COMMENT = 'Create/drop grane_cert_* in CERT_DB; use CERT_WH';
+  COMMENT = 'Create/drop objects this role created in CERT_DB; use CERT_WH';
 
 GRANT ROLE GRANE_CERT TO USER GRANE_CERT;
 
@@ -82,6 +95,35 @@ GRANT USAGE ON WAREHOUSE CERT_WH TO ROLE GRANE_CERT;
 GRANT USAGE ON DATABASE CERT_DB TO ROLE GRANE_CERT;
 GRANT CREATE SCHEMA ON DATABASE CERT_DB TO ROLE GRANE_CERT;
 ```
+
+Set `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY` to the path of `rsa_key.p8` (or
+the PEM body). Encrypted keys also need
+`GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE`. In `certify-cloud` the
+GitHub secret is the PEM document; the workflow writes a `0600` `mktemp`
+file under `$RUNNER_TEMP` and deletes it on every exit (including
+failures). Never echo, log, or upload that file; forked-PR workflows do
+not receive the secret.
+
+### Alternative: programmatic access token + network policy
+
+`TYPE=SERVICE` can use a programmatic access token (PAT) instead of
+key-pair. Generating or using a PAT for a service user **requires an
+active network policy** (account- or user-level) that allows the
+runner’s egress IPs. Put the token in `GRANE_CERT_SNOWFLAKE_PASSWORD`
+(the Node driver uses the password field). Prefer key-pair; password/PAT
+auth prints a warning.
+
+```sql
+CREATE NETWORK POLICY grane_cert_net ALLOWED_IP_LIST = ('<ci-or-qa-egress-cidr>');
+ALTER USER GRANE_CERT SET NETWORK_POLICY = grane_cert_net;
+ALTER USER GRANE_CERT ADD PROGRAMMATIC ACCESS TOKEN grane_cert_pat
+  ROLE_RESTRICTION = 'GRANE_CERT'
+  DAYS_TO_EXPIRY = 90;
+```
+
+Password-only `PERSON` users remain supported in the client for
+backward compatibility and warn at certify time. Do not create those for
+new cert accounts.
 
 `CERT_DB` must contain no adopter schemas. Do **not** grant `USAGE` on
 `CERT_DB.PUBLIC` or on any other database. Do **not** grant
@@ -114,6 +156,17 @@ Set `GRANE_CERT_SNOWFLAKE_ROLE=GRANE_CERT` so the session uses this role.
   [GRANT privileges](https://docs.snowflake.com/en/sql-reference/sql/grant-privilege)
 - Ownership model (creator owns the object):
   [Overview of access control](https://docs.snowflake.com/en/user-guide/security-access-control-overview)
+- `TYPE=SERVICE` (omit `TYPE` → `PERSON`); `RSA_PUBLIC_KEY`:
+  [CREATE USER](https://docs.snowflake.com/en/sql-reference/sql/create-user)
+- Password-only / MFA rollout (the failure an automated run hits):
+  [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout)
+- Key-pair (openssl + assign public key):
+  [Key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth),
+  [Node.js key-pair](https://docs.snowflake.com/en/developer-guide/node-js/nodejs-driver-authenticate)
+- PAT requires a network policy for service users:
+  [Programmatic access tokens](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens),
+  [ALTER USER … ADD PAT](https://docs.snowflake.com/en/sql-reference/sql/alter-user-add-programmatic-access-token),
+  [Network policies](https://docs.snowflake.com/en/user-guide/network-policies)
 
 ---
 
@@ -154,8 +207,25 @@ gcloud iam service-accounts keys create /path/to/grane-cert.json \
   --iam-account="grane-cert@PROJECT_ID.iam.gserviceaccount.com"
 ```
 
+An organization policy can **block service-account key creation**
+(`constraints/iam.disableServiceAccountKeyCreation` / managed
+`constraints/iam.managed.disableServiceAccountKeyCreation`; enforced by
+default on organizations created on or after 3 May 2024). If
+`gcloud iam service-accounts keys create` fails with key creation not
+allowed, use ADC / workload identity, or an org-policy exception on the
+cert project — do not fall back to a user key. See
+[Restrict service accounts](https://cloud.google.com/organization-policy/restrict-service-accounts)
+and
+[Troubleshoot org policies](https://cloud.google.com/iam/docs/troubleshoot-org-policies).
+
 `GRANE_CERT_BIGQUERY_PROJECT=PROJECT_ID`.
-`GRANE_CERT_BIGQUERY_CREDENTIALS` is a **path** to that JSON key (or ADC).
+Locally `GRANE_CERT_BIGQUERY_CREDENTIALS` is a **path** to that JSON key
+(or ADC) — the Node client uses `keyFilename`, not the JSON body.
+In `certify-cloud` the GitHub secret is the JSON document; the workflow
+writes a `0600` `mktemp` file under `$RUNNER_TEMP` (`printf`, never
+`echo`) and deletes it on every exit (`trap EXIT` plus the shared
+`always()` step before upload). Never echo, log, or upload that file;
+forked-PR workflows do not receive the secret.
 Gate 8 uses a second service account with the same custom role, not this
 key.
 
@@ -194,18 +264,28 @@ principal a workspace admin. Do **not** grant `CREATE TABLE` /
 future schema in the catalog, including ones the cert principal does not
 own). The schema **owner** can add tables and `DROP SCHEMA … CASCADE`.
 
-Prefer a dedicated catalog (not workspace `main`, where every user has
-`USE CATALOG` by default). Set `GRANE_CERT_DATABRICKS_CATALOG` to that
-catalog.
+**Set `GRANE_CERT_DATABRICKS_CATALOG`** to a dedicated catalog. If it is
+unset, certify **falls back to `main`**, where every workspace user has
+`USE CATALOG` by default — do not leave it blank.
 
-Replace `grane_cert` (catalog) and the service-principal application ID.
+Replace `grane_cert` (catalog), the managed-storage URI, and the
+service-principal application ID. If the metastore has no managed
+storage, `MANAGED LOCATION` is required.
 
 ```sql
 -- Metastore admin / catalog owner. Isolated catalog, no adopter schemas.
-CREATE CATALOG IF NOT EXISTS grane_cert;
+CREATE CATALOG IF NOT EXISTS grane_cert
+  MANAGED LOCATION 's3://<external-location-path>/grane_cert';
+-- Azure: abfss://…  GCP: gs://…
 GRANT USE CATALOG ON CATALOG grane_cert TO `<service-principal-application-id>`;
 GRANT CREATE SCHEMA ON CATALOG grane_cert TO `<service-principal-application-id>`;
 ```
+
+The creator needs `CREATE MANAGED STORAGE` on that external location.
+Also assign the workspace **Databricks SQL access** entitlement
+(`databricks-sql-access`) to the service principal so it can use SQL
+warehouses (CAN USE is not enough without the entitlement). Do **not**
+grant Allow unrestricted cluster creation.
 
 Do **not** grant `ALL PRIVILEGES`, `MANAGE`, `CREATE CATALOG`, or
 `USE SCHEMA` / `CREATE TABLE` / `SELECT` / `MODIFY` on `CATALOG
@@ -239,6 +319,12 @@ CAN MANAGE / IS OWNER (edit, delete, change permissions).
 - SQL warehouse CAN USE (run queries; not manage):
   [SQL warehouse ACLs](https://docs.databricks.com/aws/en/security/auth/access-control/#sql-warehouse-acls),
   [Create a SQL warehouse](https://docs.databricks.com/aws/en/compute/sql-warehouse/create)
+- `MANAGED LOCATION` / `CREATE MANAGED STORAGE`:
+  [Create catalogs](https://docs.databricks.com/aws/en/catalogs/create-catalog),
+  [Managed storage](https://docs.databricks.com/aws/en/connect/unity-catalog/cloud-storage/managed-storage),
+  [CREATE CATALOG](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-create-catalog)
+- Databricks SQL access entitlement (`databricks-sql-access`):
+  [Manage entitlements](https://docs.databricks.com/aws/en/security/auth/entitlements)
 
 Azure/GCP workspaces use the same Unity Catalog privilege names.
 
@@ -252,8 +338,10 @@ user who creates a schema owns it and can create tables, query them, and
 databases give every user `CREATE` and `USAGE` on `PUBLIC` — revoke that
 so the cert user cannot write adopter objects in `public`.
 
-Replace `cert_db` and `grane_cert`. Superuser or database owner runs
-setup. The cert user is `NOCREATEDB` `NOCREATEUSER` (the `CREATE USER`
+Replace `cert_db` and `grane_cert`. **`CREATE USER` needs a superuser or
+a role with the `CREATE USER` privilege** — not the database owner (the
+database owner can `GRANT CREATE ON DATABASE` after the user exists).
+The cert user is `NOCREATEDB` `NOCREATEUSER` (the `CREATE USER`
 defaults).
 
 ```sql
@@ -273,7 +361,10 @@ UNRESTRICTED`, or `CREATE`/`USAGE` on any other schema. Do **not**
 `GRANT SELECT ON ALL TABLES IN SCHEMA …` for adopter schemas.
 
 `TEMPORARY` on the database is not required (the corpus does not create
-temp tables).
+temp tables). **`TEMP` is still granted to `PUBLIC` by default** on the
+database; that is a Redshift default, not a cert grant. Revoking
+`TEMP ON DATABASE … FROM PUBLIC` is optional and not required for this
+setup.
 
 ### Official docs
 
@@ -303,7 +394,7 @@ share no identities:
 1. Isolated empty parent (database / catalog / project).
 2. Grants copied from the engine section above — nothing broader.
 3. Confirm the principal **cannot** `SELECT` adopter tables and **cannot**
-   drop anything except `grane_cert_*` objects it owns.
+   drop anything except **objects it created inside the isolated parent**.
 4. Store gate-5 values in GitHub `GRANE_CERT_*` secrets. Keep gate-8
    credentials out of that store.
 5. Do not dispatch `certify-cloud` or run QA RC cert from a public PR.

@@ -41,12 +41,14 @@ describe("certify env-var contract", () => {
     expect(wf).toMatch(/silently fails to authenticate/);
     expect(docs).toMatch(/silently fails to authenticate/);
     expect(docs).toMatch(/service-account JSON document/);
-    expect(wf).toMatch(/mktemp -p "\$\{RUNNER_TEMP:-\/tmp\}"/);
+    expect(wf).toMatch(/mktemp -p "\$\{RUNNER_TEMP:-\/tmp\}" grane-bq-XXXXXX/);
     expect(wf).toMatch(/chmod 0600/);
-    expect(wf).toMatch(/trap cleanup_bq_key EXIT/);
-    expect(wf).toMatch(/name: Remove BigQuery key file\n {8}if: always\(\)/);
+    expect(wf).toMatch(/cleanup_bq_key\(\)/);
+    expect(wf).toMatch(/trap cleanup_cert_keys EXIT/);
+    expect(wf).toMatch(/name: Remove Snowflake and BigQuery key files\n {8}if: always\(\)/);
     expect(wf).toMatch(/rm -f -- "\$GRANE_BQ_KEY_FILE"/);
     expect(wf).toMatch(/printf '%s' "\$GRANE_CERT_BIGQUERY_JSON"/);
+    expect(wf).toMatch(/unset GRANE_CERT_BIGQUERY_JSON/);
     expect(wf).toMatch(/GRANE_CERT_BIGQUERY_JSON:/);
     expect(wf).not.toMatch(
       /GRANE_CERT_BIGQUERY_CREDENTIALS:\s*\$\{\{\s*secrets\.GRANE_CERT_BIGQUERY_CREDENTIALS/,
@@ -62,7 +64,7 @@ describe("certify env-var contract", () => {
     expect(wf).toMatch(/path: certification\/\$\{\{ matrix\.engine \}\}\.json/);
     expect(wf).not.toMatch(/path:.*GRANE_BQ_KEY/);
     expect(wf).not.toMatch(/path:.*RUNNER_TEMP/);
-    expect(wf.indexOf("Remove BigQuery key file")).toBeLessThan(wf.indexOf("Upload certification report"));
+    expect(wf.indexOf("Remove Snowflake and BigQuery key files")).toBeLessThan(wf.indexOf("Upload certification report"));
   });
 
   it("P0-1 materialize helper: mktemp 0600 under RUNNER_TEMP, trap deletes on failure", () => {
@@ -117,6 +119,40 @@ describe("certify env-var contract", () => {
       rmSync(runnerTemp, { recursive: true, force: true });
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  it("P0-2: Snowflake private key is materialized at 0600; password-only MFA failure is named", () => {
+    const wf = readFileSync(join(ROOT, ".github/workflows/certify-cloud.yml"), "utf8");
+    const grants = readFileSync(join(ROOT, "docs/certify-grants.md"), "utf8");
+    expect(wf).toMatch(/password-only sign-in is being phased out/);
+    expect(wf).toMatch(/user with no\n# TYPE counts as human and needs MFA, so an automated certify run will fail/);
+    expect(grants).toMatch(/TYPE = SERVICE/);
+    expect(grants).toMatch(/RSA_PUBLIC_KEY/);
+    expect(grants).toMatch(/PROGRAMMATIC ACCESS TOKEN/);
+    expect(grants).toMatch(/NETWORK POLICY/);
+    expect(grants).toMatch(/only objects it created inside the isolated parent/);
+    expect(grants).toMatch(/CREATE USER` needs a superuser or\na role with the `CREATE USER` privilege/);
+    expect(grants).toMatch(/TEMP` is still granted to `PUBLIC`/);
+    expect(grants).toMatch(/disableServiceAccountKeyCreation/);
+    expect(grants).toMatch(/GRANE_CERT_DATABRICKS_CATALOG/);
+    expect(grants).toMatch(/falls back to `main`/);
+    expect(grants).toMatch(/MANAGED LOCATION/);
+    expect(grants).toMatch(/databricks-sql-access/);
+    expect(wf).toMatch(/mktemp -p "\$\{RUNNER_TEMP:-\/tmp\}" grane-sf-XXXXXX/);
+    expect(wf).toMatch(/chmod 0600/);
+    expect(wf).toMatch(/cleanup_sf_key\(\)/);
+    expect(wf).toMatch(/trap cleanup_cert_keys EXIT/);
+    expect(wf).toMatch(/name: Remove Snowflake and BigQuery key files\n {8}if: always\(\)/);
+    expect(wf).toMatch(/printf '%s' "\$GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM"/);
+    expect(wf).toMatch(/unset GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM/);
+    expect(wf).toMatch(/rm -f -- "\$GRANE_SF_KEY_FILE"/);
+    expect(wf).not.toMatch(
+      /GRANE_CERT_SNOWFLAKE_PRIVATE_KEY:\s*\$\{\{\s*secrets\.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY/,
+    );
+    expect(wf).not.toMatch(/echo\s+"\$GRANE_CERT_SNOWFLAKE_PRIVATE_KEY/);
+    const withoutComments = wf.replace(/^\s*#.*$/gm, "");
+    expect(withoutComments).not.toMatch(/pull_request_target/);
+    expect(wf.indexOf("Remove Snowflake and BigQuery key files")).toBeLessThan(wf.indexOf("Upload certification report"));
   });
 
   it("cloud engines stay self_certifiable (no CI-certified flip)", () => {

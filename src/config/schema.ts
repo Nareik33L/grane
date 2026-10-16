@@ -228,6 +228,10 @@ export const connectionConfigSchema = z.object({
   /** Snowflake warehouse. */
   warehouse: z.string().optional(),
   role: z.string().optional(),
+  /** Snowflake PKCS8 PEM path (key-pair). Cert also reads GRANE_CERT_SNOWFLAKE_PRIVATE_KEY. */
+  private_key: z.string().optional(),
+  /** Passphrase if `private_key` is encrypted. */
+  private_key_passphrase: z.string().optional(),
   /** BigQuery project id. */
   project: z.string().optional(),
   /** BigQuery dataset (falls back to schema). */

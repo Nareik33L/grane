@@ -27,13 +27,15 @@ const snowflake: CertEngineEnvContract = {
   namespace: "schema",
   vars: [
     { name: "GRANE_CERT_SNOWFLAKE_ACCOUNT", required: true, description: "Account identifier (e.g. xy12345.us-east-1)" },
-    { name: "GRANE_CERT_SNOWFLAKE_USER", required: true, description: "User that can CREATE SCHEMA" },
-    { name: "GRANE_CERT_SNOWFLAKE_PASSWORD", required: true, description: "Password" },
+    { name: "GRANE_CERT_SNOWFLAKE_USER", required: true, description: "TYPE=SERVICE user that can CREATE SCHEMA" },
     { name: "GRANE_CERT_SNOWFLAKE_WAREHOUSE", required: true, description: "Warehouse" },
     { name: "GRANE_CERT_SNOWFLAKE_DATABASE", required: true, description: "Database that will own `grane_cert_<runid>`" },
+    { name: "GRANE_CERT_SNOWFLAKE_PRIVATE_KEY", required: false, description: "PKCS8 PEM path or PEM body for key-pair auth (preferred). GitHub secret is the PEM; the workflow writes a 0600 temp file under RUNNER_TEMP." },
+    { name: "GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", required: false, description: "Passphrase if the private key is encrypted" },
+    { name: "GRANE_CERT_SNOWFLAKE_PASSWORD", required: false, description: "Legacy password or PAT (warns; password-only sign-in is being phased out)" },
     { name: "GRANE_CERT_SNOWFLAKE_ROLE", required: false, description: "Role (optional)" },
   ],
-  notes: "Creates and drops schema `grane_cert_<runid>`. QUERY_TAG=grane and STATEMENT_TIMEOUT come from limits.",
+  notes: "Creates and drops schema `grane_cert_<runid>`. Prefer TYPE=SERVICE key-pair (`GRANE_CERT_SNOWFLAKE_PRIVATE_KEY`); a user with no TYPE is human/PERSON and needs MFA, so an automated certify run will fail. Password auth is kept for compatibility and prints a warning. QUERY_TAG=grane and STATEMENT_TIMEOUT come from limits.",
 };
 
 const bigquery: CertEngineEnvContract = {
@@ -54,7 +56,7 @@ const databricks: CertEngineEnvContract = {
     { name: "GRANE_CERT_DATABRICKS_HOST", required: true, description: "Workspace host (xxx.cloud.databricks.com)" },
     { name: "GRANE_CERT_DATABRICKS_HTTP_PATH", required: true, description: "SQL warehouse HTTP path" },
     { name: "GRANE_CERT_DATABRICKS_TOKEN", required: true, description: "PAT / service-principal token that can CREATE SCHEMA" },
-    { name: "GRANE_CERT_DATABRICKS_CATALOG", required: false, description: "Unity Catalog (default main)" },
+    { name: "GRANE_CERT_DATABRICKS_CATALOG", required: false, description: "Unity Catalog name; set this — unset falls back to main" },
   ],
   notes: "Creates and drops schema `grane_cert_<runid>`. queryTimeout is limits.timeout_ms in seconds.",
 };
@@ -95,7 +97,15 @@ export function requiredCertEnvVars(type: CloudCertEngine): string[] {
 }
 
 export function missingCertEnvVars(type: CloudCertEngine, env: NodeJS.Dict<string> = process.env): string[] {
-  return requiredCertEnvVars(type).filter((name) => !env[name]?.trim());
+  const missing = requiredCertEnvVars(type).filter((name) => !env[name]?.trim());
+  if (type === "snowflake") {
+    const hasPassword = Boolean(env.GRANE_CERT_SNOWFLAKE_PASSWORD?.trim());
+    const hasKey = Boolean(env.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY?.trim());
+    if (!hasPassword && !hasKey) {
+      missing.push("GRANE_CERT_SNOWFLAKE_PASSWORD or GRANE_CERT_SNOWFLAKE_PRIVATE_KEY");
+    }
+  }
+  return missing;
 }
 
 export function cloudCertCredentialsAvailable(

@@ -4,6 +4,7 @@ import { snowflakeDialect } from "./dialect.js";
 import type { DatabaseSchema, ExecutedRows, TableInfo, WarehouseConnector } from "./types.js";
 import { loadOptionalModule, isWriteSql, timeoutSeconds } from "./types.js";
 import { unsafeQuery } from "../errors.js";
+import { resolveSnowflakeCertAuth, snowflakeSdkAuthFields, warnSnowflakePasswordAuth } from "./snowflake-auth.js";
 
 /** Warehouse QUERY_TAG so certify / MCP work is attributable in Snowflake history. */
 export const SNOWFLAKE_QUERY_TAG = "grane";
@@ -58,17 +59,28 @@ export class SnowflakeConnector implements WarehouseConnector {
     if (!create) throw configError("snowflake-sdk did not export createConnection.");
     const account = this.connection.account;
     if (!account && !this.connection.url) {
-      throw configError("Snowflake connection requires connection.account (and user/password/warehouse/database).");
+      throw configError("Snowflake connection requires connection.account (and user/warehouse/database plus key-pair or password).");
     }
+    const auth = resolveSnowflakeCertAuth(process.env, {
+      private_key: this.connection.private_key,
+      private_key_passphrase: this.connection.private_key_passphrase,
+      password: this.connection.password,
+    });
+    if (auth.kind === "missing") {
+      throw configError(
+        "Snowflake connection requires GRANE_CERT_SNOWFLAKE_PRIVATE_KEY (preferred) or GRANE_CERT_SNOWFLAKE_PASSWORD / connection.password.",
+      );
+    }
+    warnSnowflakePasswordAuth(auth);
     const conn = create({
       account,
       username: this.connection.user,
-      password: this.connection.password,
       warehouse: this.connection.warehouse,
       database: this.connection.database,
       schema: this.schemaName,
       role: this.connection.role,
       application: "Grane",
+      ...snowflakeSdkAuthFields(auth),
     });
     await new Promise<void>((resolve, reject) => {
       conn.connect((err) => (err ? reject(err) : resolve()));

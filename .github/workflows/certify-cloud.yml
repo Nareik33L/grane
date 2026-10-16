@@ -13,6 +13,14 @@ name: Certify cloud
 # (outside the repo and workspace artifacts), exports that path, and deletes
 # the file on every exit path (trap EXIT plus an always() step). Never echo,
 # log, or upload the key. Forked-PR workflows do not receive the secret.
+#
+# Snowflake P0-2: password-only sign-in is being phased out. A user with no
+# TYPE counts as human and needs MFA, so an automated certify run will fail.
+# Prefer GRANE_CERT_SNOWFLAKE_PRIVATE_KEY (PEM). The workflow writes it with
+# mktemp at 0600 under RUNNER_TEMP (outside the repo and workspace artifacts),
+# exports the path, and deletes the file on every exit (trap EXIT plus
+# always()). Never echo, log, or upload the key. Forked-PR workflows do not
+# receive the secret.
 
 on:
   workflow_dispatch:
@@ -72,6 +80,7 @@ jobs:
           GRANE_CERT_SNOWFLAKE_PASSWORD: ${{ secrets.GRANE_CERT_SNOWFLAKE_PASSWORD }}
           GRANE_CERT_SNOWFLAKE_WAREHOUSE: ${{ secrets.GRANE_CERT_SNOWFLAKE_WAREHOUSE }}
           GRANE_CERT_SNOWFLAKE_DATABASE: ${{ secrets.GRANE_CERT_SNOWFLAKE_DATABASE }}
+          GRANE_CERT_SNOWFLAKE_HAS_KEY: ${{ secrets.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY != '' }}
           GRANE_CERT_BIGQUERY_PROJECT: ${{ secrets.GRANE_CERT_BIGQUERY_PROJECT }}
           GRANE_CERT_DATABRICKS_HOST: ${{ secrets.GRANE_CERT_DATABRICKS_HOST }}
           GRANE_CERT_DATABRICKS_HTTP_PATH: ${{ secrets.GRANE_CERT_DATABRICKS_HTTP_PATH }}
@@ -82,7 +91,7 @@ jobs:
           fork=false
           # `pull_request` from a fork has an empty secrets context. Force
           # present=false so a later pull_request_target change cannot
-          # materialize the BigQuery key for an untrusted workflow.
+          # materialize the BigQuery key or Snowflake private key for an untrusted workflow.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             head_repo="${{ github.event.pull_request.head.repo.full_name }}"
             if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ] || [ "$head_repo" != "${{ github.repository }}" ]; then
@@ -94,7 +103,7 @@ jobs:
           fi
           case "${{ matrix.engine }}" in
             snowflake)
-              if [ -n "$GRANE_CERT_SNOWFLAKE_ACCOUNT" ] && [ -n "$GRANE_CERT_SNOWFLAKE_USER" ] && [ -n "$GRANE_CERT_SNOWFLAKE_PASSWORD" ] && [ -n "$GRANE_CERT_SNOWFLAKE_WAREHOUSE" ] && [ -n "$GRANE_CERT_SNOWFLAKE_DATABASE" ]; then
+              if [ -n "$GRANE_CERT_SNOWFLAKE_ACCOUNT" ] && [ -n "$GRANE_CERT_SNOWFLAKE_USER" ] && [ -n "$GRANE_CERT_SNOWFLAKE_WAREHOUSE" ] && [ -n "$GRANE_CERT_SNOWFLAKE_DATABASE" ] && { [ -n "$GRANE_CERT_SNOWFLAKE_PASSWORD" ] || [ "$GRANE_CERT_SNOWFLAKE_HAS_KEY" = "true" ]; }; then
                 present=true
               fi
               ;;
@@ -136,6 +145,11 @@ jobs:
           GRANE_CERT_SNOWFLAKE_WAREHOUSE: ${{ secrets.GRANE_CERT_SNOWFLAKE_WAREHOUSE }}
           GRANE_CERT_SNOWFLAKE_DATABASE: ${{ secrets.GRANE_CERT_SNOWFLAKE_DATABASE }}
           GRANE_CERT_SNOWFLAKE_ROLE: ${{ secrets.GRANE_CERT_SNOWFLAKE_ROLE }}
+          GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+          # Secret is the PEM document. Never assign it to
+          # GRANE_CERT_SNOWFLAKE_PRIVATE_KEY until it is a 0600 temp-file path.
+          # Empty on forked PRs even if this step's if: were bypassed.
+          GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.GRANE_CERT_SNOWFLAKE_PRIVATE_KEY || '' }}
           GRANE_CERT_BIGQUERY_PROJECT: ${{ secrets.GRANE_CERT_BIGQUERY_PROJECT }}
           GRANE_CERT_BIGQUERY_LOCATION: ${{ secrets.GRANE_CERT_BIGQUERY_LOCATION }}
           # Secret is the JSON document. Never assign it to
@@ -155,7 +169,24 @@ jobs:
               rm -f -- "$GRANE_BQ_KEY_FILE"
             fi
           }
-          trap cleanup_bq_key EXIT
+          cleanup_sf_key() {
+            if [ -n "${GRANE_SF_KEY_FILE:-}" ]; then
+              rm -f -- "$GRANE_SF_KEY_FILE"
+            fi
+          }
+          cleanup_cert_keys() {
+            cleanup_sf_key
+            cleanup_bq_key
+          }
+          trap cleanup_cert_keys EXIT
+          if [ "${{ matrix.engine }}" = "snowflake" ] && [ -n "${GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM:-}" ]; then
+            GRANE_SF_KEY_FILE="$(mktemp -p "${RUNNER_TEMP:-/tmp}" grane-sf-XXXXXX)"
+            chmod 0600 "$GRANE_SF_KEY_FILE"
+            printf '%s' "$GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM" > "$GRANE_SF_KEY_FILE"
+            unset GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PEM
+            export GRANE_CERT_SNOWFLAKE_PRIVATE_KEY="$GRANE_SF_KEY_FILE"
+            printf 'GRANE_SF_KEY_FILE=%s\n' "$GRANE_SF_KEY_FILE" >> "$GITHUB_ENV"
+          fi
           if [ "${{ matrix.engine }}" = "bigquery" ] && [ -n "${GRANE_CERT_BIGQUERY_JSON:-}" ]; then
             GRANE_BQ_KEY_FILE="$(mktemp -p "${RUNNER_TEMP:-/tmp}" grane-bq-XXXXXX)"
             chmod 0600 "$GRANE_BQ_KEY_FILE"
@@ -166,10 +197,13 @@ jobs:
             printf 'GRANE_BQ_KEY_FILE=%s\n' "$GRANE_BQ_KEY_FILE" >> "$GITHUB_ENV"
           fi
           npx tsx src/cli/index.ts certify --engine ${{ matrix.engine }}
-      - name: Remove BigQuery key file
+      - name: Remove Snowflake and BigQuery key files
         if: always()
         run: |
           set +x
+          if [ -n "${GRANE_SF_KEY_FILE:-}" ]; then
+            rm -f -- "$GRANE_SF_KEY_FILE"
+          fi
           if [ -n "${GRANE_BQ_KEY_FILE:-}" ]; then
             rm -f -- "$GRANE_BQ_KEY_FILE"
           fi

@@ -5,11 +5,17 @@
 - **Certification least-privilege grants (P0-2).**
   [docs/certify-grants.md](docs/certify-grants.md) is the copy-paste GRANT
   SQL / IAM for Snowflake, BigQuery, Databricks Unity Catalog, and
-  Redshift so the cert account can create, query, and drop only
-  `grane_cert_*` schemas or datasets. This certification account is not
-  the runtime read-only user. Gate 8 (QA independent RC cert) uses the
-  same grants on a separate credential set from gate 5. Cited from each
-  vendor’s official docs. No code change.
+  Redshift so the cert account can create, query, and drop only objects
+  it created inside the isolated parent. This certification account is
+  not the runtime read-only user. Gate 8 uses the same grants on a
+  separate credential set. Snowflake cert users are `TYPE=SERVICE` with
+  key-pair (`GRANE_CERT_SNOWFLAKE_PRIVATE_KEY`, optional
+  `GRANE_CERT_SNOWFLAKE_PRIVATE_KEY_PASSPHRASE`); password-only sign-in
+  is being phased out and a user with no TYPE needs MFA, so an automated
+  certify run will fail. Password/PAT remains as a warning path. The
+  private key is materialized like the BigQuery JSON (mktemp 0600 under
+  `$RUNNER_TEMP`, deleted on every exit, never logged, not given to
+  forks). Cited from each vendor’s official docs.
 - **BigQuery certify-cloud credentials (P0-1).** The GitHub secret
   `GRANE_CERT_BIGQUERY_CREDENTIALS` is a service-account JSON document, but
   the cert client treats that env var as a `keyFilename` path. Passing the
