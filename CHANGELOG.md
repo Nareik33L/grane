@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Certification least-privilege grants (P0-2).**
+  [docs/certify-grants.md](docs/certify-grants.md) is the copy-paste GRANT
+  SQL / IAM for Snowflake, BigQuery, Databricks Unity Catalog, and
+  Redshift so the cert account can create, query, and drop only
+  `grane_cert_*` schemas or datasets. This certification account is not
+  the runtime read-only user. Gate 8 (QA independent RC cert) uses the
+  same grants on a separate credential set from gate 5. Cited from each
+  vendor’s official docs. No code change.
 - **BigQuery certify-cloud credentials (P0-1).** The GitHub secret
   `GRANE_CERT_BIGQUERY_CREDENTIALS` is a service-account JSON document, but
   the cert client treats that env var as a `keyFilename` path. Passing the

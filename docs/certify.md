@@ -30,8 +30,12 @@ the map exactly (`certified` vs `self_certifiable`).
 
 Cloud adapters call `available()` false (and `grane certify` skips) when the
 required `GRANE_CERT_*` variables below are unset. They are **in-repo**, not
-live in OSS CI. Do not point these at a production read-only user; the cert
-role must be allowed to create and drop `grane_cert_<runid>` only.
+live in OSS CI. Do not point these at a production read-only user — this
+certification account is **not** the runtime read-only user. Exact
+least-privilege GRANT SQL and IAM roles (Snowflake, BigQuery, Databricks
+Unity Catalog, Redshift), plus gate 8’s separate QA credentials, are in
+[certify-grants.md](certify-grants.md). The cert role must be allowed to
+create and drop `grane_cert_<runid>` only.
 
 | Engine | Required | Optional | Isolated namespace |
 | --- | --- | --- | --- |
@@ -132,10 +136,11 @@ Locally, keep setting `GRANE_CERT_BIGQUERY_CREDENTIALS` to a key file path
 (or omit it and use ADC / `GOOGLE_APPLICATION_CREDENTIALS`).
 
 **Pending release step:** do not dispatch this workflow with real warehouse
-secrets from a public PR. Kieran adds `GRANE_CERT_*` and runs `certify-cloud`
+secrets from a public PR. Kieran adds `GRANE_CERT_*` (least-privilege
+accounts in [certify-grants.md](certify-grants.md)) and runs `certify-cloud`
 once before the V2 tag. Listed on [release-checklist.md](release-checklist.md)
-together with QA's independent RC cert. Do not run those steps from this PR.
-npm publish stays on hold.
+together with QA's independent RC cert, which needs a **separate credential
+set**. Do not run those steps from this PR. npm publish stays on hold.
 
 Cloud engines are compile-supported (`self_certifiable`), not
 runtime-certified. See [warehouses.md](warehouses.md#runtime-certified).
