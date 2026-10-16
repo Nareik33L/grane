@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
+  same claim: “Snowflake is production-ready, not certified by us yet”
+  fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase
+  list includes **ready for production**. No publish, tag, or tokens.
 - **Honest OSS README (Release 1 item 3).** README warehouse matrix matches
   `WAREHOUSE_CERTIFICATION`: PostgreSQL 16, MySQL 8, DuckDB 1.5, and
   ClickHouse 24 are certified.

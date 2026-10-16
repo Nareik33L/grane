@@ -62,26 +62,66 @@ function lineMentionsEngine(line: string, entry: WarehouseCertification): boolea
   });
 }
 
-/**
- * Pairing an uncertified engine with any of these is an over-claim unless the
- * line also denies it.
- */
-const OVERCLAIM_PHRASE =
-  /production[-\s]ready|fully\s+support(?:s|ed)?|supports\b.{0,80}\bin production\b|battle-tested|\bcertified\b/i;
+type ClaimKind = "certified" | "production_ready" | "fully_supported" | "battle_tested";
+
+/** One pattern per claim kind. A denial of kind A does not exempt kind B. */
+const CLAIM_PATTERNS: Array<{ kind: ClaimKind; source: string }> = [
+  { kind: "production_ready", source: "production[-\\s]ready|ready\\s+for\\s+production" },
+  { kind: "fully_supported", source: "fully\\s+support(?:s|ed)?|supports\\b.{0,80}?\\bin production\\b" },
+  { kind: "battle_tested", source: "battle[-\\s]tested" },
+  { kind: "certified", source: "\\bcertified\\b" },
+];
 
 function normalizeProse(line: string): string {
   return line.replace(/\*+/g, "");
 }
 
-function lineHasOverclaimPhrase(line: string): boolean {
-  return OVERCLAIM_PHRASE.test(normalizeProse(line));
+function flattenProse(text: string): string {
+  return normalizeProse(text).replace(/\s+/g, " ").trim();
 }
 
-/** Lines that mention a claim only to deny it, or to say self_certifiable. */
+function findClaims(text: string): Array<{ kind: ClaimKind; start: number; end: number }> {
+  const found: Array<{ kind: ClaimKind; start: number; end: number }> = [];
+  for (const { kind, source } of CLAIM_PATTERNS) {
+    const re = new RegExp(source, "gi");
+    for (const match of text.matchAll(re)) {
+      found.push({ kind, start: match.index!, end: match.index! + match[0].length });
+    }
+  }
+  return found;
+}
+
+/**
+ * Negation that applies to *this* match: "not" / isn't / aren't / never
+ * immediately before the claim (with a few modifiers). "not certified" does
+ * not deny a separate "production-ready" on the same paragraph.
+ */
+const NEGATION_BEFORE =
+  /(?:^|[^A-Za-z])(?:isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|doesn['’]?t|don['’]?t|won['’]?t|do\s+not|does\s+not|not|never)(?:[\s/*-]+\w+){0,4}[\s/*-]*$/i;
+
+function claimIsDenied(text: string, claim: { kind: ClaimKind; start: number; end: number }): boolean {
+  const before = text.slice(Math.max(0, claim.start - 80), claim.start);
+  if (NEGATION_BEFORE.test(before)) return true;
+  if (claim.kind !== "certified") return false;
+  const token = text.slice(Math.max(0, claim.start - 1), claim.end + 1);
+  if (/^`certified`$/i.test(token)) return true;
+  if (/self_certifiable|self-certify/i.test(text)) return true;
+  if (/do not (?:write|call|claim|say|treat)/i.test(text)) return true;
+  return false;
+}
+
+function lineHasOverclaimPhrase(line: string): boolean {
+  return findClaims(flattenProse(line)).length > 0;
+}
+
+/** True when every `certified` claim in the text is locally denied. */
 function lineDeniesCertification(line: string): boolean {
-  return /self_certifiable|self-certify|not\s+CI-certified|not(?:\s+\w+){0,3}\s+certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n['’]?t)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified|not yet tested|isn['’]?t|aren['’]?t|not\s+production[-\s]ready|not\s+fully\s+support|not\s+battle-tested/i.test(
-    normalizeProse(line),
-  );
+  const text = flattenProse(line);
+  const certified = findClaims(text).filter((claim) => claim.kind === "certified");
+  if (certified.length === 0) {
+    return /self_certifiable|self-certify|not yet tested/i.test(text);
+  }
+  return certified.every((claim) => claimIsDenied(text, claim));
 }
 
 type UncertifiedSubject = { label: string; aliases: string[] };
@@ -101,21 +141,61 @@ function lineMentionsAliases(line: string, aliases: string[]): boolean {
   });
 }
 
-function lineOverclaimsUncertified(line: string, aliases: string[]): boolean {
-  const text = normalizeProse(line);
-  if (!lineMentionsAliases(text, aliases)) return false;
-  if (!lineHasOverclaimPhrase(text)) return false;
-  if (lineDeniesCertification(text)) return false;
-  return true;
+function lineOverclaimsUncertified(text: string, aliases: string[]): boolean {
+  const flat = flattenProse(text);
+  if (!lineMentionsAliases(flat, aliases)) return false;
+  for (const claim of findClaims(flat)) {
+    if (!claimIsDenied(flat, claim)) return true;
+  }
+  return false;
+}
+
+/**
+ * Prose units: table rows and headings stay one line; fenced code is skipped;
+ * other consecutive non-empty lines are one paragraph (hard wraps join).
+ */
+function proseUnits(text: string): Array<{ text: string; line: number }> {
+  const lines = text.split("\n");
+  const units: Array<{ text: string; line: number }> = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (line.trim() === "") {
+      i += 1;
+      continue;
+    }
+    if (/^\s*```/.test(line)) {
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i]!)) i += 1;
+      if (i < lines.length) i += 1;
+      continue;
+    }
+    if (/^\s*\|/.test(line) || /^\s*#/.test(line)) {
+      units.push({ text: line, line: i + 1 });
+      i += 1;
+      continue;
+    }
+    const start = i;
+    const buf: string[] = [];
+    while (i < lines.length) {
+      const cur = lines[i]!;
+      if (cur.trim() === "") break;
+      if (/^\s*```/.test(cur) || /^\s*\|/.test(cur) || /^\s*#/.test(cur)) break;
+      buf.push(cur.trim());
+      i += 1;
+    }
+    units.push({ text: buf.join(" "), line: start + 1 });
+  }
+  return units;
 }
 
 function collectProseOverclaims(files: Array<{ rel: string; text: string }>): string[] {
   const overclaims: string[] = [];
   for (const { rel, text } of files) {
     for (const subject of uncertifiedSubjects()) {
-      for (const [i, line] of text.split("\n").entries()) {
-        if (!lineOverclaimsUncertified(line, subject.aliases)) continue;
-        overclaims.push(`${rel}:${i + 1} overclaims ${subject.label}: ${line.trim()}`);
+      for (const unit of proseUnits(text)) {
+        if (!lineOverclaimsUncertified(unit.text, subject.aliases)) continue;
+        overclaims.push(`${rel}:${unit.line} overclaims ${subject.label}: ${unit.text.trim()}`);
       }
     }
   }
@@ -377,6 +457,35 @@ describe("warehouse certification map", () => {
     expect(lineOverclaimsUncertified("Grane isn't production-ready on Snowflake.", snowflake)).toBe(false);
     expect(lineOverclaimsUncertified("BigQuery aren't certified.", bigquery)).toBe(false);
     expect(lineOverclaimsUncertified("MariaDB isn't fully supported.", mariadb)).toBe(false);
+  });
+
+  it("does not let a certified denial exempt a production-ready claim", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    expect(lineOverclaimsUncertified("Snowflake is production-ready, not certified by us yet", snowflake)).toBe(true);
+    expect(
+      collectProseOverclaims([
+        { rel: "README.md", text: "Snowflake is production-ready, not certified by us yet.\n" },
+      ]),
+    ).not.toEqual([]);
+  });
+
+  it("catches a claim split across a hard wrap", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    const wrapped = "Snowflake is\nproduction-ready.\n";
+    expect(lineOverclaimsUncertified(wrapped, snowflake)).toBe(true);
+    expect(collectProseOverclaims([{ rel: "README.md", text: wrapped }])).not.toEqual([]);
+    expect(collectProseOverclaims([{ rel: "README.md", text: "Snowflake is\nproduction-ready, not\ncertified by us yet.\n" }])).not.toEqual(
+      [],
+    );
+  });
+
+  it("flags ready for production on an uncertified engine", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    expect(lineOverclaimsUncertified("Grane is ready for production on Snowflake.", snowflake)).toBe(true);
+    expect(lineOverclaimsUncertified("Snowflake is not ready for production.", snowflake)).toBe(false);
+    expect(
+      collectProseOverclaims([{ rel: "README.md", text: "Grane is ready for production on Snowflake.\n" }]),
+    ).not.toEqual([]);
   });
 
   it("every warehouse state table in docs/README matches the certified matrix", () => {
