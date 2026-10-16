@@ -10,9 +10,12 @@ import {
   approveProposal,
   createProposal,
   loadServingConfig,
+  pinCommitUnmatchedMessage,
   pinHealthWarnings,
   readActivePin,
+  readMergedApproval,
   readTrackedPin,
+  resolveProposalMergedCommit,
   writeActivePin,
 } from "../../src/authoring/git.js";
 import { stableConfigHash } from "../../src/config/hash.js";
@@ -99,6 +102,31 @@ function mergeProposal(dir: string, proposal: { id: string; branch: string }): s
     proposal.branch,
   ]);
   return git(dir, ["rev-parse", "HEAD"]);
+}
+
+function squashProposal(dir: string, proposal: { id: string; branch: string }): string {
+  git(dir, ["merge", "--squash", proposal.branch]);
+  git(dir, [
+    "commit",
+    "-m",
+    `Squash pull request from ${proposal.branch}\n\nGrane-Proposal: ${proposal.id}`,
+  ]);
+  return git(dir, ["rev-parse", "HEAD"]);
+}
+
+function laterUnrelatedCommit(dir: string, message = "later work on main"): string {
+  writeFileSync(join(dir, "NOTES.md"), `${message}\n`);
+  git(dir, ["add", "NOTES.md"]);
+  git(dir, ["commit", "-m", message]);
+  return git(dir, ["rev-parse", "HEAD"]);
+}
+
+function isReachableFromBase(dir: string, commit: string, base = "main"): boolean {
+  const result = spawnSync("git", ["merge-base", "--is-ancestor", commit, `refs/heads/${base}`], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  return (result.status ?? 1) === 0;
 }
 
 function pinBranches(dir: string): string[] {
@@ -241,6 +269,173 @@ describe("tracked pin (T1)", () => {
     expect(readActivePin(dir)?.commit).toBe(merged);
     const trackedAtPin = git(dir, ["show", `${result.pin_branch}:${TRACKED_PIN_PATH}`]);
     expect(JSON.parse(trackedAtPin).commit).toBe(merged);
+    expect(isReachableFromBase(dir, result.commit)).toBe(true);
+  });
+
+  it("pinned commit must be reachable from the configured base branch", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    const merged = mergeProposal(dir, proposal);
+    const tip = laterUnrelatedCommit(dir);
+    const result = approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
+    expect(result.commit).toBe(merged);
+    expect(result.commit).not.toBe(tip);
+    expect(isReachableFromBase(dir, result.commit)).toBe(true);
+    expect(git(dir, ["rev-parse", "main"])).toBe(tip);
+
+    git(dir, ["checkout", "-b", "side"]);
+    writeFileSync(join(dir, "SIDE.md"), "not on main\n");
+    git(dir, ["add", "SIDE.md"]);
+    git(dir, ["commit", "-m", "side only"]);
+    const side = git(dir, ["rev-parse", "HEAD"]);
+    git(dir, ["checkout", "main"]);
+    expect(isReachableFromBase(dir, side)).toBe(false);
+    expect(() =>
+      writeActivePin(dir, {
+        ref: "main",
+        commit: side,
+        approved_by: "octocat",
+        approved_at: "2026-10-16T12:00:00.000Z",
+      }),
+    ).toThrow(/not reachable|Refusing to pin/);
+  });
+
+  it("merge: approve pins the merge commit, not a later base tip", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    const merged = mergeProposal(dir, proposal);
+    const tip = laterUnrelatedCommit(dir, "docs after merge");
+    const approval = readMergedApproval(dir, proposal.id, { against: "base" });
+    expect(approval.merged).toBe(true);
+    expect(approval.merge_commit).toBe(merged);
+    expect(approval.merge_commit).not.toBe(tip);
+    expect(resolveProposalMergedCommit(dir, proposal.commit, tip)).toBe(merged);
+    const result = approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
+    expect(result.commit).toBe(merged);
+    expect(result.commit).not.toBe(tip);
+    expect(isReachableFromBase(dir, result.commit)).toBe(true);
+  });
+
+  it("squash: approve pins the squash commit whose metric YAML matches, not the tip", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    const squashed = squashProposal(dir, proposal);
+    expect(isReachableFromBase(dir, proposal.commit)).toBe(false);
+    const tip = laterUnrelatedCommit(dir, "docs after squash");
+    const approval = readMergedApproval(dir, proposal.id, { against: "base" });
+    expect(approval.merged).toBe(true);
+    expect(approval.merge_commit).toBe(squashed);
+    expect(approval.merge_commit).not.toBe(tip);
+    expect(approval.merge_commit).not.toBe(proposal.commit);
+    const result = approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
+    expect(result.commit).toBe(squashed);
+    expect(result.commit).not.toBe(tip);
+    expect(isReachableFromBase(dir, result.commit)).toBe(true);
+    expect(JSON.parse(git(dir, ["show", `${result.pin_branch}:${TRACKED_PIN_PATH}`])).commit).toBe(squashed);
+  });
+
+  it("rebase: approve pins the rebased commit whose metric YAML matches, not the tip", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    laterUnrelatedCommit(dir, "main moved before rebase");
+    git(dir, ["checkout", "-B", "tmp-rebase", proposal.branch]);
+    git(dir, ["rebase", "main"]);
+    const rebased = git(dir, ["rev-parse", "HEAD"]);
+    git(dir, ["checkout", "main"]);
+    git(dir, ["merge", "--ff-only", "tmp-rebase"]);
+    git(dir, ["branch", "-D", "tmp-rebase"]);
+    expect(git(dir, ["rev-parse", proposal.branch])).toBe(proposal.commit);
+    expect(isReachableFromBase(dir, proposal.commit)).toBe(false);
+    expect(isReachableFromBase(dir, rebased)).toBe(true);
+    const tip = laterUnrelatedCommit(dir, "docs after rebase");
+    const approval = readMergedApproval(dir, proposal.id, { against: "base" });
+    expect(approval.merged).toBe(true);
+    expect(approval.merge_commit).toBe(rebased);
+    expect(approval.merge_commit).not.toBe(tip);
+    expect(approval.merge_commit).not.toBe(proposal.commit);
+    const result = approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" });
+    expect(result.commit).toBe(rebased);
+    expect(result.commit).not.toBe(tip);
+    expect(isReachableFromBase(dir, result.commit)).toBe(true);
+  });
+
+  it("squash with non-matching metric YAML refuses and does not pin the tip", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    git(dir, ["merge", "--squash", proposal.branch]);
+    writeFileSync(
+      join(dir, "metrics.yml"),
+      `metrics:
+  other:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+    status: experimental
+`,
+    );
+    git(dir, ["add", "metrics.yml"]);
+    git(dir, ["commit", "-m", "squash with different metrics"]);
+    const tip = git(dir, ["rev-parse", "HEAD"]);
+    expect(isReachableFromBase(dir, proposal.commit)).toBe(false);
+    const approval = readMergedApproval(dir, proposal.id, { against: "base" });
+    expect(approval.merged).toBe(false);
+    expect(approval.merge_commit).toBeNull();
+    expect(resolveProposalMergedCommit(dir, proposal.commit, tip)).toBeNull();
+    expect(() => approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" })).toThrow(
+      /will not silently pin|metric YAML matching/,
+    );
+    expect(() => approveProposal(dir, proposal.id, { tty: false, approved_by: "octocat" })).toThrow(
+      pinCommitUnmatchedMessage(approval).slice(0, 80),
+    );
+    expect(existsSync(join(dir, ACTIVE_PIN_PATH))).toBe(false);
+    expect(existsSync(join(dir, TRACKED_PIN_PATH))).toBe(false);
+    expect(pinBranches(dir)).toEqual([]);
+    expect(git(dir, ["rev-parse", "main"])).toBe(tip);
   });
 });
 

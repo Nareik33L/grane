@@ -39,6 +39,10 @@ npx tsx /path/to/grane/src/cli/index.ts -p . proposals   # or authoring submit_p
 ```
 
 Merge the **proposal** PR on GitHub (`gh pr merge` as a human, not Grane).
+Merge, squash, or rebase are all valid: `proposals approve` pins that
+proposal's merged commit on `main` (the merge commit, or the squash/rebase
+commit whose metric YAML matches), not a later tip. If no matching commit
+is reachable from `main`, it refuses instead of pinning silently.
 
 ### Account A — approve (does not merge the pin)
 

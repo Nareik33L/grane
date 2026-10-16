@@ -94,7 +94,7 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
   proposals
     .command("approve")
     .argument("<id>", "proposal id or grane/proposal/* branch")
-    .description("Validate YAML, pin the merge commit, commit grane.pin.json on a pin branch, print a PR (does not merge/push)")
+    .description("Validate YAML, pin the proposal's merged commit (not the base tip), commit grane.pin.json on a pin branch, print a PR (does not merge/push)")
     .option("--json", "print JSON")
     .option("--approved-by <name>", "recorded approved_by on the pin")
     .action((id: string, options: { json?: boolean; approvedBy?: string }) => {

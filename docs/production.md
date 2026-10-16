@@ -117,8 +117,10 @@ authoring tools cannot write the pin.
 ## Proposal review CLI
 
 `grane proposals list|diff|approve|reject|rollback` reviews local
-`grane/proposal/*` branches. **Approve** pins the merge commit of a GitHub
-PR: it requires a human TTY or a PR that is already merged, and it is not
+`grane/proposal/*` branches. **Approve** pins the proposal's merged commit
+on the configured base (merge, or the squash/rebase commit whose metric YAML
+matches — not the moving base tip): it requires a human TTY or a PR that is
+already merged, refuses if no matching reachable commit exists, and it is not
 an MCP tool. `approved_by` defaults to `git user.name`. **Rollback**
 re-pins `previous_commit` (or `--to` of a previously approved pin only);
 `approved_by` defaults to `git user.name`. Pin writes and restores use

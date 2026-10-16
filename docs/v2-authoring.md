@@ -157,10 +157,16 @@ grane proposals rollback [--to <sha>] [--approved-by NAME]
 - **list / diff** — local `grane/proposal/*` branches. Diff is against the
   active pin or the configured base. JSON includes semantic added/changed/removed
   metrics and entities, keys restored by the YAML merge, and lost comments.
-- **approve** — validates YAML at the merge commit first (refuses before
-  writing anything if invalid), pins that commit of a **merged** GitHub PR,
-  commits `grane.pin.json` on `grane/pin/*`, and prints `gh pr create`.
-  Does not merge or push the base. `approved_by` defaults to `git user.name`.
+- **approve** — validates YAML at the proposal's merged commit first (refuses
+  before writing anything if invalid), then pins that commit — the merge
+  commit, or the squash/rebase commit on the configured base whose metric
+  YAML matches the proposal, **not** the moving base tip. The pinned commit
+  must be reachable from the base. If no matching commit exists, it refuses
+  with a clear message (never pins silently). Commits `grane.pin.json` on
+  `grane/pin/*` and prints `gh pr create`. Does not merge or push the base.
+  `approved_by` defaults to `git user.name`. Legacy `.grane/active.json`
+  users: approve used to pin the base tip; it now pins the proposal's merged
+  commit.
 - **reject** — deletes the proposal ref after the audit line (restores the SHA
   if that write fails). TTY prompts `y/N` unless `--yes`. Does not write the pin.
 - **rollback** — re-pins `previous_commit`, or `--to` of a previously approved

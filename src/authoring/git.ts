@@ -29,10 +29,13 @@ const FULL_SHA = /^[0-9a-fA-F]{40}$/;
  *
  * This module never writes to the active branch. Proposal commits are created
  * with plumbing (`commit-tree` + `update-ref` on `grane/proposal/*` only).
- * `approveProposal` validates YAML, pins a merge commit after a GitHub PR
- * merge (or a TTY), commits the tracked pin on `grane/pin/*`, and prints a
- * PR plan. It never pushes to or merges the base branch. Rollback re-pins
- * the last good local pin. Reject deletes a proposal ref only.
+ * `approveProposal` validates YAML, pins the proposal's merged commit on
+ * the configured base (merge commit, or the squash/rebase commit whose
+ * metric YAML matches — never the moving base tip), commits the tracked
+ * pin on `grane/pin/*`, and prints a PR plan. If no matching base commit
+ * exists it refuses with a clear error; it never pins silently. It never
+ * pushes to or merges the base branch. Rollback re-pins the last good
+ * local pin. Reject deletes a proposal ref only.
  */
 
 export const PROPOSAL_BRANCH_PREFIX = "grane/proposal/";
@@ -1420,6 +1423,81 @@ function isAncestor(root: string, ancestor: string, descendant: string): boolean
   return runGit(root, ["merge-base", "--is-ancestor", ancestor, descendant], { allowFail: true }).status === 0;
 }
 
+/** First-parent SHAs of `tip`, newest first. */
+function firstParentHistory(root: string, tip: string): string[] {
+  const raw = git(root, ["log", "--first-parent", "--format=%H", tip], { allowFail: true }).trim();
+  return raw ? raw.split("\n").filter((line) => FULL_SHA.test(line)) : [];
+}
+
+/** Serving YAML at `commit` (metrics + the other project YAML `loadConfig` merges). */
+export function projectYamlFingerprint(projectDir: string, commit: string): string {
+  const contents = yamlContentsAtCommit(projectDir, commit);
+  return Object.keys(contents)
+    .sort()
+    .map((name) => `${name}\n${contents[name]}`)
+    .join("\n\u001e\n");
+}
+
+/**
+ * Commit on `tip`'s first-parent history to pin for this proposal.
+ * Merge/FF: the merge commit (or the proposal itself) — not later tips.
+ * Squash/rebase: the oldest first-parent commit whose project YAML matches
+ * the proposal. Returns null if nothing matches (caller must refuse; never
+ * pin the moving tip).
+ */
+export function resolveProposalMergedCommit(
+  projectDir: string,
+  proposalCommit: string,
+  tip: string,
+): string | null {
+  const root = gitRoot(projectDir);
+  const proposal = resolveCommit(root, proposalCommit);
+  const tipSha = resolveCommit(root, tip);
+  const history = firstParentHistory(root, tipSha);
+  if (history.length === 0) return null;
+
+  if (isAncestor(root, proposal, tipSha)) {
+    let found: string | null = null;
+    for (const sha of history) {
+      if (isAncestor(root, proposal, sha)) found = sha;
+      else break;
+    }
+    if (found && isAncestor(root, found, tipSha)) return found;
+    return null;
+  }
+
+  const wanted = projectYamlFingerprint(projectDir, proposal);
+  let found: string | null = null;
+  const mergeBaseProbe = runGit(root, ["merge-base", proposal, tipSha], { allowFail: true });
+  const mergeBase = mergeBaseProbe.status === 0 ? mergeBaseProbe.stdout.trim() || null : null;
+  for (const sha of history) {
+    if (mergeBase && sha === mergeBase) break;
+    if (projectYamlFingerprint(projectDir, sha) === wanted) {
+      found = sha;
+      continue;
+    }
+    if (found) break;
+  }
+  if (found && isAncestor(root, found, tipSha)) return found;
+  return null;
+}
+
+export function pinCommitUnmatchedMessage(approval: {
+  proposal_id: string;
+  proposal_commit: string;
+  base_branch: string;
+}): string {
+  return (
+    `Merge the GitHub PR for "${approval.proposal_id}" before approving. ` +
+    `Proposal commit ${approval.proposal_commit} is not on "${approval.base_branch}" ` +
+    `(squash and rebase merges rewrite the commit). ` +
+    `No commit on "${approval.base_branch}" has metric YAML matching the proposal. ` +
+    `Refusing to pin — will not silently pin the ${approval.base_branch} tip. ` +
+    `Approve pins the proposal's merged commit; it does not merge. ` +
+    `Merge, squash, or rebase the proposal onto ${approval.base_branch} so its YAML is reachable from that branch, then retry.`
+  );
+}
+
 /** When origin/<base> exists, merge detection uses that tip — not a local-only rewrite. */
 function originBaseTip(root: string, base_branch: string): string | null {
   const probe = runGit(root, ["rev-parse", "--verify", `refs/remotes/origin/${base_branch}^{commit}`], {
@@ -1448,6 +1526,8 @@ function findExactProposalTrailer(root: string, baseCommit: string, proposalId: 
  * Read whether a proposal has been merged into the active branch.
  * Does not merge, fast-forward, or otherwise write to the active branch.
  * The proposal id always comes from the branch name, never from the commit trailer.
+ * `merge_commit` is the proposal's merged commit on the base (merge / FF /
+ * squash / rebase YAML match), never the moving tip after later commits.
  */
 export function readMergedApproval(
   projectDir: string,
@@ -1464,17 +1544,18 @@ export function readMergedApproval(
     against === "base"
       ? originBaseTip(root, base_branch) ?? git(root, ["rev-parse", `refs/heads/${base_branch}`]).trim()
       : resolveActiveRef(projectDir).commit;
-  const ancestor = isAncestor(root, proposal_commit, tip);
   // Trailer-only "merges" (forged Grane-Proposal on an empty commit) are not
-  // merged. The proposal commit itself must be reachable from the base tip.
-  const merged = ancestor;
+  // merged. Merge/FF requires the proposal commit on the base; squash/rebase
+  // requires a base commit whose metric YAML matches. Never pin the tip.
+  const merge_commit = resolveProposalMergedCommit(projectDir, proposal_commit, tip);
+  const merged = merge_commit !== null;
   return {
     merged,
     proposal_id,
     proposal_branch: branch,
     proposal_commit,
     base_branch,
-    merge_commit: merged ? tip : null,
+    merge_commit,
     metric_trust: merged ? "governed" : "experimental",
   };
 }
@@ -1524,10 +1605,12 @@ export function diffProposalAction(projectDir: string, idOrBranch: string): Prop
 }
 
 /**
- * Pin the merge commit of a proposal. Validates YAML first (refuse before
- * writing anything if invalid). Writes the last-good local pin, then commits
- * `grane.pin.json` on a `grane/pin/*` branch and returns a `gh pr create`
- * plan. Never merges, fast-forwards, pushes, or moves the configured base.
+ * Pin the proposal's merged commit on the configured base (not the moving
+ * tip). Validates YAML first (refuse before writing anything if invalid).
+ * Writes the last-good local pin, then commits `grane.pin.json` on a
+ * `grane/pin/*` branch and returns a `gh pr create` plan. Never merges,
+ * fast-forwards, pushes, or moves the configured base. Squash/rebase
+ * matches metric YAML on the base; no match → refuse, never pin silently.
  */
 export function approveProposal(
   projectDir: string,
@@ -1536,19 +1619,11 @@ export function approveProposal(
 ): ApproveResult {
   assertNotDemoAuthoring(projectDir, "approve");
   const approval = readMergedApproval(projectDir, idOrBranch, { against: "base" });
-  if (!options.tty && !approval.merged) {
-    const reason =
-      `approve requires a human TTY or a merged GitHub PR. Merge the PR, or run "grane proposals approve" in a terminal.`;
-    recordProposalLine(projectDir, {
-      operation: "approve",
-      proposal_id: approval.proposal_id,
-      branch: approval.proposal_branch,
-      reason,
-    });
-    throw configError(reason);
-  }
   if (!approval.merged || !approval.merge_commit) {
-    const reason = `Merge the GitHub PR for "${approval.proposal_id}" before approving. Approve pins the merge commit; it does not merge.`;
+    const unmatched = pinCommitUnmatchedMessage(approval);
+    const reason = options.tty
+      ? unmatched
+      : `approve requires a human TTY or a merged GitHub PR. ${unmatched}`;
     recordProposalLine(projectDir, {
       operation: "approve",
       proposal_id: approval.proposal_id,
