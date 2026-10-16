@@ -92,12 +92,38 @@ function findClaims(text: string): Array<{ kind: ClaimKind; start: number; end: 
 }
 
 /**
- * Negation that applies to *this* match: "not" / isn't / aren't / never
- * immediately before the claim (with a few modifiers). "not certified" does
- * not deny a separate "production-ready" on the same paragraph.
+ * Negation that applies to *this* match. Stops at and / or / but so
+ * "not slow and production-ready" does not deny production-ready.
  */
 const NEGATION_BEFORE =
-  /(?:^|[^A-Za-z])(?:isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|doesn['’]?t|don['’]?t|won['’]?t|do\s+not|does\s+not|not|never)(?:[\s/*-]+\w+){0,4}[\s/*-]*$/i;
+  /(?:^|[^A-Za-z])(?:isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|doesn['’]?t|don['’]?t|won['’]?t|do\s+not|does\s+not|not|never)(?:[\s/*-]+(?!(?:and|or|but)\b)\w+){0,4}[\s/*-]*$/i;
+
+/** Sentence or list item that contains `index` (claimIsDenied scope). */
+function unitSlice(text: string, index: number): string {
+  let start = 0;
+  const bound = /[.!?]\s+(?=[A-Z`"'(])|\s+[-*+]\s+/g;
+  let match: RegExpExecArray | null;
+  while ((match = bound.exec(text)) !== null) {
+    const next = match.index + match[0].length;
+    if (next <= index) start = next;
+    else break;
+  }
+  const after = text.slice(index);
+  const endRel = after.search(/[.!?]\s+(?=[A-Z`"'(])|\s+[-*+]\s+/);
+  const end = endRel === -1 ? text.length : index + endRel;
+  return text.slice(start, end);
+}
+
+function splitCheckUnits(text: string): string[] {
+  const flat = flattenProse(text);
+  if (!flat) return [];
+  const items = flat.split(/(?:^|\s+)(?:[-*+]|\d+\.)\s+/).map((part) => part.trim()).filter(Boolean);
+  const chunks = items.length > 0 ? items : [flat];
+  return chunks.flatMap((chunk) => {
+    const sentences = chunk.split(/(?<=[.!?])\s+(?=[A-Z`"'(])/).map((part) => part.trim()).filter(Boolean);
+    return sentences.length > 0 ? sentences : [chunk];
+  });
+}
 
 function claimIsDenied(text: string, claim: { kind: ClaimKind; start: number; end: number }): boolean {
   const before = text.slice(Math.max(0, claim.start - 80), claim.start);
@@ -105,8 +131,9 @@ function claimIsDenied(text: string, claim: { kind: ClaimKind; start: number; en
   if (claim.kind !== "certified") return false;
   const token = text.slice(Math.max(0, claim.start - 1), claim.end + 1);
   if (/^`certified`$/i.test(token)) return true;
-  if (/self_certifiable|self-certify/i.test(text)) return true;
-  if (/do not (?:write|call|claim|say|treat)/i.test(text)) return true;
+  const sentence = unitSlice(text, claim.start);
+  if (/self_certifiable|self-certify/i.test(sentence)) return true;
+  if (/do not (?:write|call|claim|say|treat)/i.test(sentence)) return true;
   return false;
 }
 
@@ -116,12 +143,17 @@ function lineHasOverclaimPhrase(line: string): boolean {
 
 /** True when every `certified` claim in the text is locally denied. */
 function lineDeniesCertification(line: string): boolean {
-  const text = flattenProse(line);
-  const certified = findClaims(text).filter((claim) => claim.kind === "certified");
-  if (certified.length === 0) {
-    return /self_certifiable|self-certify|not yet tested/i.test(text);
+  let sawCertified = false;
+  for (const unit of splitCheckUnits(line)) {
+    const certified = findClaims(unit).filter((claim) => claim.kind === "certified");
+    if (certified.length === 0) continue;
+    sawCertified = true;
+    if (!certified.every((claim) => claimIsDenied(unit, claim))) return false;
   }
-  return certified.every((claim) => claimIsDenied(text, claim));
+  if (!sawCertified) {
+    return /self_certifiable|self-certify|not yet tested/i.test(flattenProse(line));
+  }
+  return true;
 }
 
 type UncertifiedSubject = { label: string; aliases: string[] };
@@ -142,17 +174,21 @@ function lineMentionsAliases(line: string, aliases: string[]): boolean {
 }
 
 function lineOverclaimsUncertified(text: string, aliases: string[]): boolean {
-  const flat = flattenProse(text);
-  if (!lineMentionsAliases(flat, aliases)) return false;
-  for (const claim of findClaims(flat)) {
-    if (!claimIsDenied(flat, claim)) return true;
+  for (const unit of splitCheckUnits(text)) {
+    if (!lineMentionsAliases(unit, aliases)) continue;
+    for (const claim of findClaims(unit)) {
+      if (!claimIsDenied(unit, claim)) return true;
+    }
   }
   return false;
 }
 
+const LIST_ITEM = /^(?:[-*+]|\d+\.)\s+/;
+
 /**
- * Prose units: table rows and headings stay one line; fenced code is skipped;
- * other consecutive non-empty lines are one paragraph (hard wraps join).
+ * Prose units: table rows, headings, and list items stay separate; fenced
+ * code is skipped; other consecutive non-empty lines are one paragraph
+ * (hard wraps join). Over-claim checks then split on sentences.
  */
 function proseUnits(text: string): Array<{ text: string; line: number }> {
   const lines = text.split("\n");
@@ -175,12 +211,29 @@ function proseUnits(text: string): Array<{ text: string; line: number }> {
       i += 1;
       continue;
     }
+    const trimmed = line.trim();
+    if (LIST_ITEM.test(trimmed)) {
+      const start = i;
+      const buf = [trimmed];
+      i += 1;
+      while (i < lines.length) {
+        const cur = lines[i]!;
+        if (cur.trim() === "") break;
+        if (/^\s*```/.test(cur) || /^\s*\|/.test(cur) || /^\s*#/.test(cur)) break;
+        if (LIST_ITEM.test(cur.trim())) break;
+        buf.push(cur.trim());
+        i += 1;
+      }
+      units.push({ text: buf.join(" "), line: start + 1 });
+      continue;
+    }
     const start = i;
     const buf: string[] = [];
     while (i < lines.length) {
       const cur = lines[i]!;
       if (cur.trim() === "") break;
       if (/^\s*```/.test(cur) || /^\s*\|/.test(cur) || /^\s*#/.test(cur)) break;
+      if (LIST_ITEM.test(cur.trim())) break;
       buf.push(cur.trim());
       i += 1;
     }
@@ -486,6 +539,43 @@ describe("warehouse certification map", () => {
     expect(
       collectProseOverclaims([{ rel: "README.md", text: "Grane is ready for production on Snowflake.\n" }]),
     ).not.toEqual([]);
+  });
+
+  it("does not let a later self-certify sentence deny certified", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    const sample = "Snowflake is certified. Self-certify with grane certify.";
+    expect(lineOverclaimsUncertified(sample, snowflake)).toBe(true);
+    const certified = findClaims(sample).find((claim) => claim.kind === "certified");
+    expect(certified).toBeTruthy();
+    expect(claimIsDenied(sample, certified!)).toBe(false);
+  });
+
+  it("stops the negation window at and, or, and but", () => {
+    const bigquery = engineAliases(WAREHOUSE_CERTIFICATION.bigquery);
+    expect(lineOverclaimsUncertified("BigQuery is not slow and production-ready", bigquery)).toBe(true);
+    expect(lineOverclaimsUncertified("Snowflake is not broken or certified", engineAliases(WAREHOUSE_CERTIFICATION.snowflake))).toBe(
+      true,
+    );
+    expect(lineOverclaimsUncertified("Databricks is not old but battle-tested", engineAliases(WAREHOUSE_CERTIFICATION.databricks))).toBe(
+      true,
+    );
+    expect(lineOverclaimsUncertified("BigQuery is not production-ready", bigquery)).toBe(false);
+  });
+
+  it("splits checks on sentence boundaries and list markers", () => {
+    const snowflake = engineAliases(WAREHOUSE_CERTIFICATION.snowflake);
+    expect(lineOverclaimsUncertified("Snowflake has a connector. PostgreSQL is production-ready.", snowflake)).toBe(
+      false,
+    );
+    expect(lineOverclaimsUncertified("- Snowflake has a connector\n- PostgreSQL is production-ready.", snowflake)).toBe(
+      false,
+    );
+    expect(
+      collectProseOverclaims([
+        { rel: "README.md", text: "Snowflake has a connector. PostgreSQL is production-ready.\n" },
+      ]),
+    ).toEqual([]);
+    expect(lineOverclaimsUncertified("- Snowflake is production-ready\n- PostgreSQL is fine.", snowflake)).toBe(true);
   });
 
   it("every warehouse state table in docs/README matches the certified matrix", () => {
