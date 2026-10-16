@@ -418,8 +418,11 @@ warehouse is runtime-certified.
 | Category | Map state | Engines |
 | --- | --- | --- |
 | runtime-certified | `certified` | PostgreSQL 16, MySQL 8, DuckDB 1.5, ClickHouse 24 |
-| compile-supported | `self_certifiable` | Snowflake, BigQuery, Redshift, Databricks |
+| compile-supported | `self_certifiable` | Snowflake, BigQuery, Redshift, Databricks — **not yet tested / not certified** (connectors exist; no credentialed certification run) |
 | not yet certified | `compile_only` | none today |
+
+MariaDB is not certified (`connection.type: mysql` may connect; treat as
+self-certifiable).
 
 ## Cloud certify (release step)
 

@@ -36,7 +36,7 @@ branch tip.
 | Category | Map state | Who |
 | --- | --- | --- |
 | runtime-certified | `certified` | PostgreSQL 16, MySQL 8, DuckDB 1.5, ClickHouse 24 (CI corpus) |
-| compile-supported | `self_certifiable` | Snowflake, BigQuery, Redshift, Databricks |
+| compile-supported | `self_certifiable` | Snowflake, BigQuery, Redshift, Databricks — not yet tested / not certified (no credentialed run) |
 | not yet certified | `compile_only` | none today |
 
 No cloud warehouse is runtime-certified until the credentialed certify-cloud

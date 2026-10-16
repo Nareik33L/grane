@@ -2,7 +2,9 @@
 
 This is the path from an empty directory to five governed metrics on **your**
 warehouse. Postgres is the default. DuckDB is an optional extra, not the
-starting point.
+starting point. There is **no hosted version** of Grane. Everyone needs their
+own read-only data access. Spreadsheets (CSV, Excel, Google Sheets) are not
+supported.
 
 If you have not used Grane yet, run the guided setup (demo shop or your
 warehouse), then ask the printed question:

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Honest OSS README (Release 1 item 3).** README warehouse matrix matches
+  `WAREHOUSE_CERTIFICATION`: PostgreSQL 16, MySQL 8, DuckDB 1.5, and
+  ClickHouse 24 are certified.
+  Snowflake, BigQuery, Databricks, and Redshift are **not yet tested / not
+  certified** (connectors exist; no credentialed certification run).
+  MariaDB is not certified. README states plainly: everyone needs their own
+  read-only data access; there is no hosted version yet; spreadsheets (CSV /
+  Excel / Google Sheets) are not supported. Links
+  [docs/two-person-test.md](docs/two-person-test.md) until
+  `docs/team-setup.md` lands. A unit test fails if the README matrix lists an
+  engine as certified that the cert map does not mark `certified`. No
+  publish, tag, or tokens.
 - **Release-checklist dry-run (P0-3).** Lead cuts the RC from `main` and
   pins every step to that 40-character SHA
   (`npx tsx src/release/dry-run.ts --sha <RC>`). Gate 5 (Kieran,

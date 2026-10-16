@@ -54,9 +54,11 @@ join/grain safety, provenance, controlled exploration of raw warehouse
 columns, semantic connectors (dbt, Cube, LookML, Apache Ossie, auto-detect),
 MCP, CLI, database connectors, the query audit log, and production Docker.
 
-Out of scope: dashboards, chart builders, a built-in chatbot, hosted
-analytics, unrestricted agent-written SQL, SSO, or anything that makes Grane
-invent business definitions or present exploration as governed truth.
+Out of scope: dashboards, chart builders, a built-in chatbot, a hosted Grane
+(there is no hosted version yet), spreadsheet connectors (CSV / Excel /
+Google Sheets), unrestricted agent-written SQL, SSO, or anything that makes
+Grane invent business definitions or present exploration as governed truth.
+Everyone needs their own read-only warehouse access.
 
 Authoring (V2) is in scope as a proposal-as-PR workflow. Do not add MCP
 tools that approve, pin, merge, or write production YAML. Guide:

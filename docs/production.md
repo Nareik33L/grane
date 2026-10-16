@@ -1,8 +1,10 @@
 # Production HTTP in your VPC
 
-Grane is self-hosted. This page is the production path: a published Docker
-image (or `docker run` from this repo), a read-only warehouse user, TLS in
-front, and per-agent bearer tokens. There is no SSO and no hosted control plane.
+Grane is self-hosted. There is **no hosted version** yet. This page is the
+production path: a published Docker image (or `docker run` from this repo), a
+read-only warehouse user, TLS in front, and per-agent bearer tokens. Everyone
+needs their own read-only data access. There is no SSO and no hosted control
+plane. Spreadsheets (CSV, Excel, Google Sheets) are not supported.
 
 Local desktop agents should keep using **stdio** (`grane mcp connect cursor`).
 Use HTTP when an agent in another process or network needs MCP.

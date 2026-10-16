@@ -16,7 +16,7 @@ Agent → MCP → Grane → Warehouse
 - Governed + exploratory analytics
 - Works with existing semantic definitions
 - No LLM inside Grane
-- Fully self-hosted
+- Self-hosted — no hosted version yet
 
 ![Why did revenue fall last month?](demo/why-revenue-fell.gif)
 
@@ -82,7 +82,7 @@ If Grane cannot safely resolve the meaning, it **refuses**. That is a feature.
 
 Connect Claude, ChatGPT, Gemini, Cursor, or any MCP agent. Grane does not need their API keys.
 
-Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)** · Authoring (V2): **[docs/v2-authoring.md](docs/v2-authoring.md)**
+Walkthrough: **[docs/connect-an-agent.md](docs/connect-an-agent.md)** · MCP tools: **[docs/mcp-setup.md](docs/mcp-setup.md)** · Your own Postgres: **[docs/first-week.md](docs/first-week.md)** · Authoring (V2): **[docs/v2-authoring.md](docs/v2-authoring.md)** · Two-person pin: **[docs/two-person-test.md](docs/two-person-test.md)** (team guide coming)
 
 ## Install (your warehouse)
 
@@ -172,13 +172,43 @@ Methodology: [`tests/benchmark/README.md`](tests/benchmark/README.md).
 
 ## Warehouses and semantic providers
 
-Postgres is bundled. Other engines are optional installs. Certified in CI: PostgreSQL 16, MySQL 8, DuckDB 1.5, and ClickHouse 24. Other engines are not CI-certified — see [docs/warehouses.md](docs/warehouses.md). Already have dbt/MetricFlow, Cube, LookML, Ossie, or Malloy? `grane init --provider ../your_project` imports those definitions instead of copying YAML; what Grane cannot compile faithfully is skipped with a reason, never guessed. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
+**Bring your own warehouse.** Everyone needs their own read-only data access.
+There is **no hosted version** yet. Spreadsheets (CSV, Excel, Google Sheets)
+are **not supported** — Grane queries a warehouse, not a file.
+
+Postgres is bundled. Other engines are optional installs. Status is from
+`WAREHOUSE_CERTIFICATION` in `src/connectors/certification.ts` (shared corpus
+in CI). A connector that ships is not certification.
+
+Certified: PostgreSQL 16, MySQL 8, DuckDB 1.5, and ClickHouse 24.
+
+| Warehouse | `connection.type` | Status |
+| --- | --- | --- |
+| PostgreSQL 16 | `postgres` | Certified |
+| MySQL 8 | `mysql` | Certified |
+| Snowflake | `snowflake` | Not yet tested / not certified |
+| BigQuery | `bigquery` | Not yet tested / not certified |
+| DuckDB 1.5 | `duckdb` | Certified |
+| ClickHouse 24 | `clickhouse` | Certified |
+| Amazon Redshift | `redshift` | Not yet tested / not certified |
+| Databricks | `databricks` | Not yet tested / not certified |
+
+MariaDB is **not certified**. `connection.type: mysql` plus mysql2 may connect; treat MariaDB as self-certifiable and verify against your server.
+
+Snowflake, BigQuery, Databricks, and Redshift have connectors; there has been
+no credentialed certification run. Self-certify with `grane certify`. Details:
+[docs/warehouses.md](docs/warehouses.md).
+
+Already have dbt/MetricFlow, Cube, LookML, Ossie, or Malloy? `grane init --provider ../your_project` imports those definitions instead of copying YAML; what Grane cannot compile faithfully is skipped with a reason, never guessed. See [docs/warehouses.md](docs/warehouses.md) and [docs/providers.md](docs/providers.md).
 
 Production HTTP (Docker, TLS, agent tokens, audit log): [docs/production.md](docs/production.md).
 
 ## What Grane is not
 
-No dashboards, no chart builder, no built-in chatbot, no hosted data plane, no required LLM API key.
+No dashboards, no chart builder, no built-in chatbot, no hosted version (yet),
+no hosted data plane, no required LLM API key, no spreadsheet connectors
+(CSV / Excel / Google Sheets). Everyone brings their own read-only warehouse
+access.
 
 ## Development
 

@@ -15,7 +15,12 @@ the one you need.
 | Amazon Redshift | `redshift` | bundled (`pg`) |
 | Databricks | `databricks` | `npm install @databricks/sql` |
 
-Use a **read-only** warehouse user. Grane still refuses write SQL in the kernel.
+MariaDB is **not** a certified engine. `connection.type: mysql` plus mysql2 may
+connect; treat that as self-certifiable and verify against your server.
+
+Use a **read-only** warehouse user. Everyone needs their own read-only data
+access. There is no hosted Grane. Spreadsheets (CSV, Excel, Google Sheets) are
+not supported.
 
 ## Certification
 
@@ -41,7 +46,9 @@ in Grane CI.
 
 Snowflake, BigQuery, Amazon Redshift, and Databricks. The connector ships and
 compiles SQL; Grane CI does not run the corpus. Self-certify locally. These
-are **not yet runtime-certified**.
+are **not yet tested / not certified** (no credentialed certification run) and
+**not yet runtime-certified**. The README warehouse matrix uses that plain
+language so a shipped connector is not mistaken for certification.
 
 ### Not yet certified (`compile_only`)
 

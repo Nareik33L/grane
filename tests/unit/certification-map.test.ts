@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -7,8 +7,11 @@ import { WAREHOUSE_TYPES, type WarehouseType } from "../../src/connectors/dialec
 import {
   CERTIFICATION_CATEGORY,
   CERTIFICATION_STATES,
+  README_MARIADB_NOTE,
   WAREHOUSE_CERTIFICATION,
   readmeCertificationLine,
+  readmeCertificationMatrix,
+  readmeWarehouseStatus,
   uncertifiedWarehouseWarning,
   warehouseCertificationMarkdown,
   warehouseServerInfo,
@@ -49,9 +52,33 @@ function lineMentionsEngine(line: string, entry: WarehouseCertification): boolea
 
 /** Lines that mention certified only to deny it, or to say self_certifiable. */
 function lineDeniesCertification(line: string): boolean {
-  return /self_certifiable|self-certify|not\s+CI-certified|not certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n't)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified/i.test(
+  return /self_certifiable|self-certify|not\s+CI-certified|not certified|not\s+CI certified|remain `?self_certifiable|stay `?self_certifiable|does(?:\s+not|n't)\s+cover|never\s+.*certified|not flipped to|without CI evidence|pending (?:release|dispatch)|skips?(?: cleanly)? without|skip unless|skips unless|do not (?:write|call|claim).*certified|must not include|runtime-certified|compile-supported|not yet certified|not yet runtime-certified|not\s+runtime-certified|not yet tested/i.test(
     line,
   );
+}
+
+/** README matrix rows: | Warehouse | `type` | Status |. */
+function parseReadmeWarehouseMatrix(readme: string): Array<{
+  warehouse: string;
+  type: string;
+  status: string;
+  line: number;
+}> {
+  const rows: Array<{ warehouse: string; type: string; status: string; line: number }> = [];
+  const re = /^\|\s*(.+?)\s*\|\s*`([a-z]+)`\s*\|\s*(.+?)\s*\|$/;
+  for (const [i, line] of readme.split("\n").entries()) {
+    const match = re.exec(line);
+    if (!match) continue;
+    const type = match[2]!;
+    if (!WAREHOUSE_TYPES.includes(type as WarehouseType)) continue;
+    if (match[1]!.includes("connection.type") || match[3] === "---") continue;
+    rows.push({ warehouse: match[1]!.trim(), type, status: match[3]!.trim(), line: i + 1 });
+  }
+  return rows;
+}
+
+function statusClaimsCertified(status: string): boolean {
+  return /\bcertified\b/i.test(status) && !lineDeniesCertification(status);
 }
 
 function ciExercisesCertifiedEngine(ci: string, type: WarehouseType): boolean {
@@ -139,14 +166,76 @@ describe("warehouse certification map", () => {
   it("README honest matrix line matches the map", () => {
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
     const line = readmeCertificationLine();
+    const matrix = readmeCertificationMatrix();
     expect(readme).toContain(line);
+    expect(readme).toContain(matrix);
+    expect(readme).toContain(README_MARIADB_NOTE);
     expect(line).toMatch(/PostgreSQL 16/);
     expect(line).toMatch(/MySQL 8/);
     expect(line).not.toMatch(/MariaDB/);
     expect(WAREHOUSE_CERTIFICATION.mysql.label).toBe("MySQL");
     expect(line).toMatch(/DuckDB 1\.5/);
     expect(line).toMatch(/ClickHouse 24/);
-    expect(line).not.toMatch(/Snowflake.*certified in CI/i);
+    expect(line).not.toMatch(/Snowflake/i);
+    for (const type of CLOUD_CERT_ENGINES) {
+      const entry = WAREHOUSE_CERTIFICATION[type];
+      expect(matrix).toContain(`| ${entry.label} | \`${type}\` | ${readmeWarehouseStatus(entry)} |`);
+      expect(readmeWarehouseStatus(entry)).toMatch(/not yet tested \/ not certified/i);
+    }
+  });
+
+  it("fails if the README matrix lists an engine as certified that the cert map does not", () => {
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    expect(readme).toContain(readmeCertificationMatrix());
+    const rows = parseReadmeWarehouseMatrix(readme);
+    expect(rows.map((row) => row.type).sort()).toEqual([...WAREHOUSE_TYPES].sort());
+
+    const overclaims: string[] = [];
+    for (const row of rows) {
+      const type = row.type as WarehouseType;
+      const entry = WAREHOUSE_CERTIFICATION[type];
+      if (statusClaimsCertified(row.status) && entry.certification !== "certified") {
+        overclaims.push(
+          `README.md:${row.line} lists ${entry.label} as certified but the cert map says ${entry.certification}: ${row.status}`,
+        );
+      }
+      if (entry.certification !== "certified") {
+        expect(row.status, `${type} README status must not claim certified`).toBe(readmeWarehouseStatus(entry));
+        expect(statusClaimsCertified(row.status), `${type} status overclaims certified`).toBe(false);
+      } else {
+        expect(row.status).toBe("Certified");
+      }
+    }
+    expect(overclaims, overclaims.join("\n")).toEqual([]);
+
+    for (const [i, line] of readme.split("\n").entries()) {
+      if (!/MariaDB/i.test(line)) continue;
+      expect(lineDeniesCertification(line), `README.md:${i + 1} must not list MariaDB as certified: ${line.trim()}`).toBe(
+        true,
+      );
+    }
+
+    const fakeOverclaim = "| Snowflake | `snowflake` | Certified |\n";
+    const fakeRows = parseReadmeWarehouseMatrix(fakeOverclaim);
+    expect(fakeRows).toHaveLength(1);
+    expect(statusClaimsCertified(fakeRows[0]!.status)).toBe(true);
+    expect(WAREHOUSE_CERTIFICATION.snowflake.certification).not.toBe("certified");
+  });
+
+  it("README states BYO warehouse, no hosted version, and no spreadsheets", () => {
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    expect(readme).toMatch(/own read-only data access/i);
+    expect(readme).toMatch(/no hosted version/i);
+    expect(readme).toMatch(/CSV/);
+    expect(readme).toMatch(/Excel/);
+    expect(readme).toMatch(/Google Sheets/);
+    expect(readme).toMatch(/not supported/i);
+    if (existsSync(join(ROOT, "docs/team-setup.md"))) {
+      expect(readme).toMatch(/docs\/team-setup\.md/);
+    } else {
+      expect(readme).toMatch(/docs\/two-person-test\.md/);
+      expect(readme).toMatch(/team guide coming/i);
+    }
   });
 
   it("serverInfo().warehouse matches the map for the configured engine", () => {
@@ -216,11 +305,14 @@ describe("warehouse certification map", () => {
     }
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
     const line = readmeCertificationLine();
+    const matrix = readmeCertificationMatrix();
     expect(readme).toContain(line);
+    expect(readme).toContain(matrix);
     for (const type of CLOUD_CERT_ENGINES) {
-      expect(line, `README Certified in CI line must not include ${type}`).not.toMatch(
+      expect(line, `README certified list must not include ${type}`).not.toMatch(
         new RegExp(WAREHOUSE_CERTIFICATION[type].label, "i"),
       );
+      expect(statusClaimsCertified(readmeWarehouseStatus(WAREHOUSE_CERTIFICATION[type]))).toBe(false);
     }
   });
 

@@ -146,7 +146,36 @@ export function warehouseCertificationMarkdown(): string {
   return `${legend}\n\n${engines}`;
 }
 
-/** README one-liner generated from the map so the matrix cannot drift. */
+/** Plain README status for each map state. Cloud connectors stay uncertified until a credentialed run. */
+export function readmeWarehouseStatus(entry: WarehouseCertification): string {
+  switch (entry.certification) {
+    case "certified":
+      return "Certified";
+    case "self_certifiable":
+      return "Not yet tested / not certified";
+    case "compile_only":
+      return "Not yet certified";
+  }
+}
+
+/**
+ * README warehouse matrix generated from the map so a "Certified" cell cannot
+ * appear for an engine the map does not mark `certified`.
+ */
+export function readmeCertificationMatrix(): string {
+  const header = ["| Warehouse | `connection.type` | Status |", "| --- | --- | --- |"];
+  const rows = WAREHOUSE_TYPES.map((type) => {
+    const entry = WAREHOUSE_CERTIFICATION[type];
+    const name =
+      entry.certification === "certified" && entry.certified_version
+        ? `${entry.label} ${entry.certified_version}`
+        : entry.label;
+    return `| ${name} | \`${type}\` | ${readmeWarehouseStatus(entry)} |`;
+  });
+  return [...header, ...rows].join("\n");
+}
+
+/** README one-liner generated from the map so the certified list cannot drift. */
 export function readmeCertificationLine(): string {
   const certified = WAREHOUSE_TYPES.filter((type) => WAREHOUSE_CERTIFICATION[type].certification === "certified").map(
     (type) => {
@@ -154,8 +183,12 @@ export function readmeCertificationLine(): string {
       return `${entry.label} ${entry.certified_version}`;
     },
   );
-  return `Certified in CI: ${joinEnglish(certified)}. Other engines are not CI-certified — see [docs/warehouses.md](docs/warehouses.md).`;
+  return `Certified: ${joinEnglish(certified)}.`;
 }
+
+/** Existing MySQL ≠ MariaDB correction. Not a `WAREHOUSE_TYPES` engine. */
+export const README_MARIADB_NOTE =
+  "MariaDB is **not certified**. `connection.type: mysql` plus mysql2 may connect; treat MariaDB as self-certifiable and verify against your server.";
 
 function joinEnglish(items: string[]): string {
   if (items.length === 0) return "";
