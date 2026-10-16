@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Release-checklist dry-run (P0-3).** Lead cuts the RC from `main` and
+  pins every step to that 40-character SHA
+  (`npx tsx src/release/dry-run.ts --sha <RC>`). Gate 5 (Kieran,
+  `certify-cloud --ref <SHA>`) and gate 8 (QA, independent cert on the
+  same SHA) are `print-only` and are not executed. `npm pack --dry-run
+  --ignore-scripts` still runs `prepare` on npm 10, so the dry-run refuses
+  package.json `prepare` / `prepack` / `postpack` / `prepublish*` (not
+  `prepublishOnly`, which is publish-only and is never invoked). Demo and
+  example paths are an **exact** allowlist (not `*.yml` / `*.sql` / `*.sh`
+  under those trees); `package.json` `files` includes `!dist/**/*.map`.
+  README, `dist/index.js`, and the bin target are required. Forbidden
+  names (`demo/creds.yml`, `demo/.env.yml`, `example/.secrets.yaml`,
+  `example/aws_credentials.sql`, `demo/deploy-key.sh`,
+  `demo/fixtures/a.sql`, `dist/tests/x.js`, `demo/secrets.json`,
+  `demo/id_ed25519`, `example/notes.txt`, dist source maps) are rejected.
+  Packed `dist/` paths that `tsc` would not emit (stray gitignored files)
+  are refused.
+  `npm view grane-analytics` is read-only (404 while unpublished is OK).
+  The dry-run does not publish, tag, or push (`npm publish` / `npm version` /
+  `npm dist-tag` / `git tag` / `git push` / `gh release` are refused), and
+  adds no tokens. npm publish stays on hold.
 - **Approved-version pin in git (T1).** The shared pin is tracked
   `grane.pin.json` (not gitignored). `grane proposals approve` validates YAML
   first (refuses before writing anything if invalid), writes the last-good

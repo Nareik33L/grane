@@ -8,3 +8,5 @@
 *.duckdb.wal
 **/*.duckdb.wal
 *.tgz
+*.map
+**/*.map
