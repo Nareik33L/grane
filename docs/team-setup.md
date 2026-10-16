@@ -90,6 +90,66 @@ it does not merge or push `main`. A human merges the pin PR. Everyone else
 
 The two-person evidence run is [two-person-test.md](two-person-test.md).
 
+## 6. Org-wide rollout (shared MCP config, no secrets)
+
+The AI client's MCP config (the `grane` command plus warehouse **host / port /
+database / user**) can be the same for everyone. Distribute it with MDM, a
+dotfiles repo, or a committed template (for Cursor: `~/.cursor/mcp.json` or
+`.cursor/mcp.json`). Generate a secret-free snippet with
+`grane mcp print-config cursor --no-env --command grane` so a live DSN is
+not copied out of the operator's shell.
+
+**That shared file must contain no secrets.** Each person's read-only
+password or key stays on their machine. Grane does **not** parse the MCP
+JSON; the client launches `grane` and copies `env` onto the process. Grane
+then expands `${VAR}` in `grane.yml` `connection.*` (including a
+`${DATABASE_URL}` whose value still contains `${GRANE_DB_PASSWORD}`).
+
+Committed `grane.yml` already uses this (from `grane init`):
+
+```yaml
+connection:
+  type: postgres
+  url: ${DATABASE_URL}
+```
+
+Shared MCP template — host, port, database, and a user name; password is
+an env reference, not a literal:
+
+```json
+{
+  "mcpServers": {
+    "grane": {
+      "command": "grane",
+      "args": ["-p", "/opt/analytics", "serve", "--stdio"],
+      "env": {
+        "DATABASE_URL": "postgres://grane_ro:${GRANE_DB_PASSWORD}@warehouse.example.com:5432/analytics"
+      }
+    }
+  }
+}
+```
+
+Each person sets only the secret locally (login env, OS keychain helper, or
+MDM user secret) — not in the shared file:
+
+```bash
+export GRANE_DB_PASSWORD='…their own read-only password…'
+```
+
+The MCP client inherits that environment. After substituting
+`${DATABASE_URL}`, Grane expands `${GRANE_DB_PASSWORD}` in the resulting URL.
+
+Also supported (no MCP `env` DATABASE_URL at all): omit `env` from the
+shared file, keep `url: ${DATABASE_URL}` in `grane.yml`, and have each
+person export a full `DATABASE_URL` only on their machine. Discrete
+`connection.password: ${GRANE_DB_PASSWORD}` (with shared host / user /
+database in YAML) is the same interpolation.
+
+Do **not** run `grane mcp connect` without `--no-env` when building the
+template — that copies the current process `DATABASE_URL` as a literal and
+will bake a password into the file.
+
 ## What Grane enforces vs what GitHub enforces
 
 **Grane** (local / pin / YAML):

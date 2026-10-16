@@ -12,7 +12,11 @@
   force-push/deletion, no bypass). No token, 403, 404, network error,
   `--offline`, or a non-GitHub remote is **couldn't verify** (never
   "protected") and never fails doctor. Grane never changes protection
-  settings. Guide: [docs/team-setup.md](docs/team-setup.md).
+  settings. Guide: [docs/team-setup.md](docs/team-setup.md) (org-wide MCP
+  template: host/port/db/user, password via `${GRANE_DB_PASSWORD}` /
+  `${DATABASE_URL}`, never a literal in the shared file). `connection.url`
+  interpolates nested `${VAR}` so a template DSN in the MCP `env` block
+  expands.
 - **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
   same claim: “Snowflake is production-ready, not certified by us yet”
   fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase

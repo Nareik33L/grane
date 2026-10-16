@@ -87,20 +87,34 @@ function applyAuditEnvOverrides(config: GraneConfig): void {
   }
 }
 
-/** Interpolates ${VAR} and ${VAR:-default} in connection settings. */
-function interpolateEnv(value: unknown): unknown {
-  if (typeof value === "string") {
-    return value.replace(
+/**
+ * Interpolates `${VAR}` and `${VAR:-default}` in connection settings.
+ * Repeats so a value like `${DATABASE_URL}` whose env contents are
+ * `postgres://user:${GRANE_DB_PASSWORD}@host/db` is fully expanded.
+ * Grane does not read the MCP client's JSON; the client copies `env`
+ * onto the process, then this runs when loading `grane.yml`.
+ */
+export function interpolateEnv(
+  value: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+  depth = 8,
+): unknown {
+  if (typeof value !== "string") return value;
+  let current = value;
+  for (let i = 0; i < depth; i++) {
+    const next = current.replace(
       /\$\{([A-Z0-9_]+)(?::-([^}]*))?\}/g,
       (whole, name: string, fallback: string | undefined) => {
-        const env = process.env[name];
-        if (env !== undefined) return env;
+        const found = env[name];
+        if (found !== undefined) return found;
         if (fallback !== undefined) return fallback;
         return whole;
       },
     );
+    if (next === current) return next;
+    current = next;
   }
-  return value;
+  return current;
 }
 
 function nativeContribution(config: GraneConfig): SemanticContribution {

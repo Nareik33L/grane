@@ -1,7 +1,7 @@
 /** Grane public API. */
 
 export { GraneKernel, GRANE_VERSION, type ActiveConfigPin } from "./kernel.js";
-export { loadConfig, findProjectDir } from "./config/load.js";
+export { loadConfig, findProjectDir, interpolateEnv } from "./config/load.js";
 export { stableConfigHash } from "./config/hash.js";
 export {
   loadServingConfig,

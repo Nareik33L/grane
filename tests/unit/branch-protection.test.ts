@@ -383,4 +383,34 @@ describe("branch protection check (T2)", () => {
     expect(docs).toMatch(/never PUT, PATCH, POST, or DELETE/i);
     expect(docs).not.toMatch(/Grane (will|does) turn on branch protection/i);
   });
+
+  it("docs/team-setup.md org-wide MCP example has no literal secret", () => {
+    const docs = readFileSync(join(ROOT, "docs/team-setup.md"), "utf8");
+    expect(docs).toMatch(/## 6\. Org-wide rollout/);
+    const fences = [...docs.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1] ?? "");
+    expect(fences.length).toBeGreaterThanOrEqual(1);
+    const example = fences.find((block) => block.includes("mcpServers") && block.includes("DATABASE_URL"));
+    expect(example, "org-wide MCP JSON example").toBeTruthy();
+    const parsed = JSON.parse(example!) as {
+      mcpServers: { grane: { command: string; args: string[]; env: { DATABASE_URL: string } } };
+    };
+    const url = parsed.mcpServers.grane.env.DATABASE_URL;
+    expect(parsed.mcpServers.grane.command).toBe("grane");
+    expect(parsed.mcpServers.grane.args).toContain("serve");
+    expect(url).toContain("warehouse.example.com");
+    expect(url).toContain("5432");
+    expect(url).toContain("analytics");
+    expect(url).toContain("grane_ro");
+    expect(url).toContain("${GRANE_DB_PASSWORD}");
+    expect(literalSecretInSharedExample(example!)).toBe(false);
+    expect(literalSecretInSharedExample(url)).toBe(false);
+  });
 });
+
+/** user:literal@ or password: literal — ${VAR} placeholders are allowed. */
+function literalSecretInSharedExample(text: string): boolean {
+  if (/:\/\/[^/\s:]+:(?!\$\{)[^/\s@]+@/.test(text)) return true;
+  if (/\bpassword\s*[:=]\s*['"]?(?!\$\{)[^\s'"]+/i.test(text)) return true;
+  if (/\b(P|GRANE_DB_)?PASSWORD\s*=\s*['"]?(?!\$\{)[^\s'"]+/i.test(text)) return true;
+  return false;
+}
