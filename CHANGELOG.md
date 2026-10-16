@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Release-checklist dry-run (P0-3).** Lead cuts the RC from `main` and
+  pins every step to that 40-character SHA
+  (`npx tsx src/release/dry-run.ts --sha <RC>`). Gate 5 (Kieran,
+  `certify-cloud --ref <SHA>`) and gate 8 (QA, independent cert on the
+  same SHA) are printed, not run. `npm pack --dry-run` fails on tests,
+  fixtures, `.env`, keys, or other unexpected files. `npm view grane-analytics`
+  is read-only (404 while unpublished is OK). The dry-run does not publish,
+  tag, or push, and adds no tokens. npm publish stays on hold.
 - **Approved-version pin in git (T1).** The shared pin is tracked
   `grane.pin.json` (not gitignored). `grane proposals approve` validates YAML
   first (refuses before writing anything if invalid), writes the last-good

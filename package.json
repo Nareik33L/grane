@@ -31,7 +31,8 @@
     "test:benchmark": "vitest run tests/benchmark tests/demo",
     "test:gauntlet": "vitest run tests/gauntlet",
     "test:v2-compat": "tsx tests/certification/compare-v2-compat.ts",
-    "certify": "tsx src/cli/index.ts certify"
+    "certify": "tsx src/cli/index.ts certify",
+    "release:dry-run": "tsx src/release/dry-run.ts"
   },
   "keywords": [
     "analytics",
