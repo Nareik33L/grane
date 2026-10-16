@@ -145,7 +145,7 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
 
   proposals
     .command("rollback")
-    .description("Re-pin a previously approved pin (default: pin.previous_commit)")
+    .description("Re-pin a previously approved pin (default: pin.previous_commit); tracked pin opens a pin-branch PR like approve")
     .option("--to <commit>", "previously approved commit (default: pin.previous_commit)")
     .option("--json", "print JSON")
     .option("--approved-by <name>", "recorded approved_by on the pin")
@@ -160,6 +160,11 @@ export function registerProposalsCommands(program: Command, ctx: ProposalsCliCon
           return;
         }
         console.log(`rollback  ${pin.ref} @ ${pin.commit.slice(0, 7)}  (${pin.approved_by})`);
+        if ("pin_branch" in pin && pin.github) {
+          console.log(`pin file  ${pin.pin_file} on ${pin.pin_branch}`);
+          console.log("Grane does not merge or push the pin PR onto the base branch.");
+          console.log(pin.github.command);
+        }
       } catch (err) {
         ctx.fail(err);
       }

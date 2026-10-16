@@ -13,6 +13,7 @@ export {
   approveProposal,
   rejectProposal,
   rollbackPin,
+  isTrackedPinPlan,
   listProposals,
   listProposalsAction,
   diffProposal,

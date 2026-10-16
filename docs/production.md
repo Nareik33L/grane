@@ -99,7 +99,9 @@ git commit (`ref`, `commit`, `approved_by`, `approved_at`) instead of the
 working tree. Only `serve` honours the pin — `validate`, `query`, and
 `certify` read the working tree. Operator guide:
 [v2-authoring.md](v2-authoring.md). Uncommitted edits do not change what agents query. `catalog`
-includes `active.commit`. Without a pin, serve is unchanged. The pin `ref`
+includes `active.commit` and `config_hash`. `grane doctor --json` also
+returns `config_hash` and `pin_warnings` (serve prints the same warnings
+on stderr; they do not change doctor's exit code). Without a pin, serve is unchanged unless origin has a tracked pin — then serve warns and keeps the working tree. The pin `ref`
 must be the configured base branch under `refs/heads/` (not `HEAD`, a tag,
 another branch, or a proposal ref) and `commit` must be a full 40-character
 hex SHA. The configured base is committed `project.base_branch` on
@@ -123,8 +125,10 @@ matches — not the moving base tip): it requires a human TTY or a PR that is
 already merged, refuses if no matching reachable commit exists, and it is not
 an MCP tool. `approved_by` defaults to `git user.name`. **Rollback**
 re-pins `previous_commit` (or `--to` of a previously approved pin only);
-`approved_by` defaults to `git user.name`. Pin writes and restores use
-temp+rename.
+when `grane.pin.json` is present it also opens a `grane/pin/*` PR like
+approve (never push/merge), because a last-good-only write would lose to
+the tracked file. `approved_by` defaults to `git user.name`. Pin writes
+and restores use temp+rename.
 **Reject** deletes the proposal ref only after writing the audit line (or
 restores the branch SHA if that write fails); a TTY prompts `y/N` unless
 `--yes`. None of these commands merge, reset, or move `main`. Each action

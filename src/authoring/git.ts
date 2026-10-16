@@ -867,7 +867,7 @@ export function loadServingConfig(
     throw err;
   }
   if (!local.pin) {
-    return { ...loadConfig(dir), pin: null, pin_source: null, pin_warnings: [] };
+    return { ...loadConfig(dir), pin: null, pin_source: null, pin_warnings: pinHealthWarnings(dir) };
   }
   const label = pinLabel(local.source);
   try {
@@ -1655,27 +1655,12 @@ export function approveProposal(
     proposal: approval.proposal_id,
     previous_commit: previous,
   });
-  const stamp = yyyymmdd(options.at ?? new Date());
-  const pin_branch = `${PIN_BRANCH_PREFIX}${stamp}-${pin.commit.slice(0, 12)}-${slugify(pin.approved_by)}`;
+  let published: ApproveResult;
   try {
-    commitOnPinBranch(
-      root,
-      pin_branch,
-      pin.commit,
-      { [TRACKED_PIN_PATH]: `${JSON.stringify(pin, null, 2)}\n` },
-      [
-        `chore(pin): approve ${pin.commit.slice(0, 7)}`,
-        "",
-        `Grane-Pin: ${TRACKED_PIN_PATH}`,
-        `Grane-Pin-Commit: ${pin.commit}`,
-        `Grane-Base: ${pin.ref}`,
-        pin.proposal ? `Grane-Proposal: ${pin.proposal}` : "",
-        "",
-        "This branch only adds the tracked pin. It must not be merged by Grane.",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
+    published = commitTrackedPinPlan(projectDir, root, pin, {
+      at: options.at,
+      verb: "approve",
+    });
   } catch (err) {
     if (previousLegacy === null) rmSync(legacyPath, { force: true });
     else atomicWriteFile(legacyPath, previousLegacy);
@@ -1685,13 +1670,47 @@ export function approveProposal(
     operation: "approve",
     proposal_id: approval.proposal_id,
     branch: approval.proposal_branch,
-    commit: pin.commit,
+    commit: published.commit,
   });
   const mainAfter = baseHeadsSha(root, projectDir);
   const headAfter = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   if (mainAfter !== mainBefore || headAfter !== headBefore) {
     throw configError("Internal error: approve moved the configured base branch. Refusing.");
   }
+  return published;
+}
+
+export function isTrackedPinPlan(value: ActivePin | ApproveResult): value is ApproveResult {
+  return "pin_branch" in value && "github" in value;
+}
+
+function commitTrackedPinPlan(
+  projectDir: string,
+  root: string,
+  pin: ActivePin,
+  options: { at?: Date; verb: "approve" | "rollback"; parent?: string },
+): ApproveResult {
+  const stamp = yyyymmdd(options.at ?? new Date());
+  const suffix = options.verb === "rollback" ? "-rollback" : "";
+  const pin_branch = `${PIN_BRANCH_PREFIX}${stamp}-${pin.commit.slice(0, 12)}-${slugify(pin.approved_by)}${suffix}`;
+  commitOnPinBranch(
+    root,
+    pin_branch,
+    options.parent ?? pin.commit,
+    { [TRACKED_PIN_PATH]: `${JSON.stringify(pin, null, 2)}\n` },
+    [
+      `chore(pin): ${options.verb} ${pin.commit.slice(0, 7)}`,
+      "",
+      `Grane-Pin: ${TRACKED_PIN_PATH}`,
+      `Grane-Pin-Commit: ${pin.commit}`,
+      `Grane-Base: ${pin.ref}`,
+      pin.proposal ? `Grane-Proposal: ${pin.proposal}` : "",
+      "",
+      "This branch only adds the tracked pin. It must not be merged by Grane.",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
   return {
     ...pin,
     pin_branch,
@@ -1749,11 +1768,16 @@ function restoreProposalRef(root: string, branch: string, sha: string): void {
   runGit(root, ["update-ref", `refs/heads/${branch}`, sha], { allowFail: true });
 }
 
-/** Re-pin a previously approved commit. Never resets or commits on the active branch. */
+/**
+ * Re-pin a previously approved commit. Never resets, pushes, or commits on
+ * the active branch. When a tracked `grane.pin.json` exists, last-good local
+ * is not enough (tracked wins on serve) — prepare a `grane/pin/*` branch
+ * like approve, or refuse. Never pin silently.
+ */
 export function rollbackPin(
   projectDir: string,
-  options: { to?: string; approved_by?: string } = {},
-): ActivePin {
+  options: { to?: string; approved_by?: string; at?: Date } = {},
+): ActivePin | ApproveResult {
   assertNotDemoAuthoring(projectDir, "rollback");
   gitRoot(projectDir);
   const pin = readActivePin(projectDir);
@@ -1788,14 +1812,31 @@ export function rollbackPin(
   }
   const mainBefore = baseHeadsSha(root, projectDir);
   const headBefore = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const tracked = readTrackedPin(projectDir);
+  const legacyPath = join(projectDir, ACTIVE_PIN_PATH);
+  const previousLegacy = existsSync(legacyPath) ? readFileSync(legacyPath) : null;
   const next = writeActivePin(projectDir, {
     ref,
     commit: resolved,
     approved_by: options.approved_by ?? identity(root).name,
-    approved_at: new Date().toISOString(),
+    approved_at: (options.at ?? new Date()).toISOString(),
     proposal: pin.proposal,
     previous_commit: pin.commit,
   });
+  let published: ActivePin | ApproveResult = next;
+  if (tracked) {
+    try {
+      published = commitTrackedPinPlan(projectDir, root, next, {
+        at: options.at,
+        verb: "rollback",
+        parent: mainBefore,
+      });
+    } catch (err) {
+      if (previousLegacy === null) rmSync(legacyPath, { force: true });
+      else atomicWriteFile(legacyPath, previousLegacy);
+      throw err;
+    }
+  }
   recordProposalLine(projectDir, {
     operation: "rollback",
     commit: next.commit,
@@ -1806,5 +1847,5 @@ export function rollbackPin(
   if (headAfter !== headBefore || mainAfter !== mainBefore) {
     throw configError("Internal error: rollback moved the configured base branch. Refusing.");
   }
-  return next;
+  return published;
 }

@@ -54,6 +54,8 @@ describe("V2 existing-YAML compat cert", () => {
     expect(docs).toMatch(/`grane proposals` CLI/);
     expect(docs).toMatch(/`grane\.pin\.json` pin/);
     expect(docs).toMatch(/`serve` honours it/);
+    expect(docs).toMatch(/pin_warnings/);
+    expect(docs).toMatch(/config_hash/);
     expect(docs).toMatch(/`\.grane\/active\.json`/);
     expect(docs).toMatch(/`project\.base_branch`/);
     expect(docs).toMatch(/Temporal `group_by` warning/);

@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,8 +7,10 @@ import {
   ACTIVE_PIN_PATH,
   PIN_BRANCH_PREFIX,
   TRACKED_PIN_PATH,
+  LEGACY_PIN_MIGRATION,
   approveProposal,
   createProposal,
+  isTrackedPinPlan,
   loadServingConfig,
   pinCommitUnmatchedMessage,
   pinHealthWarnings,
@@ -16,6 +18,7 @@ import {
   readMergedApproval,
   readTrackedPin,
   resolveProposalMergedCommit,
+  rollbackPin,
   writeActivePin,
 } from "../../src/authoring/git.js";
 import { stableConfigHash } from "../../src/config/hash.js";
@@ -91,6 +94,39 @@ function runCli(dir: string, args: string[]): { status: number; stdout: string; 
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
   };
+}
+
+/** Start `serve --stdio` long enough to print pin warnings, then stop it. */
+async function runServeStdio(dir: string): Promise<{ stdout: string; stderr: string }> {
+  const child = spawn("npx", ["tsx", "src/cli/index.ts", "-p", dir, "serve", "--stdio"], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    stdout += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    stderr += chunk.toString();
+  });
+  const started = Date.now();
+  while (Date.now() - started < 15_000) {
+    if (/WARNING:|origin\/main has grane\.pin\.json|local-only|Keeping the last good local pin/.test(`${stderr}\n${stdout}`)) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  child.kill("SIGTERM");
+  await new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 2000);
+  });
+  return { stdout, stderr };
 }
 
 function mergeProposal(dir: string, proposal: { id: string; branch: string }): string {
@@ -361,6 +397,85 @@ describe("tracked pin (T1)", () => {
     expect(JSON.parse(git(dir, ["show", `${result.pin_branch}:${TRACKED_PIN_PATH}`])).commit).toBe(squashed);
   });
 
+  it("rollback with a tracked pin prepares a pin branch and never pushes or merges", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const initial = git(dir, ["rev-parse", "HEAD"]);
+    const proposal = createProposal(dir, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    const merged = mergeProposal(dir, proposal);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: initial,
+      approved_by: "octocat",
+      approved_at: "2026-10-16T12:00:00.000Z",
+    });
+    const approved = approveProposal(dir, proposal.id, {
+      tty: false,
+      approved_by: "octocat",
+      at: new Date("2026-10-16T15:00:00.000Z"),
+    });
+    git(dir, ["merge", "--no-ff", "-m", "Merge pin", approved.pin_branch]);
+    expect(readTrackedPin(dir)?.commit).toBe(merged);
+    const mainBefore = git(dir, ["rev-parse", "main"]);
+
+    const rolled = rollbackPin(dir, {
+      approved_by: "octocat",
+      at: new Date("2026-10-16T16:00:00.000Z"),
+    });
+    expect(isTrackedPinPlan(rolled)).toBe(true);
+    if (!isTrackedPinPlan(rolled)) throw new Error("expected pin plan");
+    expect(rolled.commit).toBe(initial);
+    expect(rolled.pin_file).toBe(TRACKED_PIN_PATH);
+    expect(rolled.pin_branch).toMatch(/-rollback$/);
+    expect(rolled.github.command).toMatch(/^gh pr create /);
+    expect(rolled.github.command).toContain(`--head ${rolled.pin_branch}`);
+    expect(rolled.github.command).not.toMatch(/pr merge|git push|git tag|npm publish/);
+    expect(git(dir, ["rev-parse", "main"])).toBe(mainBefore);
+    expect(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+    expect(JSON.parse(git(dir, ["show", `${rolled.pin_branch}:${TRACKED_PIN_PATH}`])).commit).toBe(initial);
+    expect(readTrackedPin(dir)?.commit).toBe(merged);
+    const beforeMerge = loadServingConfig(dir);
+    expect(beforeMerge.pin?.commit).toBe(merged);
+    expect(Object.keys(beforeMerge.config.metrics)).toContain("revenue");
+
+    git(dir, ["merge", "--no-ff", "-m", "Merge rollback pin", rolled.pin_branch]);
+    const after = loadServingConfig(dir);
+    expect(after.pin?.commit).toBe(initial);
+    expect(Object.keys(after.config.metrics)).not.toContain("revenue");
+  });
+
+  it("refuses a symlinked grane.pin.json", () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    const outside = join(tmpdir(), `grane-pin-symlink-${process.pid}.json`);
+    writeFileSync(
+      outside,
+      JSON.stringify({
+        ref: "main",
+        commit: main,
+        approved_by: "attacker",
+        approved_at: "2026-10-16T12:00:00.000Z",
+      }),
+    );
+    symlinkSync(outside, join(dir, TRACKED_PIN_PATH));
+    expect(() => readTrackedPin(dir)).toThrow(/symlink|regular file/);
+    expect(() => readActivePin(dir)).toThrow(/symlink|regular file/);
+    expect(() => loadServingConfig(dir)).toThrow(/symlink|regular file/);
+  });
+
   it("rebase: approve pins the rebased commit whose metric YAML matches, not the tip", () => {
     const dir = tempDir();
     git(dir, ["init", "-b", "main"]);
@@ -545,16 +660,22 @@ describe("tracked pin two-clone (real CLI, no network)", () => {
     const pinB = JSON.parse(approveB.stdout) as { pin_branch: string; commit: string; approved_by: string };
     expect(pinA.pin_branch).not.toBe(pinB.pin_branch);
     expect(pinA.approved_by).not.toBe(pinB.approved_by);
+    expect(pinA.commit).not.toBe(pinB.commit);
 
     git(a, ["push", "origin", pinA.pin_branch]);
     git(a, ["merge", "--no-ff", "-m", "Merge pin A", pinA.pin_branch]);
     git(a, ["push", "origin", "main"]);
 
     git(b, ["fetch", "origin"]);
+    const originPin = JSON.parse(git(b, ["show", `origin/main:${TRACKED_PIN_PATH}`])) as { commit: string };
+    expect(originPin.commit).toBe(pinA.commit);
+    expect(originPin.commit).not.toBe(pinB.commit);
     const stale = pinHealthWarnings(b);
     expect(stale.join("\n")).toMatch(/differs from origin|Keeping the last good local pin/);
     const staleServe = loadServingConfig(b);
     expect(staleServe.pin?.commit).toBe(pinB.commit);
+    expect(staleServe.pin?.commit).not.toBe(originPin.commit);
+    expect(Object.keys(staleServe.config.metrics)).toContain("extras");
     expect(staleServe.pin_warnings.join("\n")).toMatch(/Keeping the last good local pin/);
 
     git(b, ["push", "origin", pinB.pin_branch]);
@@ -568,7 +689,118 @@ describe("tracked pin two-clone (real CLI, no network)", () => {
     expect(`${conflict.stdout}\n${conflict.stderr}`).toMatch(/conflict|CONFLICT|Automatic merge failed/i);
   });
 
-  it("doctor warns on a stale clone without failing closed", { timeout: 60_000 }, () => {
+  it("serve stays on the local pin when origin has a different commit (no auto-switch)", { timeout: 90_000 }, async () => {
+    const { a, b } = setupOriginAndClones();
+    const first = createProposal(a, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    const revenueMerged = mergeProposal(a, first);
+    git(a, ["push", "origin", "main"]);
+    const approveRevenue = runCli(a, ["proposals", "approve", first.id, "--json", "--approved-by", "Ada"]);
+    expect(approveRevenue.status, approveRevenue.stderr).toBe(0);
+    const pinRevenue = JSON.parse(approveRevenue.stdout) as { pin_branch: string; commit: string };
+    expect(pinRevenue.commit).toBe(revenueMerged);
+    git(a, ["push", "origin", pinRevenue.pin_branch]);
+    git(a, ["merge", "--no-ff", "-m", "Merge revenue pin", pinRevenue.pin_branch]);
+    git(a, ["push", "origin", "main"]);
+    git(b, ["pull", "origin", "main"]);
+    expect(readTrackedPin(b)?.commit).toBe(revenueMerged);
+    expect(Object.keys(loadServingConfig(b).config.metrics)).toEqual(["revenue"]);
+
+    const extra = `metrics:
+  revenue:
+    entity: order
+    type: sum
+    sql: "\${orders.net_amount}"
+    status: experimental
+  extras:
+    entity: order
+    type: count
+    sql: "\${orders.id}"
+    status: experimental
+`;
+    const second = createProposal(a, {
+      slug: "extras",
+      at: new Date("2026-10-16T01:00:00.000Z"),
+      files: { "metrics.yml": extra },
+    });
+    const extrasMerged = mergeProposal(a, second);
+    git(a, ["push", "origin", "main"]);
+    const approveExtras = runCli(a, ["proposals", "approve", second.id, "--json", "--approved-by", "Ada"]);
+    expect(approveExtras.status, approveExtras.stderr).toBe(0);
+    const pinExtras = JSON.parse(approveExtras.stdout) as { pin_branch: string; commit: string };
+    expect(pinExtras.commit).toBe(extrasMerged);
+    expect(pinExtras.commit).not.toBe(revenueMerged);
+    git(a, ["push", "origin", pinExtras.pin_branch]);
+    git(a, ["merge", "--no-ff", "-m", "Merge extras pin", pinExtras.pin_branch]);
+    git(a, ["push", "origin", "main"]);
+
+    git(b, ["fetch", "origin"]);
+    const originPin = JSON.parse(git(b, ["show", `origin/main:${TRACKED_PIN_PATH}`])) as { commit: string };
+    expect(originPin.commit).toBe(extrasMerged);
+    expect(originPin.commit).not.toBe(revenueMerged);
+    const serve = loadServingConfig(b);
+    expect(serve.pin?.commit).toBe(revenueMerged);
+    expect(serve.pin?.commit).not.toBe(originPin.commit);
+    expect(Object.keys(serve.config.metrics)).toEqual(["revenue"]);
+    expect(Object.keys(serve.config.metrics)).not.toContain("extras");
+    expect(serve.pin_warnings.join("\n")).toMatch(/differs from origin|Keeping the last good local pin/);
+    const served = await runServeStdio(b);
+    expect(`${served.stderr}\n${served.stdout}`).toMatch(/differs from origin|Keeping the last good local pin/);
+  });
+
+  it("serve warns when this clone has no pin but origin has one", { timeout: 90_000 }, async () => {
+    const { a, b } = setupOriginAndClones();
+    const proposal = createProposal(a, {
+      slug: "revenue",
+      at: new Date("2026-10-16T00:00:00.000Z"),
+      files: { "metrics.yml": REVENUE },
+    });
+    mergeProposal(a, proposal);
+    git(a, ["push", "origin", "main"]);
+    const approved = runCli(a, ["proposals", "approve", proposal.id, "--json", "--approved-by", "Ada"]);
+    expect(approved.status, approved.stderr).toBe(0);
+    const payload = JSON.parse(approved.stdout) as { pin_branch: string };
+    git(a, ["push", "origin", payload.pin_branch]);
+    git(a, ["merge", "--no-ff", "-m", "Merge pin", payload.pin_branch]);
+    git(a, ["push", "origin", "main"]);
+    git(b, ["fetch", "origin"]);
+    expect(readTrackedPin(b)).toBeNull();
+    expect(readActivePin(b)).toBeNull();
+    const serve = loadServingConfig(b);
+    expect(serve.pin).toBeNull();
+    expect(serve.pin_warnings.join("\n")).toMatch(/origin\/main has grane\.pin\.json/);
+    expect(serve.pin_warnings.join("\n")).toMatch(/not auto-switching/);
+    const cli = await runServeStdio(b);
+    expect(`${cli.stderr}\n${cli.stdout}`).toMatch(/origin\/main has grane\.pin\.json/);
+  });
+
+  it("legacy pin migration warning is printed on serve stderr", { timeout: 60_000 }, async () => {
+    const dir = tempDir();
+    git(dir, ["init", "-b", "main"]);
+    configureGit(dir);
+    writeShop(dir, REVENUE);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "initial"]);
+    const main = git(dir, ["rev-parse", "HEAD"]);
+    writeActivePin(dir, {
+      ref: "main",
+      commit: main,
+      approved_by: "octocat",
+      approved_at: "2026-10-16T12:00:00.000Z",
+    });
+    const serving = loadServingConfig(dir);
+    expect(serving.pin_source).toBe("legacy");
+    expect(serving.pin_warnings.join("\n")).toMatch(/local-only/);
+    expect(serving.pin_warnings.join("\n")).toContain(LEGACY_PIN_MIGRATION);
+    const cli = await runServeStdio(dir);
+    expect(cli.stderr).toMatch(/local-only/);
+    expect(cli.stderr).toContain("WARNING:");
+  });
+
+  it("doctor JSON includes pin_warnings and config_hash; exit code follows lint.ok", { timeout: 60_000 }, () => {
     const { a, b } = setupOriginAndClones();
     const proposal = createProposal(a, {
       slug: "revenue",
@@ -585,9 +817,10 @@ describe("tracked pin two-clone (real CLI, no network)", () => {
     git(a, ["push", "origin", "main"]);
     git(b, ["fetch", "origin"]);
     const doctor = runCli(b, ["doctor", "--json"]);
-    expect(doctor.status).toBe(1);
-    const body = JSON.parse(doctor.stdout) as { pin_warnings: string[] };
+    const body = JSON.parse(doctor.stdout) as { ok: boolean; pin_warnings: string[]; config_hash: string };
     expect(body.pin_warnings.join("\n")).toMatch(/origin\/main has grane\.pin\.json|Keeping the last good local pin/);
+    expect(body.config_hash).toMatch(/^[0-9a-f]{16,}$/i);
+    expect(doctor.status).toBe(body.ok ? 0 : 1);
   });
 });
 
