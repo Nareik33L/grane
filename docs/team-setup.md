@@ -120,6 +120,10 @@ Encoding is one predictable rule, never a guess about “already encoded”:
   opt-out: inserted as-is, so an already-encoded password in that DSN is
   not encoded again.
 
+If you previously pre-encoded passwords in a YAML URL template, store
+the raw value instead, or move to `url: ${DATABASE_URL}` with a fully
+encoded DSN.
+
 Unset `${VAR}` is left in the loaded config so `grane validate --offline`,
 `grane doctor --json`, and `grane mcp doctor` can run. Connecting (or any
 live warehouse path) refuses with an error that names only that variable.

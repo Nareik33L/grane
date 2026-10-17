@@ -22,8 +22,10 @@
   from the raw bytes — never decode-then-re-encode; a complete env DSN is
   the opt-out and is inserted as-is; unset variables stay at load so
   offline validate / doctor / mcp doctor can run, and are refused at
-  connect naming only the variable). Origin parsing requires host
-  `github.com` exactly.
+  connect naming only the variable). If you previously pre-encoded
+  passwords in a YAML URL template, store the raw value instead, or
+  move to `url: ${DATABASE_URL}` with a fully encoded DSN. Origin
+  parsing requires host `github.com` exactly.
 - **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
   same claim: “Snowflake is production-ready, not certified by us yet”
   fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase
