@@ -1,0 +1,13 @@
+{
+  "protocol": "r1-5b",
+  "model": "Cursor Grok 4.6",
+  "temperature": "not controllable",
+  "attempts_per_question_per_path": 5,
+  "paths": [
+    "a_no_grane",
+    "b_grane"
+  ],
+  "independence": "Single model. Five path-A and five path-B subagent contexts. Each context received every question in one prompt, so questions inside a round can leak. Rounds did not see each other's SQL, tool calls, or answers. Temperature is not controllable, so identical prompts may still yield identical answers. Not a live MCP HTTP session: path B is GraneKernel.query, which is what the MCP query tool calls. No API keys or tokens.",
+  "question_count": 16,
+  "catalog_bytes": 5583
+}
