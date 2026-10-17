@@ -18,13 +18,11 @@ import type { ConnectionConfig } from "../../src/config/schema.js";
 import { demoAnalyticsDir } from "../../src/demo/paths.js";
 import { buildDemoWarehouse, duckdbDriverAvailable } from "../../src/demo/warehouse.js";
 import { loadDuckDbModule } from "../../src/demo/duckdb.js";
-import { namedQuarterRange, resolveRelativeRange, todayInTimeZone } from "../../src/query/time.js";
 import {
   ensureReadonlyRole,
   grantReadonlyOnSchema,
   postgresLiveEnv,
 } from "../helpers/postgres-live.js";
-import type { TimeWindows } from "./questions.js";
 
 const SCHEMA_SQL = readFileSync(fileURLToPath(new URL("../../demo/seed/01_schema.sql", import.meta.url)), "utf8").replace(
   /\nCREATE ROLE[\s\S]*$/,
@@ -62,11 +60,10 @@ export function postgresRequired(): boolean {
 }
 
 /**
- * Anchor relative periods to the newest order timestamp in the warehouse,
- * not wall-clock now. The demo seed is CURRENT_DATE-relative, so this keeps
- * last_month populated however long after the build the suite runs.
+ * Pin Grane kernel `now` to the newest order timestamp (not wall-clock).
+ * Independent SQL does not use this Date — it computes windows in SQL.
  */
-export async function resolveAnchorTime(run: RawExecutor): Promise<{ now: Date; time: TimeWindows }> {
+export async function resolveAnchorNow(run: RawExecutor): Promise<Date> {
   const rows = await run(
     `SELECT max(greatest(created_at, coalesce(completed_at, created_at))) AS newest FROM orders`,
   );
@@ -75,16 +72,7 @@ export async function resolveAnchorTime(run: RawExecutor): Promise<{ now: Date; 
   if (Number.isNaN(now.getTime())) {
     throw new Error(`Could not resolve warehouse anchor time from ${String(newest)}`);
   }
-  const today = todayInTimeZone("UTC", now);
-  return {
-    now,
-    time: {
-      lastMonth: resolveRelativeRange("last_month", "UTC", now),
-      last30d: resolveRelativeRange("30d", "UTC", now),
-      lastQuarter: resolveRelativeRange("last_quarter", "UTC", now),
-      q2: namedQuarterRange(2, today),
-    },
-  };
+  return now;
 }
 
 function demoKernel(connection: ConnectionConfig, now: Date): GraneKernel {
@@ -119,7 +107,7 @@ export async function openDuckdbBackend(): Promise<ConsistencyBackend> {
   };
 
   const versionRows = await runRaw("SELECT version() AS version");
-  const { now } = await resolveAnchorTime(runRaw);
+  const now = await resolveAnchorNow(runRaw);
   const kernel = demoKernel({ type: "duckdb", path, schema: "main" }, now);
 
   return {
@@ -172,7 +160,7 @@ export async function openPostgresBackend(): Promise<ConsistencyBackend> {
   };
 
   const versionRows = await runRaw("SELECT version() AS version");
-  const { now } = await resolveAnchorTime(runRaw);
+  const now = await resolveAnchorNow(runRaw);
   const kernel = demoKernel({ type: "postgres", url: live.readUrl, schema: schemaName }, now);
 
   return {

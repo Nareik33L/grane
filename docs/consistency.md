@@ -14,7 +14,7 @@ customers-vs-ordered definition pair) is asked:
 | path | how |
 | ---- | --- |
 | **(a) Grane** | `GraneKernel.query` — the same call the MCP `query` tool makes. Intent is a Query Model v1 request (`metrics`, `dimensions`, `time.period`, …). Grane compiles and executes. |
-| **(b) Independent SQL** | Handwritten SELECT against the warehouse driver (`@duckdb/node-api` or `pg`). No Grane kernel, no Grane connector, no compiler SQL. Definitions follow `demo/analytics/metrics.yml` (completed orders, `completed_at`, pre-aggregate one-to-many payments). Independent SQL is written to run on both DuckDB and Postgres (e.g. `DOUBLE PRECISION`, not DuckDB-only `DOUBLE`). |
+| **(b) Independent SQL** | Handwritten SELECT against the warehouse driver (`@duckdb/node-api` or `pg`). No Grane kernel, no Grane connector, no compiler SQL, and **no import of `src/query/time.ts`**. Relative periods are computed in the SQL from `max(orders timestamps)` (`date_trunc` / `make_date` / intervals). Definitions follow `demo/analytics/metrics.yml` (completed orders, `completed_at`, pre-aggregate one-to-many payments). Independent SQL is written to run on both DuckDB and Postgres (e.g. `DOUBLE PRECISION`, not DuckDB-only `DOUBLE`). |
 
 The two paths are not allowed to share SQL. If Grane refuses a grain trap, path
 (b) still runs the naive join so the log shows the number an ungoverned query
@@ -23,28 +23,32 @@ would have returned.
 ## Data
 
 - **DuckDB** — `demo/seed/duckdb.sql`, the warehouse `npx grane demo` builds.
-- **Postgres** — `demo/seed/01_schema.sql` + `02_data.sql` loaded into an
-  isolated `grane_cons_*` schema on the certified CI Postgres 16 service
-  (`GRANE_PG_WRITE_URL` / `127.0.0.1:5432` / demo `localhost:5433`). `public`
-  is left empty. Runtime queries use the `grane_readonly` role.
+- **Postgres (CI)** — `demo/seed/01_schema.sql` + `02_data.sql` loaded into an
+  isolated `grane_cons_*` schema on the GitHub Actions Postgres 16 service
+  (`GRANE_PG_WRITE_URL`). `public` is left empty. Runtime queries use the
+  `grane_readonly` role.
+- **Postgres (this agent's recorded JSON)** — a local Ubuntu `postgresql-16`
+  16.15 install on `127.0.0.1:5432`, not the Actions service. CI still
+  re-executes against the Actions `postgres:16` container.
 
 Dates in the seed are `CURRENT_DATE`-relative. Relative periods (`last_month`,
 `30d`, `last_quarter`, `q2`) are anchored to `max(orders timestamps)`, not
-wall-clock now, so last_month stays populated. Path (a) gets that instant as
-kernel `now` and uses `time.period`; path (b) resolves the same ranges with
-`resolveRelativeRange` / `namedQuarterRange` independently.
+wall-clock now. Path (a) pins kernel `now` to that timestamp and uses
+`time.period`. Path (b) encodes the same windows in SQL.
 
 ## Expected outcomes
 
 | kind | questions | pass when |
 | ---- | --------- | --------- |
-| `match` | revenue / orders / AOV / Q2 / last quarter / 30d / by country / by plan / by channel last month / payments by country / revenue+payments / customer count | both answer, cells equal to the penny (order-insensitive) |
-| `mismatch` | “How many customers ordered last month?” | both answer, cells **differ** (Grane `customers` + `last_month` is `customers.created_at`; independent SQL is distinct completed-order customers) |
-| `grane_refuses` | revenue by product category / ticket category / checkout event type | Grane refuses; independent SQL still returns rows |
+| `match` (12) | revenue last month / orders / AOV / Q2 / last quarter / 30d / by country / by plan / by channel last month / payments by country / revenue+payments / customer count | both answer, non-empty, non-zero, **same row count**, cells equal to the penny |
+| `mismatch` (1) | “How many customers ordered last month?” | Grane equals **governed SQL** (customers created last month); independent SQL is distinct completed-order customers; the two differ. Any other Grane number (including +1) fails. |
+| `grane_refuses` (3) | revenue by product category / ticket category / checkout event type | Grane status is **`unsafe_query`** (not `invalid_query`); independent SQL still returns a non-empty non-zero table |
 
-The suite fails if the harness is broken, a required engine cannot run, a
-`match` pair diverges, a grain trap is answered by Grane, or the definition
-pair accidentally agrees.
+The runner prints `match=12 refuse=3 mismatch=1`, not `16/16`. The suite fails
+if the harness is broken, a required engine cannot run, a `match` pair
+diverges or is empty/trivial, a grain trap is not `unsafe_query`, Grane misses
+the governed value on the definition pair, or a committed all-time figure was
+tampered.
 
 ## How to rerun
 
@@ -74,24 +78,18 @@ invent Postgres numbers.
 
 ## Recorded results
 
-First recorded run on this branch:
-[`tests/consistency/results/consistency-20261017T141326.492Z-1c46559eb715.json`](../tests/consistency/results/consistency-20261017T141326.492Z-1c46559eb715.json)
-(`ran_at` 2026-10-17T14:13:26.492Z, `commit_sha` `1c46559eb715e658e519569e0fce03bf342e69a0`, DuckDB v1.5.5 and PostgreSQL 16.15). Open that file for the numbers. This paragraph does not restate them.
+`--write` also copies the report to
+[`tests/consistency/results/committed.json`](../tests/consistency/results/committed.json).
+All-time questions (no relative period) are checked against that file: changing
+a committed cell must fail the suite. Time-windowed questions are re-executed
+live and are not locked to the snapshot, because the seed is `CURRENT_DATE`-relative.
 
-Each `--write` run commits (when you git-add them):
+Each `--write` run also writes timestamped JSON/CSV (`consistency-<UTC>-<sha12>.*`).
+Every file includes `ran_at` and `commit_sha` (`git rev-parse HEAD` at execution;
+that revision may be the parent of the commit that adds the files). `git_dirty`
+is true when the tree was not clean.
 
-- one JSON file named `consistency-<UTC timestamp>-<sha12>.json`
-- one CSV per engine that actually ran, `duckdb-…csv` / `postgres-…csv`
-
-Every file includes `ran_at` (ISO-8601 UTC) and `commit_sha` (the `git rev-parse
-HEAD` at execution time — the revision the queries ran against, which may be
-the parent of the commit that adds the files). `git_dirty` is true when the
-tree was not clean. Question objects store both answers, generated/handwritten
-SQL, trust, refusal status, and timings.
-
-**Do not edit result files by hand.** Regenerate them with `--write`. The
-vitest gate re-executes the queries; it does not treat committed JSON as gold
-numbers, because `CURRENT_DATE`-relative seeds and calendar Q2 move.
+**Do not edit result files by hand.** Regenerated with `--write` only.
 
 ## What this is not
 

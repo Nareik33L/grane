@@ -75,12 +75,16 @@ export interface WrittenFiles {
   csv: string[];
 }
 
+export const COMMITTED_RESULTS = join(here, "results", "committed.json");
+
 export function writeReport(report: ConsistencyReport, outDir = RESULTS_DIR): WrittenFiles {
   mkdirSync(outDir, { recursive: true });
   const ranAt = new Date(report.ran_at);
   const jsonName = stampFilename("consistency", ranAt, report.commit_sha, "json");
   const jsonPath = join(outDir, jsonName);
-  writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
+  const payload = `${JSON.stringify(report, null, 2)}\n`;
+  writeFileSync(jsonPath, payload);
+  writeFileSync(COMMITTED_RESULTS, payload);
   const csv: string[] = [];
   for (const engine of report.engines.filter((e) => e.status === "ran")) {
     const csvName = stampFilename(engine.engine, ranAt, report.commit_sha, "csv");

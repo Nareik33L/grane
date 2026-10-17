@@ -87,7 +87,7 @@ export async function runConsistency(options: {
     commit_sha: sha,
     git_dirty: dirty,
     method:
-      "Same demo-shop questions via (a) GraneKernel.query — the MCP query tool — and (b) handwritten SQL through pg / DuckDB, not Grane. Relative periods anchored to max(orders timestamps). Independent SQL is the metric definition, never compiler output.",
+      "Same demo-shop questions via (a) GraneKernel.query — the MCP query tool — and (b) handwritten SQL through pg / DuckDB, not Grane and not src/query/time.ts. Relative periods are computed in SQL from max(orders timestamps).",
     engines,
   };
 }
@@ -113,7 +113,7 @@ function printReport(report: ConsistencyReport): void {
     }
     console.log(
       `[${engine.engine}] ${engine.engine_version.split(" ")[0]} anchor=${engine.anchor_now} ` +
-        `ok=${engine.summary.ok}/${engine.summary.total} failed=${engine.summary.failed}`,
+        `match=${engine.summary.match_ok} refuse=${engine.summary.refuse_ok} mismatch=${engine.summary.mismatch_ok} failed=${engine.summary.failed}`,
     );
     for (const q of engine.questions) {
       const mark = q.ok ? "ok" : "FAIL";

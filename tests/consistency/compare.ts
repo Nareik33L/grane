@@ -75,3 +75,19 @@ export function csvEscape(value: string): string {
   if (/[",\n\r]/.test(value)) return `"${value.replaceAll('"', '""')}"`;
   return value;
 }
+
+export function tableNonEmpty(table: Table | undefined): boolean {
+  return Boolean(table && table.length > 0);
+}
+
+/** True when at least one cell is a non-null, non-zero, non-empty value. */
+export function tableNonTrivial(table: Table | undefined): boolean {
+  if (!tableNonEmpty(table)) return false;
+  return table!.some((row) =>
+    row.some((c) => {
+      if (c === null || c === false || c === "") return false;
+      if (typeof c === "number") return c !== 0;
+      return true;
+    }),
+  );
+}

@@ -14,10 +14,13 @@
   tokens.
 - **Governed vs independent SQL consistency (Release 1 item 5).** Same demo
   shop questions are asked two ways: (a) `GraneKernel.query` (the MCP `query`
-  path) and (b) handwritten warehouse SQL with no Grane. Runs against the
-  demo DuckDB seed and certified CI Postgres 16 (isolated schema). Raw
-  answers are recorded under `tests/consistency/results/` with `ran_at` and
-  the git SHA. Rerun with `npm run test:consistency` or
+  path) and (b) handwritten warehouse SQL with no Grane and no
+  `src/query/time.ts` (windows computed in SQL). DuckDB demo seed plus
+  Postgres (CI: Actions `postgres:16`; the committed JSON on this branch
+  was recorded against a local PostgreSQL 16.15). The runner reports
+  12 match / 3 `unsafe_query` refusals / 1 governed mismatch, not 16/16.
+  All-time answers are checked against `tests/consistency/results/committed.json`.
+  Rerun with `npm run test:consistency` or
   `npx tsx tests/consistency/run.ts --write`. Method:
   [docs/consistency.md](docs/consistency.md). No publish, tag, or tokens.
 - **Honest OSS README (Release 1 item 3).** README warehouse matrix matches
