@@ -17,8 +17,9 @@
   only → SQL) and path B (catalog only → `GraneKernel.query`). Temperature
   is recorded as not controllable. Unedited transcripts under
   `tests/consistency/ai-runs/`. Scoring is generated only
-  (`npx tsx tests/consistency/ai-runs/score.ts`) against the #117
-  handwritten SQL. Method and limits: [docs/consistency.md](docs/consistency.md).
+  (`npx tsx tests/consistency/ai-runs/score.ts`) against #117's expected
+  outcome per question (match, `unsafe_query` refusal, or governed value).
+  Method and limits: [docs/consistency.md](docs/consistency.md).
   Generated table: [tests/consistency/ai-runs/SUMMARY.md](tests/consistency/ai-runs/SUMMARY.md).
   No publish, tag, or tokens.
 - **Governed vs independent SQL consistency (Release 1 item 5).** Same demo
