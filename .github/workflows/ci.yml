@@ -136,6 +136,10 @@ jobs:
       # The A/B/C thesis benchmark. DuckDB is a devDependency, so this runs
       # without making it a default runtime install.
       - run: npm run test:benchmark
+      # Grane vs independent SQL on demo DuckDB and this Postgres 16 service.
+      # Records nothing; committed JSON/CSV under tests/consistency/results/
+      # come from `npx tsx tests/consistency/run.ts --write`. See docs/consistency.md.
+      - run: npm run test:consistency
       # Internal robustness gauntlet. Fails when the harness is broken, a
       # known defect-class mutation is not detected, or a scenario scores
       # SECURITY CRITICAL / CRITICAL FAIL. Ordinary FAIL is report-only.
