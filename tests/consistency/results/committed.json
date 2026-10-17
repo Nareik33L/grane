@@ -1,0 +1,1740 @@
+{
+  "ran_at": "2026-10-17T14:38:13.590Z",
+  "commit_sha": "334cb457c70646f221370f87d5c5d0be1fb5bd96",
+  "git_dirty": false,
+  "method": "Same demo-shop questions via (a) GraneKernel.query — the MCP query tool — and (b) handwritten SQL through pg / DuckDB, not Grane and not src/query/time.ts. Relative periods are computed in SQL from max(orders timestamps).",
+  "engines": [
+    {
+      "engine": "duckdb",
+      "engine_version": "v1.5.5",
+      "status": "ran",
+      "anchor_now": "2026-10-08T16:00:00.000Z",
+      "questions": [
+        {
+          "id": "revenue_last_month",
+          "question": "What was Revenue last month?",
+          "category": "simple",
+          "expect": "match",
+          "all_time": false,
+          "note": "Booked on completed_at, status = completed. Last calendar month in SQL from warehouse max timestamp.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                184230
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_5e3967d0a0ce agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-09-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 106
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                184230
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND completed_at < (SELECT date_trunc('month', today) FROM anchor)",
+            "duration_ms": 3
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "orders_completed",
+          "question": "How many orders did we complete?",
+          "category": "simple",
+          "expect": "match",
+          "all_time": true,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                1789
+              ]
+            ],
+            "columns": [
+              "orders"
+            ],
+            "sql": "/* grane query_id=q_07adc1e775e4 agent=- */\nSELECT COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"orders\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nLIMIT 1000",
+            "params": [
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                1789
+              ]
+            ],
+            "columns": [
+              "orders"
+            ],
+            "sql": "SELECT COUNT(*) AS orders FROM orders WHERE status = 'completed'",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "average_order_value",
+          "question": "What is our average order value?",
+          "category": "simple",
+          "expect": "match",
+          "all_time": true,
+          "note": "Ratio of SUM(net_amount) / COUNT(*) on completed orders, not AVG(net_amount) over every row.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                333.91326439351593
+              ]
+            ],
+            "columns": [
+              "average_order_value"
+            ],
+            "sql": "/* grane query_id=q_deb6dc59201a agent=- */\nSELECT (SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1))::numeric / NULLIF((COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $2))::numeric, 0) AS \"average_order_value\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nLIMIT 1000",
+            "params": [
+              "completed",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                333.91326439351593
+              ]
+            ],
+            "columns": [
+              "average_order_value"
+            ],
+            "sql": "SELECT CAST(SUM(net_amount) AS DOUBLE PRECISION) / NULLIF(COUNT(*), 0) AS average_order_value\n         FROM orders WHERE status = 'completed'",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_q2",
+          "question": "What was Revenue in Q2?",
+          "category": "time",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                63165.23
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_3fbc517a7f84 agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-04-01",
+              "2026-07-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 3
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                63165.23
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n),\nq2 AS (\n  SELECT CASE\n    WHEN EXTRACT(MONTH FROM today) >= 4\n    THEN make_date(CAST(EXTRACT(YEAR FROM today) AS INTEGER), 4, 1)\n    ELSE make_date(CAST(EXTRACT(YEAR FROM today) AS INTEGER) - 1, 4, 1)\n  END AS q2_start\n  FROM anchor\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT CAST(q2_start AS TIMESTAMP) FROM q2)\n           AND completed_at < (SELECT CAST(q2_start + INTERVAL '3 months' AS TIMESTAMP) FROM q2)",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_last_quarter",
+          "question": "What was Revenue last quarter?",
+          "category": "time",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                421002.31
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_7364e2e5291b agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-07-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                421002.31
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('quarter', today) - INTERVAL '3 months' FROM anchor)\n           AND completed_at < (SELECT date_trunc('quarter', today) FROM anchor)",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_last_30d",
+          "question": "What was Revenue in the last 30 days?",
+          "category": "time",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                130670.59
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_09322e05db17 agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-09-09",
+              "2026-10-09"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                130670.59
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT CAST(today - INTERVAL '29 days' AS TIMESTAMP) FROM anchor)\n           AND completed_at < (SELECT CAST(today + INTERVAL '1 day' AS TIMESTAMP) FROM anchor)",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_by_country",
+          "question": "Revenue by country.",
+          "category": "dimension",
+          "expect": "match",
+          "all_time": true,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_9395351718c6 agent=- */\nWITH \"__grane_pop\" AS (\n  SELECT *\n  FROM \"orders\"\n),\n\"__grane_contrib\" AS (\n  SELECT *\n  FROM \"__grane_pop\" AS \"orders\"\n  WHERE (\"orders\".\"status\" = $1)\n),\n\"__grane_reach_customers\" AS (\n  SELECT *\n  FROM \"customers\"\n  WHERE \"customers\".\"id\" IN (\n    SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL)\n),\n\"__grane_card\" AS (\n  SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\"\n  FROM (SELECT 1 AS \"_x\") AS \"_grane_one\"\n),\n\"__grane_result\" AS (\n  SELECT \"customers\".\"country\" AS \"country\",\n         SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $2) AS \"revenue\",\n         COUNT(*) OVER() AS \"__grane_n\",\n         1 AS \"__grane_row\"\n  FROM \"__grane_pop\" AS \"orders\"\n  LEFT JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\"\n  GROUP BY 1\n  ORDER BY \"revenue\" DESC\n  LIMIT 1000\n)\nSELECT \"__grane_result\".\"country\",\n       \"__grane_result\".\"revenue\",\n       \"__grane_result\".\"__grane_n\",\n       \"__grane_result\".\"__grane_row\",\n       \"__grane_card\".\"__grane_card_customers\"\nFROM \"__grane_card\"\nLEFT JOIN \"__grane_result\" ON TRUE\nORDER BY \"__grane_result\".\"revenue\" DESC",
+            "params": [
+              "completed",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 5
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "revenue"
+            ],
+            "sql": "SELECT c.country, SUM(o.net_amount) AS revenue\n         FROM orders o JOIN customers c ON o.customer_id = c.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 6,
+          "row_count_raw": 6
+        },
+        {
+          "id": "revenue_by_plan",
+          "question": "Revenue by customer plan.",
+          "category": "dimension",
+          "expect": "match",
+          "all_time": true,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "starter",
+                240422.99
+              ],
+              [
+                "growth",
+                180565.94
+              ],
+              [
+                "enterprise",
+                176381.9
+              ]
+            ],
+            "columns": [
+              "plan",
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_df41c6578df4 agent=- */\nWITH \"__grane_pop\" AS (\n  SELECT *\n  FROM \"orders\"\n),\n\"__grane_contrib\" AS (\n  SELECT *\n  FROM \"__grane_pop\" AS \"orders\"\n  WHERE (\"orders\".\"status\" = $1)\n),\n\"__grane_reach_customers\" AS (\n  SELECT *\n  FROM \"customers\"\n  WHERE \"customers\".\"id\" IN (\n    SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL)\n),\n\"__grane_card\" AS (\n  SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\"\n  FROM (SELECT 1 AS \"_x\") AS \"_grane_one\"\n),\n\"__grane_result\" AS (\n  SELECT \"customers\".\"plan\" AS \"plan\",\n         SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $2) AS \"revenue\",\n         COUNT(*) OVER() AS \"__grane_n\",\n         1 AS \"__grane_row\"\n  FROM \"__grane_pop\" AS \"orders\"\n  LEFT JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\"\n  GROUP BY 1\n  ORDER BY \"revenue\" DESC\n  LIMIT 1000\n)\nSELECT \"__grane_result\".\"plan\",\n       \"__grane_result\".\"revenue\",\n       \"__grane_result\".\"__grane_n\",\n       \"__grane_result\".\"__grane_row\",\n       \"__grane_card\".\"__grane_card_customers\"\nFROM \"__grane_card\"\nLEFT JOIN \"__grane_result\" ON TRUE\nORDER BY \"__grane_result\".\"revenue\" DESC",
+            "params": [
+              "completed",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 5
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "starter",
+                240422.99
+              ],
+              [
+                "growth",
+                180565.94
+              ],
+              [
+                "enterprise",
+                176381.9
+              ]
+            ],
+            "columns": [
+              "plan",
+              "revenue"
+            ],
+            "sql": "SELECT c.plan, SUM(o.net_amount) AS revenue\n         FROM orders o JOIN customers c ON o.customer_id = c.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 3,
+          "row_count_raw": 3
+        },
+        {
+          "id": "revenue_by_channel_last_month",
+          "question": "Revenue by sales channel last month.",
+          "category": "dimension",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "web",
+                61928.7
+              ],
+              [
+                "mobile",
+                61394.72
+              ],
+              [
+                "partner",
+                60906.58
+              ]
+            ],
+            "columns": [
+              "channel",
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_b6454b1a0f95 agent=- */\nSELECT \"orders\".\"channel\" AS \"channel\",\n       SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nGROUP BY 1\nORDER BY \"revenue\" DESC\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-09-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 3
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "web",
+                61928.7
+              ],
+              [
+                "mobile",
+                61394.72
+              ],
+              [
+                "partner",
+                60906.58
+              ]
+            ],
+            "columns": [
+              "channel",
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT channel, SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND completed_at < (SELECT date_trunc('month', today) FROM anchor)\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 3,
+          "row_count_raw": 3
+        },
+        {
+          "id": "payments_received_by_country",
+          "question": "How much did we collect in succeeded payments, by country?",
+          "category": "join",
+          "expect": "match",
+          "all_time": true,
+          "note": "Payments are one-to-many from orders; independent SQL pre-aggregates at order grain before joining customers.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "payments_received"
+            ],
+            "sql": "/* grane query_id=q_20b19f74fc69 agent=- */\nWITH \"m_payments_received\" AS (\n  SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\"\n  FROM \"payments\"\n  WHERE \"payments\".\"status\" = $1\n  GROUP BY \"payments\".\"order_id\"\n),\n\"__grane_pop\" AS (\n  SELECT *\n  FROM \"orders\"\n),\n\"__grane_reach_customers\" AS (\n  SELECT *\n  FROM \"customers\"\n  WHERE \"customers\".\"id\" IN (\n    SELECT \"orders\".\"customer_id\" FROM \"__grane_pop\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL)\n),\n\"__grane_card\" AS (\n  SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\"\n  FROM (SELECT 1 AS \"_x\") AS \"_grane_one\"\n),\n\"__grane_result\" AS (\n  SELECT \"customers\".\"country\" AS \"country\",\n         SUM(\"m_payments_received\".\"value\") AS \"payments_received\",\n         COUNT(*) OVER() AS \"__grane_n\",\n         1 AS \"__grane_row\"\n  FROM \"__grane_pop\" AS \"orders\"\n  LEFT JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\"\n  LEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\"\n  GROUP BY 1\n  ORDER BY \"payments_received\" DESC\n  LIMIT 1000\n)\nSELECT \"__grane_result\".\"country\",\n       \"__grane_result\".\"payments_received\",\n       \"__grane_result\".\"__grane_n\",\n       \"__grane_result\".\"__grane_row\",\n       \"__grane_card\".\"__grane_card_customers\"\nFROM \"__grane_card\"\nLEFT JOIN \"__grane_result\" ON TRUE\nORDER BY \"__grane_result\".\"payments_received\" DESC",
+            "params": [
+              "succeeded"
+            ],
+            "trust": "governed",
+            "duration_ms": 6
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "payments_received"
+            ],
+            "sql": "SELECT c.country, SUM(p.value) AS payments_received\n         FROM orders o\n         JOIN customers c ON o.customer_id = c.id\n         LEFT JOIN (\n           SELECT order_id, SUM(amount) AS value FROM payments\n           WHERE status = 'succeeded' GROUP BY 1\n         ) p ON p.order_id = o.id\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 6,
+          "row_count_raw": 6
+        },
+        {
+          "id": "revenue_and_payments",
+          "question": "Show revenue and payments received side by side.",
+          "category": "join",
+          "expect": "match",
+          "all_time": true,
+          "note": "Independent SQL uses two scalar subqueries so the payment fan-out cannot multiply revenue.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                597370.83,
+                597370.83
+              ]
+            ],
+            "columns": [
+              "revenue",
+              "payments_received"
+            ],
+            "sql": "/* grane query_id=q_e0938e037d2c agent=- */\nWITH \"m_payments_received\" AS (\n  SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\"\n  FROM \"payments\"\n  WHERE \"payments\".\"status\" = $1\n  GROUP BY \"payments\".\"order_id\"\n)\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $2) AS \"revenue\",\n       SUM(\"m_payments_received\".\"value\") AS \"payments_received\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"orders\"\nLEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\"\nLIMIT 1000",
+            "params": [
+              "succeeded",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 3
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                597370.83,
+                597370.83
+              ]
+            ],
+            "columns": [
+              "revenue",
+              "payments_received"
+            ],
+            "sql": "SELECT\n           (SELECT SUM(net_amount) FROM orders WHERE status = 'completed') AS revenue,\n           (SELECT SUM(amount) FROM payments WHERE status = 'succeeded') AS payments_received",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "customers_total",
+          "question": "How many customers do we have?",
+          "category": "definition",
+          "expect": "match",
+          "all_time": true,
+          "note": "A row in customers, whether or not they have ordered.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                240
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "/* grane query_id=q_96f549a1c6ad agent=- */\nSELECT COUNT(\"customers\".\"id\") AS \"customers\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"customers\"\nLIMIT 1000",
+            "params": [],
+            "trust": "governed",
+            "duration_ms": 1
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                240
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "SELECT COUNT(*) AS customers FROM customers",
+            "duration_ms": 0
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "customers_ordered_last_month",
+          "question": "How many customers ordered last month?",
+          "category": "definition",
+          "expect": "mismatch",
+          "all_time": false,
+          "note": "demo/questions.md: not the same question as 'how many customers do we have'. Grane's customers metric + last_month filters customers.created_at (governedSql). Independent SQL counts distinct customers with a completed order in last_month.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                0
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "/* grane query_id=q_ffe3b7508334 agent=- */\nSELECT COUNT(\"customers\".\"id\") AS \"customers\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"customers\"\nWHERE \"customers\".\"created_at\" >= $1::timestamp\n  AND \"customers\".\"created_at\" < $2::timestamp\nLIMIT 1000",
+            "params": [
+              "2026-09-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                181
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT COUNT(DISTINCT customer_id) AS customers FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND completed_at < (SELECT date_trunc('month', today) FROM anchor)",
+            "duration_ms": 2
+          },
+          "governed": {
+            "kind": "answered",
+            "rows": [
+              [
+                0
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT COUNT(*) AS customers FROM customers\n         WHERE created_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND created_at < (SELECT date_trunc('month', today) FROM anchor)",
+            "duration_ms": 3
+          },
+          "tables_match": false,
+          "ok": true,
+          "detail": "mismatch as expected (Grane matched governed SQL)",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_by_product_category",
+          "question": "Revenue by product category.",
+          "category": "grain trap",
+          "expect": "grane_refuses",
+          "all_time": true,
+          "note": "Order-grain revenue joined through order_items fans out. Grane must refuse unsafe_query; raw SQL still returns a number.",
+          "grane": {
+            "kind": "refused",
+            "status": "unsafe_query",
+            "message": "Joining dimension \"product_category\" requires traversing \"orders\" -> \"order_items\" (one_to_many), which would multiply rows at the metric grain (\"orders\") and corrupt aggregation. Grane refuses this query. Define a metric at the \"products\" grain instead.",
+            "duration_ms": 0
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "home",
+                241112.49
+              ],
+              [
+                "outdoors",
+                238755.51
+              ],
+              [
+                "toys",
+                235878.38
+              ],
+              [
+                "office",
+                232983.71
+              ],
+              [
+                "electronics",
+                222233.05
+              ]
+            ],
+            "columns": [
+              "category",
+              "revenue"
+            ],
+            "sql": "SELECT p.category, SUM(o.net_amount) AS revenue\n         FROM orders o\n         JOIN order_items oi ON oi.order_id = o.id\n         JOIN products p ON p.id = oi.product_id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": null,
+          "ok": true,
+          "detail": "Grane refused (unsafe_query); raw answered",
+          "row_count_grane": null,
+          "row_count_raw": 5
+        },
+        {
+          "id": "revenue_by_ticket_category",
+          "question": "Revenue by support ticket category.",
+          "category": "grain trap",
+          "expect": "grane_refuses",
+          "all_time": true,
+          "grane": {
+            "kind": "refused",
+            "status": "unsafe_query",
+            "message": "Joining raw dimension \"support_tickets.category\" requires traversing \"customers\" -> \"support_tickets\" (one_to_many), which would multiply rows at the metric grain (\"orders\") and corrupt aggregation. Grane refuses this query. Define a metric at the \"support_tickets\" grain instead.",
+            "duration_ms": 1
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "product",
+                479514.77
+              ],
+              [
+                "billing",
+                416734.51
+              ],
+              [
+                "shipping",
+                360445.59
+              ],
+              [
+                "account",
+                298878.45
+              ]
+            ],
+            "columns": [
+              "category",
+              "revenue"
+            ],
+            "sql": "SELECT t.category, SUM(o.net_amount) AS revenue\n         FROM orders o\n         JOIN customers c ON o.customer_id = c.id\n         JOIN support_tickets t ON t.customer_id = c.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": null,
+          "ok": true,
+          "detail": "Grane refused (unsafe_query); raw answered",
+          "row_count_grane": null,
+          "row_count_raw": 4
+        },
+        {
+          "id": "revenue_by_checkout_event_type",
+          "question": "Revenue by checkout event type.",
+          "category": "grain trap",
+          "expect": "grane_refuses",
+          "all_time": true,
+          "grane": {
+            "kind": "refused",
+            "status": "unsafe_query",
+            "message": "Joining raw dimension \"checkout_events.event_type\" requires traversing \"orders\" -> \"checkout_events\" (one_to_many), which would multiply rows at the metric grain (\"orders\") and corrupt aggregation. Grane refuses this query. Define a metric at the \"checkout_events\" grain instead.",
+            "duration_ms": 0
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "viewed",
+                597370.83
+              ],
+              [
+                "started",
+                597370.83
+              ],
+              [
+                "completed",
+                597370.83
+              ],
+              [
+                "retry",
+                247603.28
+              ]
+            ],
+            "columns": [
+              "event_type",
+              "revenue"
+            ],
+            "sql": "SELECT e.event_type, SUM(o.net_amount) AS revenue\n         FROM orders o JOIN checkout_events e ON e.order_id = o.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": null,
+          "ok": true,
+          "detail": "Grane refused (unsafe_query); raw answered",
+          "row_count_grane": null,
+          "row_count_raw": 4
+        }
+      ],
+      "summary": {
+        "total": 16,
+        "ok": 16,
+        "failed": 0,
+        "match_ok": 12,
+        "refuse_ok": 3,
+        "mismatch_ok": 1
+      }
+    },
+    {
+      "engine": "postgres",
+      "engine_version": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+      "status": "ran",
+      "anchor_now": "2026-10-08T16:00:00.000Z",
+      "questions": [
+        {
+          "id": "revenue_last_month",
+          "question": "What was Revenue last month?",
+          "category": "simple",
+          "expect": "match",
+          "all_time": false,
+          "note": "Booked on completed_at, status = completed. Last calendar month in SQL from warehouse max timestamp.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                184230
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_b26cdaf6db3a agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-09-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 22
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                184230
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND completed_at < (SELECT date_trunc('month', today) FROM anchor)",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "orders_completed",
+          "question": "How many orders did we complete?",
+          "category": "simple",
+          "expect": "match",
+          "all_time": true,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                1789
+              ]
+            ],
+            "columns": [
+              "orders"
+            ],
+            "sql": "/* grane query_id=q_c4c836d5663e agent=- */\nSELECT COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"orders\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nLIMIT 1000",
+            "params": [
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                1789
+              ]
+            ],
+            "columns": [
+              "orders"
+            ],
+            "sql": "SELECT COUNT(*) AS orders FROM orders WHERE status = 'completed'",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "average_order_value",
+          "question": "What is our average order value?",
+          "category": "simple",
+          "expect": "match",
+          "all_time": true,
+          "note": "Ratio of SUM(net_amount) / COUNT(*) on completed orders, not AVG(net_amount) over every row.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                333.91326439351593
+              ]
+            ],
+            "columns": [
+              "average_order_value"
+            ],
+            "sql": "/* grane query_id=q_34b30f175102 agent=- */\nSELECT (SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1))::numeric / NULLIF((COUNT(\"orders\".\"id\") FILTER (WHERE \"orders\".\"status\" = $2))::numeric, 0) AS \"average_order_value\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nLIMIT 1000",
+            "params": [
+              "completed",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 1
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                333.91326439351593
+              ]
+            ],
+            "columns": [
+              "average_order_value"
+            ],
+            "sql": "SELECT CAST(SUM(net_amount) AS DOUBLE PRECISION) / NULLIF(COUNT(*), 0) AS average_order_value\n         FROM orders WHERE status = 'completed'",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_q2",
+          "question": "What was Revenue in Q2?",
+          "category": "time",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                63165.23
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_fd883b275552 agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-04-01",
+              "2026-07-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 1
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                63165.23
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n),\nq2 AS (\n  SELECT CASE\n    WHEN EXTRACT(MONTH FROM today) >= 4\n    THEN make_date(CAST(EXTRACT(YEAR FROM today) AS INTEGER), 4, 1)\n    ELSE make_date(CAST(EXTRACT(YEAR FROM today) AS INTEGER) - 1, 4, 1)\n  END AS q2_start\n  FROM anchor\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT CAST(q2_start AS TIMESTAMP) FROM q2)\n           AND completed_at < (SELECT CAST(q2_start + INTERVAL '3 months' AS TIMESTAMP) FROM q2)",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_last_quarter",
+          "question": "What was Revenue last quarter?",
+          "category": "time",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                421002.31
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_12c2e14e8d61 agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-07-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                421002.31
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('quarter', today) - INTERVAL '3 months' FROM anchor)\n           AND completed_at < (SELECT date_trunc('quarter', today) FROM anchor)",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_last_30d",
+          "question": "What was Revenue in the last 30 days?",
+          "category": "time",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                130670.59
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_7b9bd5f4793e agent=- */\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-09-09",
+              "2026-10-09"
+            ],
+            "trust": "governed",
+            "duration_ms": 1
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                130670.59
+              ]
+            ],
+            "columns": [
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT CAST(today - INTERVAL '29 days' AS TIMESTAMP) FROM anchor)\n           AND completed_at < (SELECT CAST(today + INTERVAL '1 day' AS TIMESTAMP) FROM anchor)",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_by_country",
+          "question": "Revenue by country.",
+          "category": "dimension",
+          "expect": "match",
+          "all_time": true,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_b0bbb9e55b60 agent=- */\nWITH \"__grane_pop\" AS (\n  SELECT *\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\n),\n\"__grane_contrib\" AS (\n  SELECT *\n  FROM \"__grane_pop\" AS \"orders\"\n  WHERE (\"orders\".\"status\" = $1)\n),\n\"__grane_reach_customers\" AS (\n  SELECT *\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"customers\"\n  WHERE \"customers\".\"id\" IN (\n    SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL)\n),\n\"__grane_card\" AS (\n  SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\"\n  FROM (SELECT 1 AS \"_x\") AS \"_grane_one\"\n),\n\"__grane_result\" AS (\n  SELECT \"customers\".\"country\" AS \"country\",\n         SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $2) AS \"revenue\",\n         COUNT(*) OVER() AS \"__grane_n\",\n         1 AS \"__grane_row\"\n  FROM \"__grane_pop\" AS \"orders\"\n  LEFT JOIN \"grane_cons_mvci4d1c_mttkqt\".\"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\"\n  GROUP BY 1\n  ORDER BY \"revenue\" DESC\n  LIMIT 1000\n)\nSELECT \"__grane_result\".\"country\",\n       \"__grane_result\".\"revenue\",\n       \"__grane_result\".\"__grane_n\",\n       \"__grane_result\".\"__grane_row\",\n       \"__grane_card\".\"__grane_card_customers\"\nFROM \"__grane_card\"\nLEFT JOIN \"__grane_result\" ON TRUE\nORDER BY \"__grane_result\".\"revenue\" DESC",
+            "params": [
+              "completed",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "revenue"
+            ],
+            "sql": "SELECT c.country, SUM(o.net_amount) AS revenue\n         FROM orders o JOIN customers c ON o.customer_id = c.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 6,
+          "row_count_raw": 6
+        },
+        {
+          "id": "revenue_by_plan",
+          "question": "Revenue by customer plan.",
+          "category": "dimension",
+          "expect": "match",
+          "all_time": true,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "starter",
+                240422.99
+              ],
+              [
+                "growth",
+                180565.94
+              ],
+              [
+                "enterprise",
+                176381.9
+              ]
+            ],
+            "columns": [
+              "plan",
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_1eeeff09000f agent=- */\nWITH \"__grane_pop\" AS (\n  SELECT *\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\n),\n\"__grane_contrib\" AS (\n  SELECT *\n  FROM \"__grane_pop\" AS \"orders\"\n  WHERE (\"orders\".\"status\" = $1)\n),\n\"__grane_reach_customers\" AS (\n  SELECT *\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"customers\"\n  WHERE \"customers\".\"id\" IN (\n    SELECT \"orders\".\"customer_id\" FROM \"__grane_contrib\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL)\n),\n\"__grane_card\" AS (\n  SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\"\n  FROM (SELECT 1 AS \"_x\") AS \"_grane_one\"\n),\n\"__grane_result\" AS (\n  SELECT \"customers\".\"plan\" AS \"plan\",\n         SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $2) AS \"revenue\",\n         COUNT(*) OVER() AS \"__grane_n\",\n         1 AS \"__grane_row\"\n  FROM \"__grane_pop\" AS \"orders\"\n  LEFT JOIN \"grane_cons_mvci4d1c_mttkqt\".\"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\"\n  GROUP BY 1\n  ORDER BY \"revenue\" DESC\n  LIMIT 1000\n)\nSELECT \"__grane_result\".\"plan\",\n       \"__grane_result\".\"revenue\",\n       \"__grane_result\".\"__grane_n\",\n       \"__grane_result\".\"__grane_row\",\n       \"__grane_card\".\"__grane_card_customers\"\nFROM \"__grane_card\"\nLEFT JOIN \"__grane_result\" ON TRUE\nORDER BY \"__grane_result\".\"revenue\" DESC",
+            "params": [
+              "completed",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "starter",
+                240422.99
+              ],
+              [
+                "growth",
+                180565.94
+              ],
+              [
+                "enterprise",
+                176381.9
+              ]
+            ],
+            "columns": [
+              "plan",
+              "revenue"
+            ],
+            "sql": "SELECT c.plan, SUM(o.net_amount) AS revenue\n         FROM orders o JOIN customers c ON o.customer_id = c.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 3,
+          "row_count_raw": 3
+        },
+        {
+          "id": "revenue_by_channel_last_month",
+          "question": "Revenue by sales channel last month.",
+          "category": "dimension",
+          "expect": "match",
+          "all_time": false,
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "web",
+                61928.7
+              ],
+              [
+                "mobile",
+                61394.72
+              ],
+              [
+                "partner",
+                60906.58
+              ]
+            ],
+            "columns": [
+              "channel",
+              "revenue"
+            ],
+            "sql": "/* grane query_id=q_842d6eb89ac4 agent=- */\nSELECT \"orders\".\"channel\" AS \"channel\",\n       SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $1) AS \"revenue\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nWHERE \"orders\".\"completed_at\" >= $2::timestamp\n  AND \"orders\".\"completed_at\" < $3::timestamp\nGROUP BY 1\nORDER BY \"revenue\" DESC\nLIMIT 1000",
+            "params": [
+              "completed",
+              "2026-09-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "web",
+                61928.7
+              ],
+              [
+                "mobile",
+                61394.72
+              ],
+              [
+                "partner",
+                60906.58
+              ]
+            ],
+            "columns": [
+              "channel",
+              "revenue"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT channel, SUM(net_amount) AS revenue FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND completed_at < (SELECT date_trunc('month', today) FROM anchor)\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 3,
+          "row_count_raw": 3
+        },
+        {
+          "id": "payments_received_by_country",
+          "question": "How much did we collect in succeeded payments, by country?",
+          "category": "join",
+          "expect": "match",
+          "all_time": true,
+          "note": "Payments are one-to-many from orders; independent SQL pre-aggregates at order grain before joining customers.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "payments_received"
+            ],
+            "sql": "/* grane query_id=q_e72bddd75212 agent=- */\nWITH \"m_payments_received\" AS (\n  SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\"\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"payments\"\n  WHERE \"payments\".\"status\" = $1\n  GROUP BY \"payments\".\"order_id\"\n),\n\"__grane_pop\" AS (\n  SELECT *\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\n),\n\"__grane_reach_customers\" AS (\n  SELECT *\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"customers\"\n  WHERE \"customers\".\"id\" IN (\n    SELECT \"orders\".\"customer_id\" FROM \"__grane_pop\" AS \"orders\" WHERE \"orders\".\"customer_id\" IS NOT NULL)\n),\n\"__grane_card\" AS (\n  SELECT (SELECT MAX(\"_n\") FROM (SELECT COUNT(*) AS \"_n\" FROM \"__grane_reach_customers\" GROUP BY \"id\") AS \"_keys\") AS \"__grane_card_customers\"\n  FROM (SELECT 1 AS \"_x\") AS \"_grane_one\"\n),\n\"__grane_result\" AS (\n  SELECT \"customers\".\"country\" AS \"country\",\n         SUM(\"m_payments_received\".\"value\") AS \"payments_received\",\n         COUNT(*) OVER() AS \"__grane_n\",\n         1 AS \"__grane_row\"\n  FROM \"__grane_pop\" AS \"orders\"\n  LEFT JOIN \"grane_cons_mvci4d1c_mttkqt\".\"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"id\"\n  LEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\"\n  GROUP BY 1\n  ORDER BY \"payments_received\" DESC\n  LIMIT 1000\n)\nSELECT \"__grane_result\".\"country\",\n       \"__grane_result\".\"payments_received\",\n       \"__grane_result\".\"__grane_n\",\n       \"__grane_result\".\"__grane_row\",\n       \"__grane_card\".\"__grane_card_customers\"\nFROM \"__grane_card\"\nLEFT JOIN \"__grane_result\" ON TRUE\nORDER BY \"__grane_result\".\"payments_received\" DESC",
+            "params": [
+              "succeeded"
+            ],
+            "trust": "governed",
+            "duration_ms": 3
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "UK",
+                174309.64
+              ],
+              [
+                "Germany",
+                133329.88
+              ],
+              [
+                "US",
+                127759.87
+              ],
+              [
+                "France",
+                66113.35
+              ],
+              [
+                "Spain",
+                52806.07
+              ],
+              [
+                "Netherlands",
+                43052.02
+              ]
+            ],
+            "columns": [
+              "country",
+              "payments_received"
+            ],
+            "sql": "SELECT c.country, SUM(p.value) AS payments_received\n         FROM orders o\n         JOIN customers c ON o.customer_id = c.id\n         LEFT JOIN (\n           SELECT order_id, SUM(amount) AS value FROM payments\n           WHERE status = 'succeeded' GROUP BY 1\n         ) p ON p.order_id = o.id\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 6,
+          "row_count_raw": 6
+        },
+        {
+          "id": "revenue_and_payments",
+          "question": "Show revenue and payments received side by side.",
+          "category": "join",
+          "expect": "match",
+          "all_time": true,
+          "note": "Independent SQL uses two scalar subqueries so the payment fan-out cannot multiply revenue.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                597370.83,
+                597370.83
+              ]
+            ],
+            "columns": [
+              "revenue",
+              "payments_received"
+            ],
+            "sql": "/* grane query_id=q_b61c47f8d3b4 agent=- */\nWITH \"m_payments_received\" AS (\n  SELECT \"payments\".\"order_id\" AS \"_key\", SUM(\"payments\".\"amount\") AS \"value\"\n  FROM \"grane_cons_mvci4d1c_mttkqt\".\"payments\"\n  WHERE \"payments\".\"status\" = $1\n  GROUP BY \"payments\".\"order_id\"\n)\nSELECT SUM(\"orders\".\"net_amount\") FILTER (WHERE \"orders\".\"status\" = $2) AS \"revenue\",\n       SUM(\"m_payments_received\".\"value\") AS \"payments_received\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"orders\"\nLEFT JOIN \"m_payments_received\" ON \"m_payments_received\".\"_key\" = \"orders\".\"id\"\nLIMIT 1000",
+            "params": [
+              "succeeded",
+              "completed"
+            ],
+            "trust": "governed",
+            "duration_ms": 3
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                597370.83,
+                597370.83
+              ]
+            ],
+            "columns": [
+              "revenue",
+              "payments_received"
+            ],
+            "sql": "SELECT\n           (SELECT SUM(net_amount) FROM orders WHERE status = 'completed') AS revenue,\n           (SELECT SUM(amount) FROM payments WHERE status = 'succeeded') AS payments_received",
+            "duration_ms": 1
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "customers_total",
+          "question": "How many customers do we have?",
+          "category": "definition",
+          "expect": "match",
+          "all_time": true,
+          "note": "A row in customers, whether or not they have ordered.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                240
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "/* grane query_id=q_034b28ceacef agent=- */\nSELECT COUNT(\"customers\".\"id\") AS \"customers\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"customers\"\nLIMIT 1000",
+            "params": [],
+            "trust": "governed",
+            "duration_ms": 1
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                240
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "SELECT COUNT(*) AS customers FROM customers",
+            "duration_ms": 0
+          },
+          "tables_match": true,
+          "ok": true,
+          "detail": "match",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "customers_ordered_last_month",
+          "question": "How many customers ordered last month?",
+          "category": "definition",
+          "expect": "mismatch",
+          "all_time": false,
+          "note": "demo/questions.md: not the same question as 'how many customers do we have'. Grane's customers metric + last_month filters customers.created_at (governedSql). Independent SQL counts distinct customers with a completed order in last_month.",
+          "grane": {
+            "kind": "answered",
+            "rows": [
+              [
+                0
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "/* grane query_id=q_add599972eaf agent=- */\nSELECT COUNT(\"customers\".\"id\") AS \"customers\",\n       COUNT(*) OVER() AS \"__grane_n\",\n       1 AS \"__grane_row\"\nFROM \"grane_cons_mvci4d1c_mttkqt\".\"customers\"\nWHERE \"customers\".\"created_at\" >= $1::timestamp\n  AND \"customers\".\"created_at\" < $2::timestamp\nLIMIT 1000",
+            "params": [
+              "2026-09-01",
+              "2026-10-01"
+            ],
+            "trust": "governed",
+            "duration_ms": 2
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                181
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT COUNT(DISTINCT customer_id) AS customers FROM orders\n         WHERE status = 'completed' AND completed_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND completed_at < (SELECT date_trunc('month', today) FROM anchor)",
+            "duration_ms": 1
+          },
+          "governed": {
+            "kind": "answered",
+            "rows": [
+              [
+                0
+              ]
+            ],
+            "columns": [
+              "customers"
+            ],
+            "sql": "WITH anchor AS (\n  SELECT CAST(max(greatest(created_at, coalesce(completed_at, created_at))) AS DATE) AS today\n  FROM orders\n)\n         SELECT COUNT(*) AS customers FROM customers\n         WHERE created_at >= (SELECT date_trunc('month', today) - INTERVAL '1 month' FROM anchor)\n           AND created_at < (SELECT date_trunc('month', today) FROM anchor)",
+            "duration_ms": 5
+          },
+          "tables_match": false,
+          "ok": true,
+          "detail": "mismatch as expected (Grane matched governed SQL)",
+          "row_count_grane": 1,
+          "row_count_raw": 1
+        },
+        {
+          "id": "revenue_by_product_category",
+          "question": "Revenue by product category.",
+          "category": "grain trap",
+          "expect": "grane_refuses",
+          "all_time": true,
+          "note": "Order-grain revenue joined through order_items fans out. Grane must refuse unsafe_query; raw SQL still returns a number.",
+          "grane": {
+            "kind": "refused",
+            "status": "unsafe_query",
+            "message": "Joining dimension \"product_category\" requires traversing \"orders\" -> \"order_items\" (one_to_many), which would multiply rows at the metric grain (\"orders\") and corrupt aggregation. Grane refuses this query. Define a metric at the \"products\" grain instead.",
+            "duration_ms": 0
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "home",
+                241112.49
+              ],
+              [
+                "outdoors",
+                238755.51
+              ],
+              [
+                "toys",
+                235878.38
+              ],
+              [
+                "office",
+                232983.71
+              ],
+              [
+                "electronics",
+                222233.05
+              ]
+            ],
+            "columns": [
+              "category",
+              "revenue"
+            ],
+            "sql": "SELECT p.category, SUM(o.net_amount) AS revenue\n         FROM orders o\n         JOIN order_items oi ON oi.order_id = o.id\n         JOIN products p ON p.id = oi.product_id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 4
+          },
+          "tables_match": null,
+          "ok": true,
+          "detail": "Grane refused (unsafe_query); raw answered",
+          "row_count_grane": null,
+          "row_count_raw": 5
+        },
+        {
+          "id": "revenue_by_ticket_category",
+          "question": "Revenue by support ticket category.",
+          "category": "grain trap",
+          "expect": "grane_refuses",
+          "all_time": true,
+          "grane": {
+            "kind": "refused",
+            "status": "unsafe_query",
+            "message": "Joining raw dimension \"support_tickets.category\" requires traversing \"customers\" -> \"support_tickets\" (one_to_many), which would multiply rows at the metric grain (\"orders\") and corrupt aggregation. Grane refuses this query. Define a metric at the \"support_tickets\" grain instead.",
+            "duration_ms": 0
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "product",
+                479514.77
+              ],
+              [
+                "billing",
+                416734.51
+              ],
+              [
+                "shipping",
+                360445.59
+              ],
+              [
+                "account",
+                298878.45
+              ]
+            ],
+            "columns": [
+              "category",
+              "revenue"
+            ],
+            "sql": "SELECT t.category, SUM(o.net_amount) AS revenue\n         FROM orders o\n         JOIN customers c ON o.customer_id = c.id\n         JOIN support_tickets t ON t.customer_id = c.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 4
+          },
+          "tables_match": null,
+          "ok": true,
+          "detail": "Grane refused (unsafe_query); raw answered",
+          "row_count_grane": null,
+          "row_count_raw": 4
+        },
+        {
+          "id": "revenue_by_checkout_event_type",
+          "question": "Revenue by checkout event type.",
+          "category": "grain trap",
+          "expect": "grane_refuses",
+          "all_time": true,
+          "grane": {
+            "kind": "refused",
+            "status": "unsafe_query",
+            "message": "Joining raw dimension \"checkout_events.event_type\" requires traversing \"orders\" -> \"checkout_events\" (one_to_many), which would multiply rows at the metric grain (\"orders\") and corrupt aggregation. Grane refuses this query. Define a metric at the \"checkout_events\" grain instead.",
+            "duration_ms": 0
+          },
+          "raw": {
+            "kind": "answered",
+            "rows": [
+              [
+                "completed",
+                597370.83
+              ],
+              [
+                "started",
+                597370.83
+              ],
+              [
+                "viewed",
+                597370.83
+              ],
+              [
+                "retry",
+                247603.28
+              ]
+            ],
+            "columns": [
+              "event_type",
+              "revenue"
+            ],
+            "sql": "SELECT e.event_type, SUM(o.net_amount) AS revenue\n         FROM orders o JOIN checkout_events e ON e.order_id = o.id\n         WHERE o.status = 'completed'\n         GROUP BY 1 ORDER BY 2 DESC",
+            "duration_ms": 2
+          },
+          "tables_match": null,
+          "ok": true,
+          "detail": "Grane refused (unsafe_query); raw answered",
+          "row_count_grane": null,
+          "row_count_raw": 4
+        }
+      ],
+      "summary": {
+        "total": 16,
+        "ok": 16,
+        "failed": 0,
+        "match_ok": 12,
+        "refuse_ok": 3,
+        "mismatch_ok": 1
+      }
+    }
+  ]
+}

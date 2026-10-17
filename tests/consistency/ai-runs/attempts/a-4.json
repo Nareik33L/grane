@@ -1,0 +1,66 @@
+[
+  {
+    "id": "revenue_last_month",
+    "sql": "SELECT COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o WHERE o.status = 'completed' AND o.completed_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND o.completed_at < DATE_TRUNC('month', CURRENT_DATE)"
+  },
+  {
+    "id": "orders_completed",
+    "sql": "SELECT COUNT(*) AS orders_completed FROM orders o WHERE o.status = 'completed'"
+  },
+  {
+    "id": "average_order_value",
+    "sql": "SELECT AVG(o.net_amount) AS average_order_value FROM orders o WHERE o.status = 'completed'"
+  },
+  {
+    "id": "revenue_q2",
+    "sql": "SELECT COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o WHERE o.status = 'completed' AND o.completed_at >= DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '3 months' AND o.completed_at < DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '6 months'"
+  },
+  {
+    "id": "revenue_last_quarter",
+    "sql": "SELECT COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o WHERE o.status = 'completed' AND o.completed_at >= DATE_TRUNC('quarter', CURRENT_DATE) - INTERVAL '3 months' AND o.completed_at < DATE_TRUNC('quarter', CURRENT_DATE)"
+  },
+  {
+    "id": "revenue_last_30d",
+    "sql": "SELECT COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o WHERE o.status = 'completed' AND o.completed_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' AND o.completed_at < CURRENT_TIMESTAMP"
+  },
+  {
+    "id": "revenue_by_country",
+    "sql": "SELECT c.country, COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = 'completed' GROUP BY c.country"
+  },
+  {
+    "id": "revenue_by_plan",
+    "sql": "SELECT c.plan, COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = 'completed' GROUP BY c.plan"
+  },
+  {
+    "id": "revenue_by_channel_last_month",
+    "sql": "SELECT o.channel, COALESCE(SUM(o.net_amount), 0) AS revenue FROM orders o WHERE o.status = 'completed' AND o.completed_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND o.completed_at < DATE_TRUNC('month', CURRENT_DATE) GROUP BY o.channel"
+  },
+  {
+    "id": "payments_received_by_country",
+    "sql": "SELECT c.country, COALESCE(SUM(p.amount), 0) AS payments_received FROM payments p JOIN orders o ON p.order_id = o.id JOIN customers c ON o.customer_id = c.id WHERE p.failure_code IS NULL AND p.paid_at IS NOT NULL GROUP BY c.country"
+  },
+  {
+    "id": "revenue_and_payments",
+    "sql": "SELECT (SELECT COALESCE(SUM(net_amount), 0) FROM orders WHERE status = 'completed') AS revenue, (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE failure_code IS NULL AND paid_at IS NOT NULL) AS payments"
+  },
+  {
+    "id": "customers_total",
+    "sql": "SELECT COUNT(*) AS customers_total FROM customers"
+  },
+  {
+    "id": "customers_ordered_last_month",
+    "sql": "SELECT COUNT(DISTINCT o.customer_id) AS customers_ordered FROM orders o WHERE o.created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND o.created_at < DATE_TRUNC('month', CURRENT_DATE)"
+  },
+  {
+    "id": "revenue_by_product_category",
+    "sql": "SELECT pr.category, COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS revenue FROM order_items oi JOIN products pr ON oi.product_id = pr.id JOIN orders o ON oi.order_id = o.id WHERE o.status = 'completed' GROUP BY pr.category"
+  },
+  {
+    "id": "revenue_by_ticket_category",
+    "sql": "SELECT st.category, COALESCE(SUM(o.net_amount), 0) AS revenue FROM support_tickets st JOIN orders o ON o.customer_id = st.customer_id WHERE o.status = 'completed' GROUP BY st.category"
+  },
+  {
+    "id": "revenue_by_checkout_event_type",
+    "sql": "SELECT ce.event_type, COALESCE(SUM(o.net_amount), 0) AS revenue FROM checkout_events ce JOIN orders o ON ce.order_id = o.id WHERE o.status = 'completed' GROUP BY ce.event_type"
+  }
+]

@@ -1,0 +1,127 @@
+[
+  {
+    "id": "revenue_last_month",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "time": { "range": "last_month" }
+    }
+  },
+  {
+    "id": "orders_completed",
+    "query": {
+      "version": 1,
+      "metrics": ["orders"]
+    }
+  },
+  {
+    "id": "average_order_value",
+    "query": {
+      "version": 1,
+      "metrics": ["average_order_value"]
+    }
+  },
+  {
+    "id": "revenue_q2",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "time": { "range": "q2" }
+    }
+  },
+  {
+    "id": "revenue_last_quarter",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "time": { "range": "last_quarter" }
+    }
+  },
+  {
+    "id": "revenue_last_30d",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "time": { "range": "last_30d" }
+    }
+  },
+  {
+    "id": "revenue_by_country",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "dimensions": ["country"]
+    }
+  },
+  {
+    "id": "revenue_by_plan",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "dimensions": ["plan"]
+    }
+  },
+  {
+    "id": "revenue_by_channel_last_month",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "dimensions": ["channel"],
+      "time": { "range": "last_month" }
+    }
+  },
+  {
+    "id": "payments_received_by_country",
+    "query": {
+      "version": 1,
+      "metrics": ["payments_received"],
+      "dimensions": ["country"]
+    }
+  },
+  {
+    "id": "revenue_and_payments",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue", "payments_received"]
+    }
+  },
+  {
+    "id": "customers_total",
+    "query": {
+      "version": 1,
+      "metrics": ["customers"]
+    }
+  },
+  {
+    "id": "customers_ordered_last_month",
+    "query": {
+      "version": 1,
+      "metrics": ["customers"],
+      "time": { "range": "last_month" }
+    }
+  },
+  {
+    "id": "revenue_by_product_category",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "dimensions": ["product_category"]
+    }
+  },
+  {
+    "id": "revenue_by_ticket_category",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "raw_dimensions": ["support_tickets.category"]
+    }
+  },
+  {
+    "id": "revenue_by_checkout_event_type",
+    "query": {
+      "version": 1,
+      "metrics": ["revenue"],
+      "raw_dimensions": ["checkout_events.event_type"]
+    }
+  }
+]
