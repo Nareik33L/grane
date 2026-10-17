@@ -78,6 +78,10 @@ invent Postgres numbers.
 
 ## Recorded results
 
+QA re-record on this branch:
+[`tests/consistency/results/consistency-20261017T142349.165Z-54404699eb8a.json`](../tests/consistency/results/consistency-20261017T142349.165Z-54404699eb8a.json)
+(`ran_at` 2026-10-17T14:23:49.165Z, `commit_sha` `54404699eb8a07f244a88e1adf2dd1aa245791a2`, DuckDB v1.5.5 and local PostgreSQL 16.15). Classification: 12 match, 3 refuse, 1 mismatch. Open the JSON for every cell.
+
 `--write` also copies the report to
 [`tests/consistency/results/committed.json`](../tests/consistency/results/committed.json).
 All-time questions (no relative period) are checked against that file: changing
