@@ -1,0 +1,2148 @@
+{
+  "scored_at": "2026-10-17T14:29:21.607Z",
+  "commit_sha": "09f966f99036a4f91bda9846030fcc476e198299",
+  "git_dirty": true,
+  "model": "Cursor Grok 4.6",
+  "temperature": "not controllable",
+  "attempts_per_question_per_path": 5,
+  "gold": "tests/consistency/questions.ts rawSql executed on demo DuckDB",
+  "questions": [
+    {
+      "question_id": "revenue_last_month",
+      "question": "What was Revenue last month?",
+      "gold_fingerprint": "answered:[[184230]]",
+      "gold_preview": "184230",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[184230]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 3,
+          "gold_matches": 3,
+          "fingerprints": [
+            "answered:[[184230]]",
+            "answered:[[597370.83]]",
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]"
+          ],
+          "kinds": {
+            "answered": 4,
+            "error": 1
+          }
+        }
+      }
+    },
+    {
+      "question_id": "orders_completed",
+      "question": "How many orders did we complete?",
+      "gold_fingerprint": "answered:[[1789]]",
+      "gold_preview": "1789",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[1789]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[1789]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "average_order_value",
+      "question": "What is our average order value?",
+      "gold_fingerprint": "answered:[[333.91326439351593]]",
+      "gold_preview": "333.91326439351593",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[333.91326439351593]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[333.91326439351593]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_q2",
+      "question": "What was Revenue in Q2?",
+      "gold_fingerprint": "answered:[[63165.23]]",
+      "gold_preview": "63165.23",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[63165.23]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 3,
+          "gold_matches": 3,
+          "fingerprints": [
+            "answered:[[63165.23]]",
+            "answered:[[597370.83]]",
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]"
+          ],
+          "kinds": {
+            "answered": 4,
+            "error": 1
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_last_quarter",
+      "question": "What was Revenue last quarter?",
+      "gold_fingerprint": "answered:[[421002.31]]",
+      "gold_preview": "421002.31",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[421002.31]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 3,
+          "gold_matches": 3,
+          "fingerprints": [
+            "answered:[[421002.31]]",
+            "answered:[[597370.83]]",
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]"
+          ],
+          "kinds": {
+            "answered": 4,
+            "error": 1
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_last_30d",
+      "question": "What was Revenue in the last 30 days?",
+      "gold_fingerprint": "answered:[[130670.59]]",
+      "gold_preview": "130670.59",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 3,
+          "gold_matches": 2,
+          "fingerprints": [
+            "answered:[[137894.79]]",
+            "answered:[[130670.59]]",
+            "answered:[[74575.87]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 3,
+          "gold_matches": 3,
+          "fingerprints": [
+            "answered:[[130670.59]]",
+            "answered:[[597370.83]]",
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]"
+          ],
+          "kinds": {
+            "answered": 4,
+            "error": 1
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_by_country",
+      "question": "Revenue by country.",
+      "gold_fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_preview": "UK | 174309.64 ; Germany | 133329.88 ; US | 127759.87 ; France | 66113.35 ; Spain | 52806.07 ; Netherlands | 43052.02",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_by_plan",
+      "question": "Revenue by customer plan.",
+      "gold_fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_preview": "starter | 240422.99 ; growth | 180565.94 ; enterprise | 176381.9",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_by_channel_last_month",
+      "question": "Revenue by sales channel last month.",
+      "gold_fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_preview": "web | 61928.7 ; mobile | 61394.72 ; partner | 60906.58",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 3,
+          "gold_matches": 3,
+          "fingerprints": [
+            "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+            "answered:[[\"mobile\",200473.05],[\"partner\",194870.12],[\"web\",202027.66]]",
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]"
+          ],
+          "kinds": {
+            "answered": 4,
+            "error": 1
+          }
+        }
+      }
+    },
+    {
+      "question_id": "payments_received_by_country",
+      "question": "How much did we collect in succeeded payments, by country?",
+      "gold_fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_preview": "UK | 174309.64 ; Germany | 133329.88 ; US | 127759.87 ; France | 66113.35 ; Spain | 52806.07 ; Netherlands | 43052.02",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+            "answered:[]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_and_payments",
+      "question": "Show revenue and payments received side by side.",
+      "gold_fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_preview": "597370.83 | 597370.83",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "answered:[[597370.83,597370.83]]",
+            "answered:[[597370.83,0]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[597370.83,597370.83]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "customers_total",
+      "question": "How many customers do we have?",
+      "gold_fingerprint": "answered:[[240]]",
+      "gold_preview": "240",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[240]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "answered:[[240]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "customers_ordered_last_month",
+      "question": "How many customers ordered last month?",
+      "gold_fingerprint": "answered:[[181]]",
+      "gold_preview": "181",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 5,
+          "fingerprints": [
+            "answered:[[181]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 4,
+          "gold_matches": 0,
+          "fingerprints": [
+            "answered:[[0]]",
+            "error:invalid Query Model: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"filters\",\n      0,\n      \"field\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]",
+            "answered:[[240]]",
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]"
+          ],
+          "kinds": {
+            "answered": 3,
+            "error": 2
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_by_product_category",
+      "question": "Revenue by product category.",
+      "gold_fingerprint": "answered:[[\"electronics\",222233.05],[\"home\",241112.49],[\"office\",232983.71],[\"outdoors\",238755.51],[\"toys\",235878.38]]",
+      "gold_preview": "home | 241112.49 ; outdoors | 238755.51 ; toys | 235878.38 ; office | 232983.71 ; electronics | 222233.05",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 1,
+          "gold_matches": 0,
+          "fingerprints": [
+            "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]"
+          ],
+          "kinds": {
+            "answered": 5
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 0,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "refused:unsafe_query"
+          ],
+          "kinds": {
+            "error": 1,
+            "refused": 4
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_by_ticket_category",
+      "question": "Revenue by support ticket category.",
+      "gold_fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
+      "gold_preview": "product | 479514.77 ; billing | 416734.51 ; shipping | 360445.59 ; account | 298878.45",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:support_tickets has no amount and no order_id; ticket category is not a revenue grain",
+            "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 5,
+          "gold_matches": 0,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "refused:undefined_dimension",
+            "answered:[[597370.83]]",
+            "refused:undefined_column",
+            "refused:unsafe_query"
+          ],
+          "kinds": {
+            "error": 1,
+            "refused": 3,
+            "answered": 1
+          }
+        }
+      }
+    },
+    {
+      "question_id": "revenue_by_checkout_event_type",
+      "question": "Revenue by checkout event type.",
+      "gold_fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
+      "gold_preview": "viewed | 597370.83 ; started | 597370.83 ; completed | 597370.83 ; retry | 247603.28",
+      "paths": {
+        "a_no_grane": {
+          "attempts": 5,
+          "distinct_answers": 2,
+          "gold_matches": 4,
+          "fingerprints": [
+            "error:checkout_events has no amount; joining to orders would duplicate net_amount across multiple events per order",
+            "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]"
+          ],
+          "kinds": {
+            "error": 1,
+            "answered": 4
+          }
+        },
+        "b_grane": {
+          "attempts": 5,
+          "distinct_answers": 5,
+          "gold_matches": 0,
+          "fingerprints": [
+            "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+            "refused:undefined_dimension",
+            "answered:[[597370.83]]",
+            "refused:undefined_column",
+            "refused:unsafe_query"
+          ],
+          "kinds": {
+            "error": 1,
+            "refused": 3,
+            "answered": 1
+          }
+        }
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-average_order_value.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[181]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-customers_ordered_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-customers_total.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-orders_completed.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-payments_received_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_and_payments.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "error:checkout_events has no amount; joining to orders would duplicate net_amount across multiple events per order",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_by_plan.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_by_product_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "error:support_tickets has no amount and no order_id; ticket category is not a revenue grain",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[137894.79]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_last_30d.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_last_quarter.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 1,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-01-revenue_q2.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-average_order_value.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[181]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-customers_ordered_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-customers_total.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-orders_completed.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-payments_received_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_and_payments.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_by_plan.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_by_product_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[137894.79]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_last_30d.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_last_quarter.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 2,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-02-revenue_q2.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-average_order_value.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[181]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-customers_ordered_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-customers_total.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-orders_completed.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-payments_received_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_and_payments.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_by_plan.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_by_product_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[130670.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_last_30d.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_last_quarter.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 3,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-03-revenue_q2.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-average_order_value.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[181]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-customers_ordered_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-customers_total.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-orders_completed.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-payments_received_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_and_payments.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_by_plan.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_by_product_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[74575.87]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_last_30d.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_last_quarter.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 4,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-04-revenue_q2.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-average_order_value.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[181]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-customers_ordered_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-customers_total.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-orders_completed.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-payments_received_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,0]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_and_payments.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_by_country.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_by_plan.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_by_product_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[130670.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_last_30d.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_last_month.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_last_quarter.json"
+    },
+    {
+      "path": "a_no_grane",
+      "attempt": 5,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/a-05-revenue_q2.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "average_order_value",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-average_order_value.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[0]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-customers_ordered_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "customers_total",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-customers_total.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "orders_completed",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-orders_completed.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-payments_received_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_and_payments.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_country",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_by_plan.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_by_product_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[130670.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_last_30d.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_last_quarter.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 1,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-01-revenue_q2.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-average_order_value.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[0]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-customers_ordered_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-customers_total.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-orders_completed.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-payments_received_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_and_payments.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "refused:undefined_dimension",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_by_plan.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "refused:unsafe_query",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_by_product_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "refused:undefined_dimension",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[130670.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_last_30d.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_last_quarter.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 2,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-02-revenue_q2.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-average_order_value.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"filters\",\n      0,\n      \"field\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-customers_ordered_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-customers_total.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-orders_completed.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-payments_received_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_and_payments.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "answered:[[597370.83]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_by_plan.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "refused:unsafe_query",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_by_product_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "answered:[[597370.83]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[130670.59]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_last_30d.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[184230]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[421002.31]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_last_quarter.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 3,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[63165.23]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-03-revenue_q2.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-average_order_value.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-customers_ordered_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-customers_total.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-orders_completed.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-payments_received_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_and_payments.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "answered:[[\"mobile\",200473.05],[\"partner\",194870.12],[\"web\",202027.66]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "refused:undefined_column",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_by_plan.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "refused:unsafe_query",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_by_product_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "refused:undefined_column",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "answered:[[597370.83]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_last_30d.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_last_month",
+      "fingerprint": "answered:[[597370.83]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "answered:[[597370.83]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_last_quarter.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 4,
+      "question_id": "revenue_q2",
+      "fingerprint": "answered:[[597370.83]]",
+      "gold_match": false,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-04-revenue_q2.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "average_order_value",
+      "fingerprint": "answered:[[333.91326439351593]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-average_order_value.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "customers_ordered_last_month",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-customers_ordered_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "customers_total",
+      "fingerprint": "answered:[[240]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-customers_total.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "orders_completed",
+      "fingerprint": "answered:[[1789]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-orders_completed.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "payments_received_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-payments_received_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_and_payments",
+      "fingerprint": "answered:[[597370.83,597370.83]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_and_payments.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_channel_last_month",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_by_channel_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_checkout_event_type",
+      "fingerprint": "refused:unsafe_query",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_by_checkout_event_type.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_country",
+      "fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_by_country.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_plan",
+      "fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
+      "gold_match": true,
+      "output_kind": "answered",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_by_plan.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_product_category",
+      "fingerprint": "refused:unsafe_query",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_by_product_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_by_ticket_category",
+      "fingerprint": "refused:unsafe_query",
+      "gold_match": false,
+      "output_kind": "refused",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_by_ticket_category.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_last_30d",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_last_30d.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_last_month",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_last_month.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_last_quarter",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_last_quarter.json"
+    },
+    {
+      "path": "b_grane",
+      "attempt": 5,
+      "question_id": "revenue_q2",
+      "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
+      "gold_match": false,
+      "output_kind": "error",
+      "gold_kind": "answered",
+      "transcript": "transcripts/b-05-revenue_q2.json"
+    }
+  ]
+}
