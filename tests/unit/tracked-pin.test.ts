@@ -850,9 +850,17 @@ describe("tracked pin two-clone (real CLI, no network)", () => {
     git(a, ["push", "origin", "main"]);
     git(b, ["fetch", "origin"]);
     const doctor = runCli(b, ["doctor", "--json"]);
-    const body = JSON.parse(doctor.stdout) as { ok: boolean; pin_warnings: string[]; config_hash: string };
+    const body = JSON.parse(doctor.stdout) as {
+      ok: boolean;
+      pin_warnings: string[];
+      config_hash: string;
+      branch_protection: { status: string; detail: string };
+    };
     expect(body.pin_warnings.join("\n")).toMatch(/origin\/main has grane\.pin\.json|Keeping the last good local pin/);
     expect(body.config_hash).toMatch(/^[0-9a-f]{16,}$/i);
+    expect(body.branch_protection.status).toBe("couldn't verify");
+    expect(body.branch_protection.detail).toMatch(/couldn't verify/);
+    expect(JSON.stringify(body.branch_protection)).not.toMatch(/"protected"/);
     expect(doctor.status).toBe(body.ok ? 0 : 1);
   });
 });

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Team setup + branch-protection check (T2).** `grane doctor` and
+  `grane setup` GET classic branch protection and repository rulesets for
+  the customer's `origin` (GitHub only). Token from `GITHUB_TOKEN`,
+  `GH_TOKEN`, or `gh auth token`. Warns once per missing setting (PR
+  required with >=1 approval, CODEOWNERS review for metric YAML and
+  `grane.pin.json`, dismiss stale approvals, require approval of the most
+  recent push, required status checks, branch up to date, no
+  force-push/deletion, no bypass). No token, 403, 404, network error,
+  `--offline`, or a non-GitHub remote is **couldn't verify** (never
+  "protected") and never fails doctor. Partial rulesets, unknown bypass
+  actors, and settings the API did not return are **couldn't verify** or
+  **missing**, not a pass. Grane never changes protection
+  settings. Guide: [docs/team-setup.md](docs/team-setup.md) (org-wide MCP
+  template: host/port/db/user, password via `${GRANE_DB_PASSWORD}` /
+  `${DATABASE_URL}`, never a literal in the shared file). `connection.*`
+  interpolates `${VAR}` in a single pass (env values are never treated as
+  templates; YAML URL userinfo `${VAR}` is always `encodeURIComponent`'d
+  from the raw bytes — never decode-then-re-encode; a complete env DSN is
+  the opt-out and is inserted as-is; unset variables stay at load so
+  offline validate / doctor / mcp doctor can run, and are refused at
+  connect naming only the variable). If you previously pre-encoded
+  passwords in a YAML URL template, store the raw value instead, or
+  move to `url: ${DATABASE_URL}` with a fully encoded DSN. Origin
+  parsing requires host `github.com` exactly.
 - **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
   same claim: “Snowflake is production-ready, not certified by us yet”
   fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase

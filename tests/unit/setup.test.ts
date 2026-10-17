@@ -52,12 +52,16 @@ function tempDir(): string {
   return dir;
 }
 
+function setupEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return { ...process.env, ...extra };
+}
+
 function runGraneCli(args: string[]): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("npx", ["tsx", "src/cli/index.ts", ...args], {
     cwd: process.cwd(),
     encoding: "utf8",
     timeout: 30_000,
-    env: process.env,
+    env: setupEnv(),
   });
   return {
     status: result.status ?? 1,
@@ -114,6 +118,7 @@ function importRun(dir: string, extra: RunSetupOptions = {}): Promise<SetupResul
     },
     ...extra,
     prompt,
+    env: extra.env ?? setupEnv(),
   });
 }
 
@@ -351,6 +356,7 @@ audit:
       offline: true,
       stdinIsTty: false,
       stdoutIsTty: false,
+      env: setupEnv(),
       io: { log: (line) => logs.push(line), error: () => undefined },
     });
     expect(result.path).toBe("import");
@@ -375,6 +381,7 @@ audit:
       activateOffline: true,
       stdinIsTty: true,
       stdoutIsTty: true,
+      env: setupEnv(),
       io: quiet,
     });
     expect(result.validated).toBe(true);
@@ -397,6 +404,7 @@ audit:
       importDir: dir,
       offline: true,
       stdinIsTty: false,
+      env: setupEnv(),
       io: quiet,
     });
     expect(result.validated).toBe(false);
@@ -960,7 +968,7 @@ audit:
     git(dir, ["commit", "-m", "invalid metric"]);
     const before = snapshotYaml(dir);
 
-    const loaded = loadConfig(dir);
+    const loaded = loadConfig(dir, { env: setupEnv() });
     const kernel = new GraneKernel(loaded.config, { projectDir: loaded.projectDir });
     const expected = formatValidateReport(kernel.validate(), {
       providers: kernel.serverInfo().semantic_providers,

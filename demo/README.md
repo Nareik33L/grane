@@ -16,6 +16,10 @@ Later `query` / `validate` / MCP commands use that DuckDB file. Docker is not re
 
 The 40-second walkthrough is [`why-revenue-fell.gif`](why-revenue-fell.gif) (still: [`why-revenue-fell.svg`](why-revenue-fell.svg)).
 
+This demo is a local shop. When you share YAML with a team, use a GitHub
+repo and the settings in [docs/team-setup.md](../docs/team-setup.md) —
+Grane does not turn branch protection on for you.
+
 Then ask an agent:
 
 > Why did Revenue fall last month?

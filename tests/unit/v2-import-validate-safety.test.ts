@@ -61,7 +61,7 @@ function runCli(args: string[]): { status: number; stdout: string; stderr: strin
     cwd: process.cwd(),
     encoding: "utf8",
     timeout: 30_000,
-    env: process.env,
+    env: { ...process.env },
   });
   return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
@@ -86,6 +86,7 @@ describe("import/validate never pin and never overwrite originals", () => {
       offline: true,
       stdinIsTty: false,
       stdoutIsTty: false,
+      env: { ...process.env },
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: { log: () => undefined, error: () => undefined },
@@ -115,6 +116,7 @@ describe("import/validate never pin and never overwrite originals", () => {
       offline: true,
       stdinIsTty: false,
       stdoutIsTty: false,
+      env: { ...process.env },
       homeDir: tempDir(),
       workspaceDir: tempDir(),
       io: { log: () => undefined, error: () => undefined },

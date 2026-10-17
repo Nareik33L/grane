@@ -16,6 +16,8 @@ npx grane-analytics setup   # after 0.7.0 is on npm
 
 That path does not need your warehouse. Details: [demo/README.md](../demo/README.md).
 Drafting new metrics as a GitHub PR: [v2-authoring.md](v2-authoring.md).
+Sharing the project with a team (branch protection, CODEOWNERS, approve /
+pull): [team-setup.md](team-setup.md).
 
 **Already have dbt/MetricFlow (or Cube, LookML, Ossie, Malloy)?** Do not
 recreate metrics here. Run `grane init --provider ../your_project`, set the
