@@ -1,0 +1,66 @@
+[
+  {
+    "id": "revenue_last_month",
+    "sql": "WITH as_of AS (\n  SELECT max(greatest(created_at, completed_at)) AS ts FROM orders\n)\nSELECT COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nCROSS JOIN as_of\nWHERE o.status = 'completed'\n  AND date_trunc('month', o.completed_at) = date_trunc('month', as_of.ts) - INTERVAL 1 MONTH"
+  },
+  {
+    "id": "orders_completed",
+    "sql": "SELECT COUNT(*) AS orders_completed\nFROM orders o\nWHERE o.status = 'completed'"
+  },
+  {
+    "id": "average_order_value",
+    "sql": "SELECT AVG(o.net_amount) AS average_order_value\nFROM orders o\nWHERE o.status = 'completed'"
+  },
+  {
+    "id": "revenue_q2",
+    "sql": "WITH as_of AS (\n  SELECT max(greatest(created_at, completed_at)) AS ts FROM orders\n)\nSELECT COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nCROSS JOIN as_of\nWHERE o.status = 'completed'\n  AND EXTRACT(quarter FROM o.completed_at) = 2\n  AND EXTRACT(year FROM o.completed_at) = EXTRACT(year FROM as_of.ts)"
+  },
+  {
+    "id": "revenue_last_quarter",
+    "sql": "WITH as_of AS (\n  SELECT max(greatest(created_at, completed_at)) AS ts FROM orders\n)\nSELECT COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nCROSS JOIN as_of\nWHERE o.status = 'completed'\n  AND date_trunc('quarter', o.completed_at) = date_trunc('quarter', as_of.ts) - INTERVAL 3 MONTH"
+  },
+  {
+    "id": "revenue_last_30d",
+    "sql": "WITH as_of AS (\n  SELECT max(greatest(created_at, completed_at)) AS ts FROM orders\n)\nSELECT COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nCROSS JOIN as_of\nWHERE o.status = 'completed'\n  AND o.completed_at > as_of.ts - INTERVAL 30 DAY\n  AND o.completed_at <= as_of.ts"
+  },
+  {
+    "id": "revenue_by_country",
+    "sql": "SELECT c.country, COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE o.status = 'completed'\nGROUP BY c.country"
+  },
+  {
+    "id": "revenue_by_plan",
+    "sql": "SELECT c.plan, COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE o.status = 'completed'\nGROUP BY c.plan"
+  },
+  {
+    "id": "revenue_by_channel_last_month",
+    "sql": "WITH as_of AS (\n  SELECT max(greatest(created_at, completed_at)) AS ts FROM orders\n)\nSELECT o.channel, COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM orders o\nCROSS JOIN as_of\nWHERE o.status = 'completed'\n  AND date_trunc('month', o.completed_at) = date_trunc('month', as_of.ts) - INTERVAL 1 MONTH\nGROUP BY o.channel"
+  },
+  {
+    "id": "payments_received_by_country",
+    "sql": "SELECT c.country, COALESCE(SUM(p.amount), 0) AS payments_received\nFROM payments p\nJOIN orders o ON o.id = p.order_id\nJOIN customers c ON c.id = o.customer_id\nWHERE p.status = 'received'\nGROUP BY c.country"
+  },
+  {
+    "id": "revenue_and_payments",
+    "sql": "SELECT\n  (SELECT COALESCE(SUM(net_amount), 0) FROM orders WHERE status = 'completed') AS revenue,\n  (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'received') AS payments_received"
+  },
+  {
+    "id": "customers_total",
+    "sql": "SELECT COUNT(*) AS customers_total\nFROM customers"
+  },
+  {
+    "id": "customers_ordered_last_month",
+    "sql": "WITH as_of AS (\n  SELECT max(greatest(created_at, completed_at)) AS ts FROM orders\n)\nSELECT COUNT(DISTINCT o.customer_id) AS customers_ordered\nFROM orders o\nCROSS JOIN as_of\nWHERE date_trunc('month', o.created_at) = date_trunc('month', as_of.ts) - INTERVAL 1 MONTH"
+  },
+  {
+    "id": "revenue_by_product_category",
+    "sql": "SELECT p.category, COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS revenue\nFROM order_items oi\nJOIN products p ON p.id = oi.product_id\nJOIN orders o ON o.id = oi.order_id\nWHERE o.status = 'completed'\nGROUP BY p.category"
+  },
+  {
+    "id": "revenue_by_ticket_category",
+    "sql": "SELECT t.category AS ticket_category, COALESCE(SUM(r.revenue), 0) AS revenue\nFROM (SELECT DISTINCT customer_id, category FROM support_tickets) t\nJOIN (\n  SELECT customer_id, SUM(net_amount) AS revenue\n  FROM orders\n  WHERE status = 'completed'\n  GROUP BY customer_id\n) r ON r.customer_id = t.customer_id\nGROUP BY t.category"
+  },
+  {
+    "id": "revenue_by_checkout_event_type",
+    "sql": "SELECT ce.event_type, COALESCE(SUM(o.net_amount), 0) AS revenue\nFROM (SELECT DISTINCT order_id, event_type FROM checkout_events) ce\nJOIN orders o ON o.id = ce.order_id\nWHERE o.status = 'completed'\nGROUP BY ce.event_type"
+  }
+]

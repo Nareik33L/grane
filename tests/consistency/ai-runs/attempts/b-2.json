@@ -1,0 +1,111 @@
+[
+  {
+    "id": "revenue_last_month",
+    "query": {
+      "metrics": ["revenue"],
+      "time": { "period": "last_month" }
+    }
+  },
+  {
+    "id": "orders_completed",
+    "query": {
+      "metrics": ["orders"]
+    }
+  },
+  {
+    "id": "average_order_value",
+    "query": {
+      "metrics": ["average_order_value"]
+    }
+  },
+  {
+    "id": "revenue_q2",
+    "query": {
+      "metrics": ["revenue"],
+      "time": { "period": "q2" }
+    }
+  },
+  {
+    "id": "revenue_last_quarter",
+    "query": {
+      "metrics": ["revenue"],
+      "time": { "period": "last_quarter" }
+    }
+  },
+  {
+    "id": "revenue_last_30d",
+    "query": {
+      "metrics": ["revenue"],
+      "time": { "period": "30d" }
+    }
+  },
+  {
+    "id": "revenue_by_country",
+    "query": {
+      "metrics": ["revenue"],
+      "dimensions": ["country"]
+    }
+  },
+  {
+    "id": "revenue_by_plan",
+    "query": {
+      "metrics": ["revenue"],
+      "dimensions": ["plan"]
+    }
+  },
+  {
+    "id": "revenue_by_channel_last_month",
+    "query": {
+      "metrics": ["revenue"],
+      "dimensions": ["channel"],
+      "time": { "period": "last_month" }
+    }
+  },
+  {
+    "id": "payments_received_by_country",
+    "query": {
+      "metrics": ["payments_received"],
+      "dimensions": ["country"]
+    }
+  },
+  {
+    "id": "revenue_and_payments",
+    "query": {
+      "metrics": ["revenue", "payments_received"]
+    }
+  },
+  {
+    "id": "customers_total",
+    "query": {
+      "metrics": ["customers"]
+    }
+  },
+  {
+    "id": "customers_ordered_last_month",
+    "query": {
+      "metrics": ["customers"],
+      "time": { "period": "last_month" }
+    }
+  },
+  {
+    "id": "revenue_by_product_category",
+    "query": {
+      "metrics": ["revenue"],
+      "dimensions": ["product_category"]
+    }
+  },
+  {
+    "id": "revenue_by_ticket_category",
+    "query": {
+      "metrics": ["revenue"],
+      "dimensions": ["support_tickets.category"]
+    }
+  },
+  {
+    "id": "revenue_by_checkout_event_type",
+    "query": {
+      "metrics": ["revenue"],
+      "dimensions": ["checkout_events.event_type"]
+    }
+  }
+]
