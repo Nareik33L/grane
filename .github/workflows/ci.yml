@@ -1,9 +1,27 @@
 name: CI
 
+# pull_request covers open PRs. push on main covers merges.
+# push on cursor/** covers agent branches when pull_request.synchronize
+# does not fire. Same-SHA push + pull_request share a concurrency group
+# so they do not double-run.
+#
+# This workflow must not use repository secrets (secrets.*). cursor/**
+# push is not a secrets-safe path. certify-cloud.yml is unchanged: it
+# runs only on labeled PRs, schedule, and workflow_dispatch, never on
+# push, so GRANE_CERT_* never flows to cursor/** pushes.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "cursor/**"
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
