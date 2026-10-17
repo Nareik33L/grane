@@ -1,15 +1,16 @@
 {
-  "scored_at": "2026-10-17T14:29:21.607Z",
-  "commit_sha": "09f966f99036a4f91bda9846030fcc476e198299",
-  "git_dirty": true,
+  "scored_at": "2026-10-17T14:39:37.484Z",
+  "commit_sha": "f00a86ee7f156e172ee7ff4fbac6c9c8f47bc1fa",
+  "git_dirty": false,
   "model": "Cursor Grok 4.6",
   "temperature": "not controllable",
   "attempts_per_question_per_path": 5,
-  "gold": "tests/consistency/questions.ts rawSql executed on demo DuckDB",
+  "gold": "tests/consistency/questions.ts expected outcome (match value / unsafe_query / governed value)",
   "questions": [
     {
       "question_id": "revenue_last_month",
       "question": "What was Revenue last month?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[184230]]",
       "gold_preview": "184230",
       "paths": {
@@ -43,6 +44,7 @@
     {
       "question_id": "orders_completed",
       "question": "How many orders did we complete?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[1789]]",
       "gold_preview": "1789",
       "paths": {
@@ -75,6 +77,7 @@
     {
       "question_id": "average_order_value",
       "question": "What is our average order value?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[333.91326439351593]]",
       "gold_preview": "333.91326439351593",
       "paths": {
@@ -107,6 +110,7 @@
     {
       "question_id": "revenue_q2",
       "question": "What was Revenue in Q2?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[63165.23]]",
       "gold_preview": "63165.23",
       "paths": {
@@ -140,6 +144,7 @@
     {
       "question_id": "revenue_last_quarter",
       "question": "What was Revenue last quarter?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[421002.31]]",
       "gold_preview": "421002.31",
       "paths": {
@@ -173,6 +178,7 @@
     {
       "question_id": "revenue_last_30d",
       "question": "What was Revenue in the last 30 days?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[130670.59]]",
       "gold_preview": "130670.59",
       "paths": {
@@ -208,8 +214,9 @@
     {
       "question_id": "revenue_by_country",
       "question": "Revenue by country.",
+      "expect": "match",
       "gold_fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
-      "gold_preview": "UK | 174309.64 ; Germany | 133329.88 ; US | 127759.87 ; France | 66113.35 ; Spain | 52806.07 ; Netherlands | 43052.02",
+      "gold_preview": "France | 66113.35 ; Germany | 133329.88 ; Netherlands | 43052.02 ; Spain | 52806.07 ; UK | 174309.64 ; US | 127759.87",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
@@ -240,8 +247,9 @@
     {
       "question_id": "revenue_by_plan",
       "question": "Revenue by customer plan.",
+      "expect": "match",
       "gold_fingerprint": "answered:[[\"enterprise\",176381.9],[\"growth\",180565.94],[\"starter\",240422.99]]",
-      "gold_preview": "starter | 240422.99 ; growth | 180565.94 ; enterprise | 176381.9",
+      "gold_preview": "enterprise | 176381.9 ; growth | 180565.94 ; starter | 240422.99",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
@@ -272,8 +280,9 @@
     {
       "question_id": "revenue_by_channel_last_month",
       "question": "Revenue by sales channel last month.",
+      "expect": "match",
       "gold_fingerprint": "answered:[[\"mobile\",61394.72],[\"partner\",60906.58],[\"web\",61928.7]]",
-      "gold_preview": "web | 61928.7 ; mobile | 61394.72 ; partner | 60906.58",
+      "gold_preview": "mobile | 61394.72 ; partner | 60906.58 ; web | 61928.7",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
@@ -305,8 +314,9 @@
     {
       "question_id": "payments_received_by_country",
       "question": "How much did we collect in succeeded payments, by country?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[\"France\",66113.35],[\"Germany\",133329.88],[\"Netherlands\",43052.02],[\"Spain\",52806.07],[\"UK\",174309.64],[\"US\",127759.87]]",
-      "gold_preview": "UK | 174309.64 ; Germany | 133329.88 ; US | 127759.87 ; France | 66113.35 ; Spain | 52806.07 ; Netherlands | 43052.02",
+      "gold_preview": "France | 66113.35 ; Germany | 133329.88 ; Netherlands | 43052.02 ; Spain | 52806.07 ; UK | 174309.64 ; US | 127759.87",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
@@ -338,6 +348,7 @@
     {
       "question_id": "revenue_and_payments",
       "question": "Show revenue and payments received side by side.",
+      "expect": "match",
       "gold_fingerprint": "answered:[[597370.83,597370.83]]",
       "gold_preview": "597370.83 | 597370.83",
       "paths": {
@@ -371,6 +382,7 @@
     {
       "question_id": "customers_total",
       "question": "How many customers do we have?",
+      "expect": "match",
       "gold_fingerprint": "answered:[[240]]",
       "gold_preview": "240",
       "paths": {
@@ -403,13 +415,14 @@
     {
       "question_id": "customers_ordered_last_month",
       "question": "How many customers ordered last month?",
-      "gold_fingerprint": "answered:[[181]]",
-      "gold_preview": "181",
+      "expect": "mismatch",
+      "gold_fingerprint": "answered:[[0]]",
+      "gold_preview": "0",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
           "distinct_answers": 1,
-          "gold_matches": 5,
+          "gold_matches": 0,
           "fingerprints": [
             "answered:[[181]]"
           ],
@@ -420,7 +433,7 @@
         "b_grane": {
           "attempts": 5,
           "distinct_answers": 4,
-          "gold_matches": 0,
+          "gold_matches": 2,
           "fingerprints": [
             "answered:[[0]]",
             "error:invalid Query Model: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"filters\",\n      0,\n      \"field\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]",
@@ -437,8 +450,9 @@
     {
       "question_id": "revenue_by_product_category",
       "question": "Revenue by product category.",
-      "gold_fingerprint": "answered:[[\"electronics\",222233.05],[\"home\",241112.49],[\"office\",232983.71],[\"outdoors\",238755.51],[\"toys\",235878.38]]",
-      "gold_preview": "home | 241112.49 ; outdoors | 238755.51 ; toys | 235878.38 ; office | 232983.71 ; electronics | 222233.05",
+      "expect": "grane_refuses",
+      "gold_fingerprint": "refused:unsafe_query",
+      "gold_preview": "unsafe_query",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
@@ -454,7 +468,7 @@
         "b_grane": {
           "attempts": 5,
           "distinct_answers": 2,
-          "gold_matches": 0,
+          "gold_matches": 4,
           "fingerprints": [
             "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
             "refused:unsafe_query"
@@ -469,13 +483,14 @@
     {
       "question_id": "revenue_by_ticket_category",
       "question": "Revenue by support ticket category.",
-      "gold_fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
-      "gold_preview": "product | 479514.77 ; billing | 416734.51 ; shipping | 360445.59 ; account | 298878.45",
+      "expect": "grane_refuses",
+      "gold_fingerprint": "refused:unsafe_query",
+      "gold_preview": "unsafe_query",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
           "distinct_answers": 2,
-          "gold_matches": 4,
+          "gold_matches": 0,
           "fingerprints": [
             "error:support_tickets has no amount and no order_id; ticket category is not a revenue grain",
             "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]"
@@ -488,7 +503,7 @@
         "b_grane": {
           "attempts": 5,
           "distinct_answers": 5,
-          "gold_matches": 0,
+          "gold_matches": 1,
           "fingerprints": [
             "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
             "refused:undefined_dimension",
@@ -507,13 +522,14 @@
     {
       "question_id": "revenue_by_checkout_event_type",
       "question": "Revenue by checkout event type.",
-      "gold_fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
-      "gold_preview": "viewed | 597370.83 ; started | 597370.83 ; completed | 597370.83 ; retry | 247603.28",
+      "expect": "grane_refuses",
+      "gold_fingerprint": "refused:unsafe_query",
+      "gold_preview": "unsafe_query",
       "paths": {
         "a_no_grane": {
           "attempts": 5,
           "distinct_answers": 2,
-          "gold_matches": 4,
+          "gold_matches": 0,
           "fingerprints": [
             "error:checkout_events has no amount; joining to orders would duplicate net_amount across multiple events per order",
             "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]"
@@ -526,7 +542,7 @@
         "b_grane": {
           "attempts": 5,
           "distinct_answers": 5,
-          "gold_matches": 0,
+          "gold_matches": 1,
           "fingerprints": [
             "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
             "refused:undefined_dimension",
@@ -552,6 +568,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-average_order_value.json"
     },
     {
@@ -559,9 +576,10 @@
       "attempt": 1,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[181]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/a-01-customers_ordered_last_month.json"
     },
     {
@@ -572,6 +590,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-customers_total.json"
     },
     {
@@ -582,6 +601,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-orders_completed.json"
     },
     {
@@ -592,6 +612,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-payments_received_by_country.json"
     },
     {
@@ -602,6 +623,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_and_payments.json"
     },
     {
@@ -612,6 +634,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_by_channel_last_month.json"
     },
     {
@@ -621,7 +644,8 @@
       "fingerprint": "error:checkout_events has no amount; joining to orders would duplicate net_amount across multiple events per order",
       "gold_match": false,
       "output_kind": "error",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-01-revenue_by_checkout_event_type.json"
     },
     {
@@ -632,6 +656,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_by_country.json"
     },
     {
@@ -642,6 +667,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_by_plan.json"
     },
     {
@@ -651,7 +677,8 @@
       "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-01-revenue_by_product_category.json"
     },
     {
@@ -661,7 +688,8 @@
       "fingerprint": "error:support_tickets has no amount and no order_id; ticket category is not a revenue grain",
       "gold_match": false,
       "output_kind": "error",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-01-revenue_by_ticket_category.json"
     },
     {
@@ -672,6 +700,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_last_30d.json"
     },
     {
@@ -682,6 +711,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_last_month.json"
     },
     {
@@ -692,6 +722,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_last_quarter.json"
     },
     {
@@ -702,6 +733,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-01-revenue_q2.json"
     },
     {
@@ -712,6 +744,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-average_order_value.json"
     },
     {
@@ -719,9 +752,10 @@
       "attempt": 2,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[181]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/a-02-customers_ordered_last_month.json"
     },
     {
@@ -732,6 +766,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-customers_total.json"
     },
     {
@@ -742,6 +777,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-orders_completed.json"
     },
     {
@@ -752,6 +788,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-payments_received_by_country.json"
     },
     {
@@ -762,6 +799,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_and_payments.json"
     },
     {
@@ -772,6 +810,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_by_channel_last_month.json"
     },
     {
@@ -779,9 +818,10 @@
       "attempt": 2,
       "question_id": "revenue_by_checkout_event_type",
       "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-02-revenue_by_checkout_event_type.json"
     },
     {
@@ -792,6 +832,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_by_country.json"
     },
     {
@@ -802,6 +843,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_by_plan.json"
     },
     {
@@ -811,7 +853,8 @@
       "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-02-revenue_by_product_category.json"
     },
     {
@@ -819,9 +862,10 @@
       "attempt": 2,
       "question_id": "revenue_by_ticket_category",
       "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-02-revenue_by_ticket_category.json"
     },
     {
@@ -832,6 +876,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_last_30d.json"
     },
     {
@@ -842,6 +887,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_last_month.json"
     },
     {
@@ -852,6 +898,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_last_quarter.json"
     },
     {
@@ -862,6 +909,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-02-revenue_q2.json"
     },
     {
@@ -872,6 +920,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-average_order_value.json"
     },
     {
@@ -879,9 +928,10 @@
       "attempt": 3,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[181]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/a-03-customers_ordered_last_month.json"
     },
     {
@@ -892,6 +942,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-customers_total.json"
     },
     {
@@ -902,6 +953,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-orders_completed.json"
     },
     {
@@ -912,6 +964,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-payments_received_by_country.json"
     },
     {
@@ -922,6 +975,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_and_payments.json"
     },
     {
@@ -932,6 +986,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_by_channel_last_month.json"
     },
     {
@@ -939,9 +994,10 @@
       "attempt": 3,
       "question_id": "revenue_by_checkout_event_type",
       "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-03-revenue_by_checkout_event_type.json"
     },
     {
@@ -952,6 +1008,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_by_country.json"
     },
     {
@@ -962,6 +1019,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_by_plan.json"
     },
     {
@@ -971,7 +1029,8 @@
       "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-03-revenue_by_product_category.json"
     },
     {
@@ -979,9 +1038,10 @@
       "attempt": 3,
       "question_id": "revenue_by_ticket_category",
       "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-03-revenue_by_ticket_category.json"
     },
     {
@@ -992,6 +1052,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_last_30d.json"
     },
     {
@@ -1002,6 +1063,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_last_month.json"
     },
     {
@@ -1012,6 +1074,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_last_quarter.json"
     },
     {
@@ -1022,6 +1085,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-03-revenue_q2.json"
     },
     {
@@ -1032,6 +1096,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-average_order_value.json"
     },
     {
@@ -1039,9 +1104,10 @@
       "attempt": 4,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[181]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/a-04-customers_ordered_last_month.json"
     },
     {
@@ -1052,6 +1118,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-customers_total.json"
     },
     {
@@ -1062,6 +1129,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-orders_completed.json"
     },
     {
@@ -1072,6 +1140,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-payments_received_by_country.json"
     },
     {
@@ -1082,6 +1151,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_and_payments.json"
     },
     {
@@ -1092,6 +1162,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_by_channel_last_month.json"
     },
     {
@@ -1099,9 +1170,10 @@
       "attempt": 4,
       "question_id": "revenue_by_checkout_event_type",
       "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-04-revenue_by_checkout_event_type.json"
     },
     {
@@ -1112,6 +1184,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_by_country.json"
     },
     {
@@ -1122,6 +1195,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_by_plan.json"
     },
     {
@@ -1131,7 +1205,8 @@
       "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-04-revenue_by_product_category.json"
     },
     {
@@ -1139,9 +1214,10 @@
       "attempt": 4,
       "question_id": "revenue_by_ticket_category",
       "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-04-revenue_by_ticket_category.json"
     },
     {
@@ -1152,6 +1228,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_last_30d.json"
     },
     {
@@ -1162,6 +1239,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_last_month.json"
     },
     {
@@ -1172,6 +1250,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_last_quarter.json"
     },
     {
@@ -1182,6 +1261,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-04-revenue_q2.json"
     },
     {
@@ -1192,6 +1272,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-average_order_value.json"
     },
     {
@@ -1199,9 +1280,10 @@
       "attempt": 5,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[181]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/a-05-customers_ordered_last_month.json"
     },
     {
@@ -1212,6 +1294,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-customers_total.json"
     },
     {
@@ -1222,6 +1305,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-orders_completed.json"
     },
     {
@@ -1232,6 +1316,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-payments_received_by_country.json"
     },
     {
@@ -1242,6 +1327,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_and_payments.json"
     },
     {
@@ -1252,6 +1338,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_by_channel_last_month.json"
     },
     {
@@ -1259,9 +1346,10 @@
       "attempt": 5,
       "question_id": "revenue_by_checkout_event_type",
       "fingerprint": "answered:[[\"completed\",597370.83],[\"retry\",247603.28],[\"started\",597370.83],[\"viewed\",597370.83]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-05-revenue_by_checkout_event_type.json"
     },
     {
@@ -1272,6 +1360,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_by_country.json"
     },
     {
@@ -1282,6 +1371,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_by_plan.json"
     },
     {
@@ -1291,7 +1381,8 @@
       "fingerprint": "answered:[[\"electronics\",58977.31],[\"home\",64084.17],[\"office\",61459.97],[\"outdoors\",61037.41],[\"toys\",62827.2]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-05-revenue_by_product_category.json"
     },
     {
@@ -1299,9 +1390,10 @@
       "attempt": 5,
       "question_id": "revenue_by_ticket_category",
       "fingerprint": "answered:[[\"account\",298878.45],[\"billing\",416734.51],[\"product\",479514.77],[\"shipping\",360445.59]]",
-      "gold_match": true,
+      "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/a-05-revenue_by_ticket_category.json"
     },
     {
@@ -1312,6 +1404,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_last_30d.json"
     },
     {
@@ -1322,6 +1415,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_last_month.json"
     },
     {
@@ -1332,6 +1426,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_last_quarter.json"
     },
     {
@@ -1342,6 +1437,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/a-05-revenue_q2.json"
     },
     {
@@ -1352,6 +1448,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-average_order_value.json"
     },
     {
@@ -1359,9 +1456,10 @@
       "attempt": 1,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[0]]",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/b-01-customers_ordered_last_month.json"
     },
     {
@@ -1372,6 +1470,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-customers_total.json"
     },
     {
@@ -1382,6 +1481,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-orders_completed.json"
     },
     {
@@ -1392,6 +1492,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-payments_received_by_country.json"
     },
     {
@@ -1402,6 +1503,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_and_payments.json"
     },
     {
@@ -1412,6 +1514,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_by_channel_last_month.json"
     },
     {
@@ -1421,7 +1524,8 @@
       "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
       "gold_match": false,
       "output_kind": "error",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-01-revenue_by_checkout_event_type.json"
     },
     {
@@ -1432,6 +1536,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_by_country.json"
     },
     {
@@ -1442,6 +1547,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_by_plan.json"
     },
     {
@@ -1451,7 +1557,8 @@
       "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
       "gold_match": false,
       "output_kind": "error",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-01-revenue_by_product_category.json"
     },
     {
@@ -1461,7 +1568,8 @@
       "fingerprint": "error:invalid Query Model: [\n  {\n    \"code\": \"custom\",\n    \"message\": \"time requires period (e.g. last_month, 30d) or both from and to (YYYY-MM-DD)\",\n    \"path\": [\n      \"time\"\n    ]\n  }\n]",
       "gold_match": false,
       "output_kind": "error",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-01-revenue_by_ticket_category.json"
     },
     {
@@ -1472,6 +1580,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_last_30d.json"
     },
     {
@@ -1482,6 +1591,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_last_month.json"
     },
     {
@@ -1492,6 +1602,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_last_quarter.json"
     },
     {
@@ -1502,6 +1613,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-01-revenue_q2.json"
     },
     {
@@ -1512,6 +1624,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-average_order_value.json"
     },
     {
@@ -1519,9 +1632,10 @@
       "attempt": 2,
       "question_id": "customers_ordered_last_month",
       "fingerprint": "answered:[[0]]",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/b-02-customers_ordered_last_month.json"
     },
     {
@@ -1532,6 +1646,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-customers_total.json"
     },
     {
@@ -1542,6 +1657,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-orders_completed.json"
     },
     {
@@ -1552,6 +1668,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-payments_received_by_country.json"
     },
     {
@@ -1562,6 +1679,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_and_payments.json"
     },
     {
@@ -1572,6 +1690,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_by_channel_last_month.json"
     },
     {
@@ -1581,7 +1700,8 @@
       "fingerprint": "refused:undefined_dimension",
       "gold_match": false,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-02-revenue_by_checkout_event_type.json"
     },
     {
@@ -1592,6 +1712,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_by_country.json"
     },
     {
@@ -1602,6 +1723,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_by_plan.json"
     },
     {
@@ -1609,9 +1731,10 @@
       "attempt": 2,
       "question_id": "revenue_by_product_category",
       "fingerprint": "refused:unsafe_query",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-02-revenue_by_product_category.json"
     },
     {
@@ -1621,7 +1744,8 @@
       "fingerprint": "refused:undefined_dimension",
       "gold_match": false,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-02-revenue_by_ticket_category.json"
     },
     {
@@ -1632,6 +1756,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_last_30d.json"
     },
     {
@@ -1642,6 +1767,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_last_month.json"
     },
     {
@@ -1652,6 +1778,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_last_quarter.json"
     },
     {
@@ -1662,6 +1789,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-02-revenue_q2.json"
     },
     {
@@ -1672,6 +1800,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-average_order_value.json"
     },
     {
@@ -1682,6 +1811,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/b-03-customers_ordered_last_month.json"
     },
     {
@@ -1692,6 +1822,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-customers_total.json"
     },
     {
@@ -1702,6 +1833,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-orders_completed.json"
     },
     {
@@ -1712,6 +1844,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-payments_received_by_country.json"
     },
     {
@@ -1722,6 +1855,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_and_payments.json"
     },
     {
@@ -1732,6 +1866,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_by_channel_last_month.json"
     },
     {
@@ -1741,7 +1876,8 @@
       "fingerprint": "answered:[[597370.83]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-03-revenue_by_checkout_event_type.json"
     },
     {
@@ -1752,6 +1888,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_by_country.json"
     },
     {
@@ -1762,6 +1899,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_by_plan.json"
     },
     {
@@ -1769,9 +1907,10 @@
       "attempt": 3,
       "question_id": "revenue_by_product_category",
       "fingerprint": "refused:unsafe_query",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-03-revenue_by_product_category.json"
     },
     {
@@ -1781,7 +1920,8 @@
       "fingerprint": "answered:[[597370.83]]",
       "gold_match": false,
       "output_kind": "answered",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-03-revenue_by_ticket_category.json"
     },
     {
@@ -1792,6 +1932,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_last_30d.json"
     },
     {
@@ -1802,6 +1943,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_last_month.json"
     },
     {
@@ -1812,6 +1954,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_last_quarter.json"
     },
     {
@@ -1822,6 +1965,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-03-revenue_q2.json"
     },
     {
@@ -1832,6 +1976,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-average_order_value.json"
     },
     {
@@ -1842,6 +1987,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/b-04-customers_ordered_last_month.json"
     },
     {
@@ -1852,6 +1998,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-customers_total.json"
     },
     {
@@ -1862,6 +2009,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-orders_completed.json"
     },
     {
@@ -1872,6 +2020,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-payments_received_by_country.json"
     },
     {
@@ -1882,6 +2031,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_and_payments.json"
     },
     {
@@ -1892,6 +2042,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_by_channel_last_month.json"
     },
     {
@@ -1901,7 +2052,8 @@
       "fingerprint": "refused:undefined_column",
       "gold_match": false,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-04-revenue_by_checkout_event_type.json"
     },
     {
@@ -1912,6 +2064,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_by_country.json"
     },
     {
@@ -1922,6 +2075,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_by_plan.json"
     },
     {
@@ -1929,9 +2083,10 @@
       "attempt": 4,
       "question_id": "revenue_by_product_category",
       "fingerprint": "refused:unsafe_query",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-04-revenue_by_product_category.json"
     },
     {
@@ -1941,7 +2096,8 @@
       "fingerprint": "refused:undefined_column",
       "gold_match": false,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-04-revenue_by_ticket_category.json"
     },
     {
@@ -1952,6 +2108,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_last_30d.json"
     },
     {
@@ -1962,6 +2119,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_last_month.json"
     },
     {
@@ -1972,6 +2130,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_last_quarter.json"
     },
     {
@@ -1982,6 +2141,7 @@
       "gold_match": false,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-04-revenue_q2.json"
     },
     {
@@ -1992,6 +2152,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-average_order_value.json"
     },
     {
@@ -2002,6 +2163,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "mismatch",
       "transcript": "transcripts/b-05-customers_ordered_last_month.json"
     },
     {
@@ -2012,6 +2174,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-customers_total.json"
     },
     {
@@ -2022,6 +2185,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-orders_completed.json"
     },
     {
@@ -2032,6 +2196,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-payments_received_by_country.json"
     },
     {
@@ -2042,6 +2207,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_and_payments.json"
     },
     {
@@ -2052,6 +2218,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_by_channel_last_month.json"
     },
     {
@@ -2059,9 +2226,10 @@
       "attempt": 5,
       "question_id": "revenue_by_checkout_event_type",
       "fingerprint": "refused:unsafe_query",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-05-revenue_by_checkout_event_type.json"
     },
     {
@@ -2072,6 +2240,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_by_country.json"
     },
     {
@@ -2082,6 +2251,7 @@
       "gold_match": true,
       "output_kind": "answered",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_by_plan.json"
     },
     {
@@ -2089,9 +2259,10 @@
       "attempt": 5,
       "question_id": "revenue_by_product_category",
       "fingerprint": "refused:unsafe_query",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-05-revenue_by_product_category.json"
     },
     {
@@ -2099,9 +2270,10 @@
       "attempt": 5,
       "question_id": "revenue_by_ticket_category",
       "fingerprint": "refused:unsafe_query",
-      "gold_match": false,
+      "gold_match": true,
       "output_kind": "refused",
-      "gold_kind": "answered",
+      "gold_kind": "refused",
+      "gold_expect": "grane_refuses",
       "transcript": "transcripts/b-05-revenue_by_ticket_category.json"
     },
     {
@@ -2112,6 +2284,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_last_30d.json"
     },
     {
@@ -2122,6 +2295,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_last_month.json"
     },
     {
@@ -2132,6 +2306,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_last_quarter.json"
     },
     {
@@ -2142,6 +2317,7 @@
       "gold_match": false,
       "output_kind": "error",
       "gold_kind": "answered",
+      "gold_expect": "match",
       "transcript": "transcripts/b-05-revenue_q2.json"
     }
   ]
