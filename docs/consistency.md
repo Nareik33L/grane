@@ -74,6 +74,10 @@ invent Postgres numbers.
 
 ## Recorded results
 
+First recorded run on this branch:
+[`tests/consistency/results/consistency-20261017T141326.492Z-1c46559eb715.json`](../tests/consistency/results/consistency-20261017T141326.492Z-1c46559eb715.json)
+(`ran_at` 2026-10-17T14:13:26.492Z, `commit_sha` `1c46559eb715e658e519569e0fce03bf342e69a0`, DuckDB v1.5.5 and PostgreSQL 16.15). Open that file for the numbers. This paragraph does not restate them.
+
 Each `--write` run commits (when you git-add them):
 
 - one JSON file named `consistency-<UTC timestamp>-<sha12>.json`
