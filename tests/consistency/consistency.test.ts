@@ -48,6 +48,7 @@ describe("Grane vs independent SQL consistency", { timeout: 120_000, hookTimeout
     }
 
     const committed = loadCommittedReport();
+    expect(committed.git_dirty, "committed.json must be recorded on a clean tree").toBe(false);
     const committedDuck = committed.engines.find((e) => e.engine === "duckdb" && e.status === "ran");
     expect(committedDuck, "committed.json missing DuckDB run").toBeTruthy();
     const drift = allTimeDrift(duck!, committedDuck!);

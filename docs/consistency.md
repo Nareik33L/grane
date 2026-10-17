@@ -78,20 +78,19 @@ invent Postgres numbers.
 
 ## Recorded results
 
-QA re-record on this branch:
-[`tests/consistency/results/consistency-20261017T142349.165Z-54404699eb8a.json`](../tests/consistency/results/consistency-20261017T142349.165Z-54404699eb8a.json)
-(`ran_at` 2026-10-17T14:23:49.165Z, `commit_sha` `54404699eb8a07f244a88e1adf2dd1aa245791a2`, DuckDB v1.5.5 and local PostgreSQL 16.15). Classification: 12 match, 3 refuse, 1 mismatch. Open the JSON for every cell.
+The snapshot is [`tests/consistency/results/committed.json`](../tests/consistency/results/committed.json)
+(DuckDB v1.5.5 and local PostgreSQL 16.15). Classification: 12 match, 3 refuse,
+1 mismatch. Open the JSON for every cell.
 
-`--write` also copies the report to
-[`tests/consistency/results/committed.json`](../tests/consistency/results/committed.json).
 All-time questions (no relative period) are checked against that file: changing
 a committed cell must fail the suite. Time-windowed questions are re-executed
 live and are not locked to the snapshot, because the seed is `CURRENT_DATE`-relative.
 
-Each `--write` run also writes timestamped JSON/CSV (`consistency-<UTC>-<sha12>.*`).
-Every file includes `ran_at` and `commit_sha` (`git rev-parse HEAD` at execution;
-that revision may be the parent of the commit that adds the files). `git_dirty`
-is true when the tree was not clean.
+Each `--write` run also writes timestamped JSON/CSV (`consistency-<UTC>-<sha12>.*`)
+and copies the same payload to `committed.json`. Every file includes `ran_at` and
+`commit_sha` (`git rev-parse HEAD` at execution; that revision is the parent of
+the commit that adds the files). `--write` refuses a dirty tree, so `git_dirty`
+is false.
 
 **Do not edit result files by hand.** Regenerated with `--write` only.
 

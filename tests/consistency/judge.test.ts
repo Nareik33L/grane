@@ -92,4 +92,12 @@ describe("consistency judge", () => {
     expect(judge(mismatchQ, graneRight, raw, governed).ok).toBe(true);
     expect(judge(mismatchQ, answered([[181]]), raw, governed).ok).toBe(false);
   });
+
+  it("mismatch fails when cells matched, so not a mismatch", () => {
+    const same = answered([[181]]);
+    const result = judge(mismatchQ, same, same, same);
+    expect(result.ok).toBe(false);
+    expect(result.tables_match).toBe(true);
+    expect(result.detail).toMatch(/cells matched/);
+  });
 });

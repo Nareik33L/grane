@@ -137,9 +137,22 @@ async function main(): Promise<void> {
   const engine =
     engineArg === "duckdb" || engineArg === "postgres" || engineArg === "all" ? engineArg : "all";
   const write = has("--write") || process.env.CONSISTENCY_WRITE === "1";
+  if (write) {
+    const { dirty } = gitHeadSha();
+    if (dirty) {
+      console.error("refusing --write: working tree is dirty. Commit first so git_dirty is false.");
+      process.exitCode = 1;
+      return;
+    }
+  }
   const report = await runConsistency({ engine });
   printReport(report);
   if (write) {
+    if (report.git_dirty) {
+      console.error("refusing to write results with git_dirty true.");
+      process.exitCode = 1;
+      return;
+    }
     const written = writeReport(report);
     console.log(`wrote ${written.json}`);
     for (const csv of written.csv) console.log(`wrote ${csv}`);
