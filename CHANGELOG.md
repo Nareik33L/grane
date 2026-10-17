@@ -12,6 +12,14 @@
   list markers. Sentence splits skip e.g. / i.e. / etc. / vs. A
   parenthetical self-certify does not deny certified. No publish, tag, or
   tokens.
+- **Governed vs independent SQL consistency (Release 1 item 5).** Same demo
+  shop questions are asked two ways: (a) `GraneKernel.query` (the MCP `query`
+  path) and (b) handwritten warehouse SQL with no Grane. Runs against the
+  demo DuckDB seed and certified CI Postgres 16 (isolated schema). Raw
+  answers are recorded under `tests/consistency/results/` with `ran_at` and
+  the git SHA. Rerun with `npm run test:consistency` or
+  `npx tsx tests/consistency/run.ts --write`. Method:
+  [docs/consistency.md](docs/consistency.md). No publish, tag, or tokens.
 - **Honest OSS README (Release 1 item 3).** README warehouse matrix matches
   `WAREHOUSE_CERTIFICATION`: PostgreSQL 16, MySQL 8, DuckDB 1.5, and
   ClickHouse 24 are certified.
