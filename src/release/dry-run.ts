@@ -15,9 +15,6 @@ import { fileURLToPath } from "node:url";
 
 export const PACKAGE_NAME = "grane-analytics";
 
-/** Named RC: tip of `main` at the R1-4 cut. Full 40-character SHA. */
-export const RC_MAIN_SHA = "5f97528c0ff25f62ea5bfed70ee201b3ccfce662";
-
 /** AI prepares, QA certifies, Kieran publishes. */
 export const RELEASE_OWNERS = ["AI", "QA", "Kieran"] as const;
 export type ReleaseOwner = (typeof RELEASE_OWNERS)[number];

@@ -9,7 +9,6 @@ import {
   NPM_PACK_ARGV,
   PACKAGE_NAME,
   PACK_ALLOW_PATTERNS,
-  RC_MAIN_SHA,
   RELEASE_OWNERS,
   assertCertifyCloudPinsDispatchRef,
   assertNoPackLifecycleScripts,
@@ -565,8 +564,8 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(checklist).toMatch(/Cut the RC from main/);
     expect(checklist).toMatch(/git fetch origin main/);
     expect(checklist).toMatch(/src\/release\/dry-run\.ts --sha/);
-    expect(RC_MAIN_SHA).toBe("5f97528c0ff25f62ea5bfed70ee201b3ccfce662");
-    expect(checklist).toContain(RC_MAIN_SHA);
+    expect(checklist).toMatch(/to be cut from main after #110 merges/);
+    expect(checklist).not.toMatch(/[0-9a-f]{40}/);
     expect(checklist).toMatch(/the \*\*AI prepares\*\*/i);
     expect(checklist).toMatch(/\*\*QA certifies\*\*/i);
     expect(checklist).toMatch(/\*\*Kieran\s+publishes\*\*/i);
@@ -575,6 +574,8 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(checklist).toMatch(/QA/);
     expect(checklist).toMatch(/#110/);
     expect(checklist).toMatch(/not merged yet/);
+    expect(checklist).toMatch(/team setup guide/);
+    expect(checklist).toMatch(/branch-protection check/);
     expect(checklist).toMatch(/npm pack --dry-run --ignore-scripts/);
     expect(checklist).toMatch(/allowlist/);
     expect(checklist).toMatch(/transcripts/);

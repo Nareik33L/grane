@@ -13,18 +13,19 @@ publishes**.
 
 ## Cut the RC from main (owner: AI)
 
-The RC is the tip of `main` at this cut — never a feature branch:
+The RC is **to be cut from main after #110 merges**. Release 1 includes
+the team setup guide (`docs/team-setup.md`) and the read-only
+branch-protection check, which land in
+[#110](https://github.com/Nareik33L/grane/pull/110) (T2). That PR is
+**not merged yet**, so do not pin an RC SHA from today's `main`.
 
-**`5f97528c0ff25f62ea5bfed70ee201b3ccfce662`**
-
-[#110](https://github.com/Nareik33L/grane/pull/110) (T2 read-only
-branch-protection check and `docs/team-setup.md`) is **not merged yet**.
-This RC does not include that work.
+When #110 is on `main`, the AI prepares by cutting the tip of `main` —
+never a feature branch — and pinning every later command to that
+40-character SHA:
 
 ```bash
 git fetch origin main
-RC=5f97528c0ff25f62ea5bfed70ee201b3ccfce662
-test "$(git rev-parse origin/main)" = "$RC"
+RC=$(git rev-parse origin/main)   # full 40-character SHA
 git checkout "$RC"
 npx tsx src/release/dry-run.ts --sha "$RC"
 # or: npm run release:dry-run -- --sha "$RC"
