@@ -30,6 +30,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:benchmark": "vitest run tests/benchmark tests/demo",
+    "test:consistency": "vitest run tests/consistency",
+    "consistency:run": "tsx tests/consistency/run.ts",
     "test:gauntlet": "vitest run tests/gauntlet",
     "test:v2-compat": "tsx tests/certification/compare-v2-compat.ts",
     "certify": "tsx src/cli/index.ts certify",
