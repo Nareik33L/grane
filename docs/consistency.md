@@ -102,3 +102,17 @@ is false.
 - Not live MCP HTTP in this suite: path (a) is `GraneKernel.query`, which is
   what `src/mcp/server.ts` registers as the `query` tool. Spinning an HTTP
   server is not required to exercise that path.
+
+## AI answer consistency (Release 1 item 5b)
+
+Same 16 questions as above, asked of this model (`Cursor Grok 4.6`) two ways,
+five times each:
+
+| path | what the model saw | what was executed |
+| ---- | ------------------- | ----------------- |
+| **A** | DuckDB DDL only. No metrics.yml, no Grane tools. | The model's SQL on demo DuckDB (`demo/seed/duckdb.sql`). |
+| **B** | Compiled Grane catalog JSON (metrics, dimensions, exploration columns, time periods). No warehouse DDL, no `query` HTTP server. | The model's Query Model v1 object through `GraneKernel.query` (same call the MCP `query` tool makes). |
+
+Exact prompts: [`tests/consistency/ai-runs/prompts/path-a.txt`](../tests/consistency/ai-runs/prompts/path-a.txt) and [`path-b.txt`](../tests/consistency/ai-runs/prompts/path-b.txt). Temperature is **not controllable** in this runtime (recorded as that string, not a guessed number). Attempt files under [`tests/consistency/ai-runs/attempts/`](../tests/consistency/ai-runs/attempts/) and per-question transcripts under [`transcripts/`](../tests/consistency/ai-runs/transcripts/) are unedited. Scoring is only [`npx tsx tests/consistency/ai-runs/score.ts`](../tests/consistency/ai-runs/score.ts) against #117's expected outcome per question (match value, `unsafe_query` refusal, or governed value) — not against the independent-SQL grain-trap numbers. The generated table is [`SUMMARY.md`](../tests/consistency/ai-runs/SUMMARY.md). Do not copy figures into this document.
+
+**Limits (this is not an independent lab study):** one model; temperature not controllable; each round asked all 16 questions in one prompt (within-round leakage); path B is `GraneKernel.query`, not a live MCP HTTP session; no API keys. The five rounds per path were isolated subagent contexts told not to read `questions.ts`. Identical prompts can still yield identical answers. The `attempts/*.json` “raw” replies are files the agent wrote, not API logs. Report only what SUMMARY.md shows, including any variance (or lack of it) on the Grane path.

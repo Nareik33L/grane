@@ -1,0 +1,114 @@
+You are answering analytics questions against a shop warehouse.
+You may ONLY use the DuckDB schema below. You do not have Grane, a semantic layer, metric YAML, sample rows, or previous answers.
+Do not read files. Do not use tools. Do not look up definitions. Write one DuckDB SELECT per question from this schema alone.
+
+Protocol for relative periods (last month, last 30 days, last quarter, Q2): they are relative to the newest timestamp in the warehouse (greatest of orders.created_at / orders.completed_at), not the machine clock. You may use a subquery or CTE to pin that "today". Inclusive start, exclusive end of the next day is acceptable.
+
+Return ONLY a JSON array, no markdown, of objects:
+  { "id": "<question id>", "sql": "<single DuckDB SELECT>" }
+One object per question, every id listed. If you cannot answer, still return the id with "sql": null and "error": "<reason>".
+
+Questions:
+- revenue_last_month: What was Revenue last month?
+- orders_completed: How many orders did we complete?
+- average_order_value: What is our average order value?
+- revenue_q2: What was Revenue in Q2?
+- revenue_last_quarter: What was Revenue last quarter?
+- revenue_last_30d: What was Revenue in the last 30 days?
+- revenue_by_country: Revenue by country.
+- revenue_by_plan: Revenue by customer plan.
+- revenue_by_channel_last_month: Revenue by sales channel last month.
+- payments_received_by_country: How much did we collect in succeeded payments, by country?
+- revenue_and_payments: Show revenue and payments received side by side.
+- customers_total: How many customers do we have?
+- customers_ordered_last_month: How many customers ordered last month?
+- revenue_by_product_category: Revenue by product category.
+- revenue_by_ticket_category: Revenue by support ticket category.
+- revenue_by_checkout_event_type: Revenue by checkout event type.
+
+Schema:
+-- Canonical Grane demo shop (DuckDB). Same shape as the Postgres seed.
+-- Foreign keys omitted so the file can be loaded without constraint order issues.
+-- Dates are relative to current_date so last_month always has the demo story.
+
+CREATE TABLE customers (
+  id INTEGER PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  email VARCHAR NOT NULL,
+  country VARCHAR NOT NULL,
+  customer_type VARCHAR NOT NULL,
+  plan VARCHAR NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE products (
+  id INTEGER PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  category VARCHAR NOT NULL,
+  price DECIMAL(10, 2) NOT NULL
+);
+
+CREATE TABLE orders (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL,
+  status VARCHAR NOT NULL,
+  channel VARCHAR NOT NULL,
+  net_amount DECIMAL(10, 2) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  paid_at TIMESTAMPTZ,
+  settled_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  refunded_at TIMESTAMPTZ,
+  payment_failure_code VARCHAR,
+  discount_code VARCHAR
+);
+
+CREATE TABLE order_items (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  quantity INTEGER NOT NULL,
+  unit_price DECIMAL(10, 2) NOT NULL
+);
+
+CREATE TABLE payments (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  status VARCHAR NOT NULL,
+  failure_code VARCHAR,
+  paid_at TIMESTAMPTZ NOT NULL,
+  settled_at TIMESTAMPTZ
+);
+
+CREATE TABLE refunds (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE subscriptions (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL,
+  plan VARCHAR NOT NULL,
+  status VARCHAR NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  cancelled_at TIMESTAMPTZ,
+  mrr DECIMAL(10, 2) NOT NULL
+);
+
+CREATE TABLE checkout_events (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL,
+  event_type VARCHAR NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE support_tickets (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL,
+  category VARCHAR NOT NULL,
+  status VARCHAR NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);

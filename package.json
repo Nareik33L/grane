@@ -32,6 +32,8 @@
     "test:benchmark": "vitest run tests/benchmark tests/demo",
     "test:consistency": "vitest run tests/consistency",
     "consistency:run": "tsx tests/consistency/run.ts",
+    "consistency:ai-record": "tsx tests/consistency/ai-runs/record.ts",
+    "consistency:ai-score": "tsx tests/consistency/ai-runs/score.ts",
     "test:gauntlet": "vitest run tests/gauntlet",
     "test:v2-compat": "tsx tests/certification/compare-v2-compat.ts",
     "certify": "tsx src/cli/index.ts certify",

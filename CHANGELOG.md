@@ -12,6 +12,16 @@
   list markers. Sentence splits skip e.g. / i.e. / etc. / vs. A
   parenthetical self-certify does not deny certified. No publish, tag, or
   tokens.
+- **AI vs independent SQL consistency (Release 1 item 5b).** Same 16 demo
+  questions, Cursor Grok 4.6, five attempts per question on path A (schema
+  only → SQL) and path B (catalog only → `GraneKernel.query`). Temperature
+  is recorded as not controllable. Unedited transcripts under
+  `tests/consistency/ai-runs/`. Scoring is generated only
+  (`npx tsx tests/consistency/ai-runs/score.ts`) against #117's expected
+  outcome per question (match, `unsafe_query` refusal, or governed value).
+  Method and limits: [docs/consistency.md](docs/consistency.md).
+  Generated table: [tests/consistency/ai-runs/SUMMARY.md](tests/consistency/ai-runs/SUMMARY.md).
+  No publish, tag, or tokens.
 - **Governed vs independent SQL consistency (Release 1 item 5).** Same demo
   shop questions are asked two ways: (a) `GraneKernel.query` (the MCP `query`
   path) and (b) handwritten warehouse SQL with no Grane and no

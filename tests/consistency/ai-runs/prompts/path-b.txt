@@ -1,0 +1,256 @@
+You are answering analytics questions through Grane's governed metrics path (the MCP query tool).
+You may ONLY produce Grane Query Model v1 requests from the catalog below. Do not write warehouse SQL. Do not read files. Do not use tools other than mentally calling catalog (already provided) and query.
+
+A query looks like:
+  { "metrics": ["revenue"], "dimensions": ["country"], "time": { "period": "last_month" }, "filters": [], "raw_dimensions": [] }
+time.period values include last_month, last_quarter, 30d, q2. Prefer period over computing dates.
+Use governed metric and dimension names from the catalog. raw_dimensions is table.column for permitted exploration columns. If the catalog cannot support a question safely, return a query you would still send (Grane will refuse) rather than SQL.
+
+Return ONLY a JSON array, no markdown, of objects:
+  { "id": "<question id>", "query": { "metrics": [...], ... } }
+One object per question, every id listed. If you cannot form a query, still return the id with "query": null and "error": "<reason>".
+
+Questions:
+- revenue_last_month: What was Revenue last month?
+- orders_completed: How many orders did we complete?
+- average_order_value: What is our average order value?
+- revenue_q2: What was Revenue in Q2?
+- revenue_last_quarter: What was Revenue last quarter?
+- revenue_last_30d: What was Revenue in the last 30 days?
+- revenue_by_country: Revenue by country.
+- revenue_by_plan: Revenue by customer plan.
+- revenue_by_channel_last_month: Revenue by sales channel last month.
+- payments_received_by_country: How much did we collect in succeeded payments, by country?
+- revenue_and_payments: Show revenue and payments received side by side.
+- customers_total: How many customers do we have?
+- customers_ordered_last_month: How many customers ordered last month?
+- revenue_by_product_category: Revenue by product category.
+- revenue_by_ticket_category: Revenue by support ticket category.
+- revenue_by_checkout_event_type: Revenue by checkout event type.
+
+Grane catalog (MCP catalog() payload, truncated exploration to column names):
+{
+  "metrics": [
+    {
+      "name": "revenue",
+      "description": "Net revenue from completed orders, booked on completed_at (not created_at, paid_at or settled_at).",
+      "entity": "order",
+      "type": "sum",
+      "unit": "GBP",
+      "status": "approved",
+      "synonyms": [
+        "sales",
+        "net sales"
+      ],
+      "time_dimension": "orders.completed_at",
+      "available_dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at"
+      ]
+    },
+    {
+      "name": "orders",
+      "description": "Number of completed orders.",
+      "entity": "order",
+      "type": "count",
+      "unit": "count",
+      "status": "approved",
+      "synonyms": [],
+      "time_dimension": "orders.completed_at",
+      "available_dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at"
+      ]
+    },
+    {
+      "name": "average_order_value",
+      "description": "Average net revenue per completed order.",
+      "entity": "order",
+      "type": "ratio",
+      "unit": "GBP",
+      "status": "approved",
+      "synonyms": [
+        "aov"
+      ],
+      "time_dimension": "orders.completed_at",
+      "available_dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at"
+      ]
+    },
+    {
+      "name": "payments_received",
+      "description": "Total successfully collected payments. Payments are one_to_many from orders, so Grane pre-aggregates them at the order grain before joining.",
+      "entity": "order",
+      "type": "sum",
+      "unit": "GBP",
+      "status": "approved",
+      "synonyms": [],
+      "time_dimension": "orders.completed_at",
+      "available_dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at"
+      ]
+    },
+    {
+      "name": "refunded_amount",
+      "description": "Total refunded amount, at the order grain.",
+      "entity": "order",
+      "type": "sum",
+      "unit": "GBP",
+      "status": "approved",
+      "synonyms": [],
+      "time_dimension": "orders.completed_at",
+      "available_dimensions": [
+        "country",
+        "customer_type",
+        "plan",
+        "channel",
+        "order_status",
+        "completed_at"
+      ]
+    },
+    {
+      "name": "customers",
+      "description": "Number of registered customers (a row in customers, whether or not they have ordered).",
+      "entity": "customer",
+      "type": "count",
+      "unit": "count",
+      "status": "approved",
+      "synonyms": [],
+      "time_dimension": "customers.created_at",
+      "available_dimensions": [
+        "country",
+        "customer_type",
+        "plan"
+      ]
+    }
+  ],
+  "dimensions": [
+    {
+      "name": "country",
+      "description": "Customer billing country.",
+      "entity": "customer",
+      "type": null
+    },
+    {
+      "name": "customer_type",
+      "description": "consumer or business.",
+      "entity": "customer",
+      "type": null
+    },
+    {
+      "name": "plan",
+      "description": "Customer subscription plan (starter, growth, enterprise).",
+      "entity": "customer",
+      "type": null
+    },
+    {
+      "name": "channel",
+      "description": "Sales channel the order came through.",
+      "entity": "order",
+      "type": null
+    },
+    {
+      "name": "order_status",
+      "description": null,
+      "entity": "order",
+      "type": null
+    },
+    {
+      "name": "completed_at",
+      "description": null,
+      "entity": "order",
+      "type": "timestamp"
+    },
+    {
+      "name": "product_category",
+      "description": "Product category.",
+      "entity": "product",
+      "type": null
+    }
+  ],
+  "entities": [
+    {
+      "name": "customer",
+      "table": "customers",
+      "description": "A registered shop account. Not \"someone who has ordered\"."
+    },
+    {
+      "name": "order",
+      "table": "orders",
+      "description": "A customer order. Revenue and most metrics live at this grain."
+    },
+    {
+      "name": "product",
+      "table": "products",
+      "description": "A sellable product."
+    }
+  ],
+  "exploration": {
+    "enabled": true,
+    "mode": "denylist",
+    "excluded": [
+      "customers.email"
+    ],
+    "columns": [
+      "checkout_events.id",
+      "checkout_events.order_id",
+      "checkout_events.event_type",
+      "checkout_events.created_at",
+      "customers.name",
+      "order_items.id",
+      "order_items.order_id",
+      "order_items.product_id",
+      "order_items.quantity",
+      "order_items.unit_price",
+      "orders.customer_id",
+      "orders.created_at",
+      "orders.paid_at",
+      "orders.settled_at",
+      "orders.refunded_at",
+      "orders.payment_failure_code",
+      "orders.discount_code",
+      "payments.id",
+      "payments.order_id",
+      "payments.status",
+      "payments.failure_code",
+      "payments.paid_at",
+      "payments.settled_at",
+      "products.id",
+      "products.name",
+      "products.price",
+      "refunds.id",
+      "refunds.order_id",
+      "refunds.created_at",
+      "subscriptions.id",
+      "subscriptions.customer_id",
+      "subscriptions.plan",
+      "subscriptions.status",
+      "subscriptions.started_at",
+      "subscriptions.cancelled_at",
+      "subscriptions.mrr",
+      "support_tickets.id",
+      "support_tickets.customer_id",
+      "support_tickets.category",
+      "support_tickets.status",
+      "support_tickets.created_at"
+    ]
+  }
+}

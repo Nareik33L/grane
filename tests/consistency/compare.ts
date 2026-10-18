@@ -65,8 +65,15 @@ export function tablesMatch(actual: Table, expected: Table, tolerance = 0.005): 
   return true;
 }
 
+/** Stable row order for previews (same key as tablesMatch). */
+export function orderTable(table: Table): Table {
+  return [...table].sort((a, b) => rowKey(a).localeCompare(rowKey(b)));
+}
+
 export function formatTable(table: Table, max = 8): string {
-  const shown = table.slice(0, max).map((row) => row.map((c) => (c === null ? "NULL" : String(c))).join(" | "));
+  const shown = orderTable(table)
+    .slice(0, max)
+    .map((row) => row.map((c) => (c === null ? "NULL" : String(c))).join(" | "));
   const suffix = table.length > max ? ` (+${table.length - max} more rows)` : "";
   return `${shown.join(" ; ")}${suffix}`;
 }
