@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 
 export const PACKAGE_NAME = "grane-analytics";
 
-export const RELEASE_OWNERS = ["Lead", "QA", "Kieran"] as const;
+/** AI prepares, QA certifies, Kieran publishes. */
+export const RELEASE_OWNERS = ["AI", "QA", "Kieran"] as const;
 export type ReleaseOwner = (typeof RELEASE_OWNERS)[number];
 
 export type DryRunExecute = "run" | "print-only";
@@ -146,6 +147,7 @@ export const FORBIDDEN_PACK_NAME_RES: readonly RegExp[] = [
   /deploy-key/i,
   /(^|\/)fixtures\//,
   /(^|\/)tests\//,
+  /(^|\/)transcripts\//,
   /\.map$/i,
   /(^|\/)id_(rsa|ed25519|ecdsa)(\.|\/|$)/,
   /(^|\/)\.env(\.|\/|$)/,
@@ -170,11 +172,11 @@ export function parseRcSha(value: string): string {
   return sha;
 }
 
-/** How Lead cuts the RC from main and pins later steps to that SHA. */
+/** How the AI prepares the RC from main and pins later steps to that SHA. */
 export function rcCutFromMainInstructions(sha: string): string[] {
   const pin = parseRcSha(sha);
   return [
-    "Lead cuts the RC from main (never from a feature branch):",
+    "AI prepares the RC from main (never from a feature branch):",
     "  git fetch origin main",
     "  RC=$(git rev-parse origin/main)",
     `  # this dry-run is pinned to ${pin}`,
@@ -190,7 +192,7 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
     {
       id: "rc-cut",
       title: "Cut the RC from main",
-      owner: "Lead",
+      owner: "AI",
       sha: pin,
       command: `git fetch origin main && test "$(git rev-parse origin/main)" = "${pin}" && git checkout ${pin}`,
       execute: "print-only",
@@ -198,7 +200,7 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
     {
       id: "gate-5",
       title: "Credentialed certify-cloud on the exact RC commit",
-      owner: "Kieran",
+      owner: "QA",
       sha: pin,
       command: `gh workflow run certify-cloud.yml --ref ${pin} -f engine=all`,
       execute: "print-only",
@@ -218,7 +220,7 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
     {
       id: "npm-pack",
       title: "npm pack --dry-run --ignore-scripts file-list check",
-      owner: "Lead",
+      owner: "AI",
       sha: pin,
       command: `git rev-parse HEAD # expect ${pin} && ${NPM_PACK_ARGV.join(" ")}`,
       execute: "run",
@@ -226,7 +228,7 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
     {
       id: "npm-view",
       title: "package-name ownership check (read-only)",
-      owner: "Lead",
+      owner: "AI",
       sha: pin,
       command: `${NPM_VIEW_ARGV.join(" ")} # read-only at RC ${pin}`,
       execute: "run",
@@ -234,7 +236,7 @@ export function releaseDryRunPlan(sha: string): DryRunStep[] {
     {
       id: "npm-publish-hold",
       title: "npm publish (on hold — not run)",
-      owner: "Lead",
+      owner: "Kieran",
       sha: pin,
       command: `# not run at ${pin}: npm publish / npm version / npm dist-tag / gh release`,
       execute: "print-only",
