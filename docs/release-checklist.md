@@ -94,14 +94,20 @@ The dry-run only prints these commands.
 `workflow_dispatch`. It uses the protected GitHub environment
 `npm-publish` (manual approval). **This PR does not create that
 environment, add a token, change branch protection, or change repo
-settings.** The workflow references the environment's npm publish secret
-by name only (no value is stored in-repo). If that secret is missing,
-the job fails closed with a clear message and does not publish.
+settings.** When a human creates `npm-publish`, its deployment rule
+should allow `v*` tags only (not branches), so a dispatch from a branch
+cannot deploy. The workflow also fails closed unless `GITHUB_REF` is
+`refs/tags/v*` and `${GITHUB_REF_NAME#v}` equals the `version` in
+`package.json`. The workflow references the environment's npm publish
+secret by name only (no value is stored in-repo). If that secret is
+missing, the job fails closed with a clear message and does not publish.
 
-Order: `npm ci` → build → unit tests → `npm pack --dry-run` file-list
-check (`npx tsx src/release/check-pack.ts`) → fail-closed token check →
-`npm publish --provenance`. Permissions: `contents: read`,
-`id-token: write`.
+Order: `npm ci --ignore-scripts` → build → unit tests → `npm pack
+--dry-run` file-list check (`npx tsx src/release/check-pack.ts`) →
+require `refs/tags/v*` → tag version equals `package.json` → fail-closed
+token check → `npm publish --provenance`. Permissions: `contents: read`,
+`id-token: write`. Checkout and setup-node are pinned to commit SHAs.
+The publish job does not use the npm cache.
 
 Do not tag, push tags, or dispatch this workflow from a public PR.
 

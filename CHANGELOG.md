@@ -9,10 +9,15 @@
   certifies, Kieran publishes. Tag-driven
   `.github/workflows/publish-npm.yml` (`v*` tag or `workflow_dispatch`)
   uses environment `npm-publish` (not created here; needs manual
-  approval), `permissions: contents: read` and `id-token: write`, runs
-  `npm ci` / build / unit tests / `npm pack --dry-run` file-list check,
-  then `npm publish --provenance`. Missing `secrets.NPM_TOKEN` fails
-  closed with a clear message. This PR does not add a token, create the
+  approval; when created, deployment should allow `v*` tags only),
+  `permissions: contents: read` and `id-token: write`, runs
+  `npm ci --ignore-scripts` / build / unit tests / `npm pack --dry-run`
+  file-list check, then fails closed unless `GITHUB_REF` is
+  `refs/tags/v*` and `${GITHUB_REF_NAME#v}` equals `package.json`
+  `version`, then `npm publish --provenance`. Missing
+  `secrets.NPM_TOKEN` fails closed with a clear message. Checkout and
+  setup-node are pinned to commit SHAs; the publish job does not use
+  the npm cache. This PR does not add a token, create the
   environment, change repo settings, tag, or publish. Pack allowlist
   forbids `tests/`, `fixtures/`, `.env`, and `transcripts/` (unit test
   asserts the live packed file list). `npm view grane-analytics` confirms

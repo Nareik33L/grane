@@ -585,6 +585,9 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(checklist).toMatch(/npm version/);
     expect(checklist).toMatch(/npm dist-tag/);
     expect(checklist).toMatch(/gh release/);
+    expect(checklist).toMatch(/allow `v\*` tags only/);
+    expect(checklist).toMatch(/refs\/tags\/v\*/);
+    expect(checklist).toMatch(/GITHUB_REF_NAME#v/);
     expect(checklist).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN/);
   });
 

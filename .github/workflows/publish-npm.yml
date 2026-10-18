@@ -2,8 +2,8 @@ name: Publish npm
 
 # Tag-driven publish. This PR does not create the `npm-publish` environment,
 # add NPM_TOKEN, or change repo settings. Until a human creates that
-# protected environment (manual approval) and sets the token, a tag or
-# dispatch cannot publish: missing token fails closed.
+# protected environment (manual approval, v* tags only) and sets the token,
+# a tag or dispatch cannot publish: missing token fails closed.
 #
 # Do not add repository secrets here. Do not run this workflow from this PR.
 
@@ -22,17 +22,30 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm-publish
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
-          cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm run test:unit
       - name: npm pack --dry-run file-list check
         run: npx tsx src/release/check-pack.ts
+      - name: Require a v* tag ref
+        run: |
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            echo "::error::GITHUB_REF must be refs/tags/v* (got '${GITHUB_REF}'). workflow_dispatch from a branch cannot publish. Fail closed; not publishing."
+            exit 1
+          fi
+      - name: Tag version must match package.json
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "${TAG_VERSION}" != "${PKG_VERSION}" ]; then
+            echo "::error::Tag version '${TAG_VERSION}' does not match package.json version '${PKG_VERSION}'. Fail closed; not publishing."
+            exit 1
+          fi
       - name: Fail closed if NPM_TOKEN is missing
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
