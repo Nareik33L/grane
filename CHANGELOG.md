@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Release-candidate prep (Release 1 item 4).** Names the RC as `main`
+  `5f97528c0ff25f62ea5bfed70ee201b3ccfce662`. The AI prepares, QA
+  certifies, Kieran publishes. Tag-driven
+  `.github/workflows/publish-npm.yml` (`v*` tag or `workflow_dispatch`)
+  uses environment `npm-publish` (not created here; needs manual
+  approval), `permissions: contents: read` and `id-token: write`, runs
+  `npm ci` / build / unit tests / `npm pack --dry-run` file-list check,
+  then `npm publish --provenance`. Missing `secrets.NPM_TOKEN` fails
+  closed with a clear message. This PR does not add a token, create the
+  environment, change repo settings, tag, or publish. Pack allowlist
+  forbids `tests/`, `fixtures/`, `.env`, and `transcripts/` (unit test
+  asserts the live packed file list). `npm view grane-analytics` confirms
+  the package name is owned (read-only; 404 while unpublished is OK).
+  [#110](https://github.com/Nareik33L/grane/pull/110) (T2 / team-setup)
+  is not merged yet. No README claims beyond the certified matrix.
 - **Prose over-claim check (R1-3 follow-up).** A denial exempts only the
   same claim: “Snowflake is production-ready, not certified by us yet”
   fails. Scan joins hard-wrapped paragraphs (not only single lines). Phrase

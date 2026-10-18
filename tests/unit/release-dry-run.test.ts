@@ -9,6 +9,7 @@ import {
   NPM_PACK_ARGV,
   PACKAGE_NAME,
   PACK_ALLOW_PATTERNS,
+  RC_MAIN_SHA,
   RELEASE_OWNERS,
   assertCertifyCloudPinsDispatchRef,
   assertNoPackLifecycleScripts,
@@ -109,7 +110,7 @@ function mockRun(opts: {
 describe("release-checklist dry-run (P0-3)", () => {
   it("names how the RC is cut from main and pins every step to that SHA", () => {
     const cut = rcCutFromMainInstructions(SHA).join("\n");
-    expect(cut).toMatch(/Lead cuts the RC from main/);
+    expect(cut).toMatch(/AI prepares the RC from main/);
     expect(cut).toMatch(/git fetch origin main/);
     expect(cut).toMatch(/git rev-parse origin\/main/);
     expect(cut).toContain(SHA);
@@ -122,11 +123,13 @@ describe("release-checklist dry-run (P0-3)", () => {
       expect(step.sha).toBe(SHA);
       expect(step.command, step.id).toContain(SHA);
     }
-    expect(steps.find((s) => s.id === "rc-cut")?.owner).toBe("Lead");
-    expect(steps.find((s) => s.id === "gate-5")?.owner).toBe("Kieran");
+    expect(RELEASE_OWNERS).toEqual(["AI", "QA", "Kieran"]);
+    expect(steps.find((s) => s.id === "rc-cut")?.owner).toBe("AI");
+    expect(steps.find((s) => s.id === "gate-5")?.owner).toBe("QA");
     expect(steps.find((s) => s.id === "gate-8")?.owner).toBe("QA");
-    expect(steps.find((s) => s.id === "npm-pack")?.owner).toBe("Lead");
-    expect(steps.find((s) => s.id === "npm-view")?.owner).toBe("Lead");
+    expect(steps.find((s) => s.id === "npm-pack")?.owner).toBe("AI");
+    expect(steps.find((s) => s.id === "npm-view")?.owner).toBe("AI");
+    expect(steps.find((s) => s.id === "npm-publish-hold")?.owner).toBe("Kieran");
     expect(steps.find((s) => s.id === "gate-5")?.command).toMatch(
       new RegExp(`gh workflow run certify-cloud\\.yml --ref ${SHA}`),
     );
@@ -275,6 +278,9 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(isAllowedPackPath("dist/tests/x.js")).toBe(false);
     expect(isAllowedPackPath("demo/.env.yml")).toBe(false);
     expect(isAllowedPackPath("example/aws_credentials.sql")).toBe(false);
+    expect(isAllowedPackPath("tests/unit/release-dry-run.test.ts")).toBe(false);
+    expect(isAllowedPackPath("tests/consistency/ai-runs/transcripts/a-01-revenue_q2.json")).toBe(false);
+    expect(isAllowedPackPath(".env")).toBe(false);
     expect(isForbiddenPackName("demo/creds.yml")).toBe(true);
     expect(isForbiddenPackName("example/.secrets.yaml")).toBe(true);
     expect(isForbiddenPackName("demo/deploy-key.sh")).toBe(true);
@@ -282,6 +288,11 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(isForbiddenPackName("dist/tests/x.js")).toBe(true);
     expect(isForbiddenPackName("demo/.env.yml")).toBe(true);
     expect(isForbiddenPackName("example/aws_credentials.sql")).toBe(true);
+    expect(isForbiddenPackName("tests/unit/foo.test.ts")).toBe(true);
+    expect(isForbiddenPackName("demo/fixtures/a.sql")).toBe(true);
+    expect(isForbiddenPackName("tests/consistency/ai-runs/transcripts/a.json")).toBe(true);
+    expect(isForbiddenPackName(".env")).toBe(true);
+    expect(isForbiddenPackName(".env.local")).toBe(true);
     expect(EXACT_PACK_FILES.has("demo/creds.yml")).toBe(false);
     expect(EXACT_PACK_FILES.has("example/.secrets.yaml")).toBe(false);
     expect(EXACT_PACK_FILES.has("demo/deploy-key.sh")).toBe(false);
@@ -298,6 +309,11 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(unexpectedPackedFiles(["dist/tests/x.js"])).toEqual(["dist/tests/x.js"]);
     expect(unexpectedPackedFiles(["demo/.env.yml"])).toEqual(["demo/.env.yml"]);
     expect(unexpectedPackedFiles(["example/aws_credentials.sql"])).toEqual(["example/aws_credentials.sql"]);
+    expect(unexpectedPackedFiles(["tests/unit/foo.test.ts"])).toEqual(["tests/unit/foo.test.ts"]);
+    expect(unexpectedPackedFiles(["tests/consistency/ai-runs/transcripts/a.json"])).toEqual([
+      "tests/consistency/ai-runs/transcripts/a.json",
+    ]);
+    expect(unexpectedPackedFiles([".env"])).toEqual([".env"]);
     expect(isAllowedPackPath("dist/cli/index.js")).toBe(true);
     expect(isAllowedPackPath("dist/index.js")).toBe(true);
     expect(isAllowedPackPath("README.md")).toBe(true);
@@ -499,6 +515,33 @@ describe("release-checklist dry-run (P0-3)", () => {
         root: ROOT,
         headSha: SHA,
         treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "tests/unit/foo.test.ts"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, "tests/consistency/ai-runs/transcripts/a.json"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
+        run: mockRun({ pack: [...REQUIRED_PACK, ".env"] }),
+      }),
+    ).toThrow(/allowlist/);
+    expect(() =>
+      runReleaseDryRun({
+        sha: SHA,
+        root: ROOT,
+        headSha: SHA,
+        treeStatus: "",
         run: mockRun({ pack: [...REQUIRED_PACK, "dist/leaked.js"] }),
       }),
     ).toThrow(/not produced by the build/);
@@ -522,12 +565,21 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(checklist).toMatch(/Cut the RC from main/);
     expect(checklist).toMatch(/git fetch origin main/);
     expect(checklist).toMatch(/src\/release\/dry-run\.ts --sha/);
-    expect(checklist).toMatch(/owner:\s*Lead/i);
+    expect(RC_MAIN_SHA).toBe("5f97528c0ff25f62ea5bfed70ee201b3ccfce662");
+    expect(checklist).toContain(RC_MAIN_SHA);
+    expect(checklist).toMatch(/the \*\*AI prepares\*\*/i);
+    expect(checklist).toMatch(/\*\*QA certifies\*\*/i);
+    expect(checklist).toMatch(/\*\*Kieran\s+publishes\*\*/i);
+    expect(checklist).toMatch(/owner:\s*AI/i);
     expect(checklist).toMatch(/Kieran/);
     expect(checklist).toMatch(/QA/);
+    expect(checklist).toMatch(/#110/);
+    expect(checklist).toMatch(/not merged yet/);
     expect(checklist).toMatch(/npm pack --dry-run --ignore-scripts/);
     expect(checklist).toMatch(/allowlist/);
+    expect(checklist).toMatch(/transcripts/);
     expect(checklist).toMatch(/npm view grane-analytics/);
+    expect(checklist).toMatch(/package name is owned/);
     expect(checklist).toMatch(/does not publish, tag, or push/);
     expect(checklist).toMatch(/npm version/);
     expect(checklist).toMatch(/npm dist-tag/);
@@ -554,6 +606,14 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(unexpectedPackedFiles(paths), unexpectedPackedFiles(paths).join("\n")).toEqual([]);
     for (const path of paths) {
       expect(isAllowedPackPath(path), path).toBe(true);
+      expect(isForbiddenPackName(path), path).toBe(false);
+      expect(path, path).not.toMatch(/(^|\/)tests\//);
+      expect(path, path).not.toMatch(/(^|\/)fixtures\//);
+      expect(path, path).not.toMatch(/(^|\/)transcripts\//);
+      expect(path, path).not.toMatch(/(^|\/)\.env(\.|\/|$)/);
+    }
+    for (const listed of EXACT_PACK_FILES) {
+      expect(isForbiddenPackName(listed), listed).toBe(false);
     }
     expect(paths).toContain("README.md");
     expect(paths).toContain("package.json");
@@ -574,8 +634,12 @@ describe("release-checklist dry-run (P0-3)", () => {
     expect(isForbiddenPackName("demo/.env.yml")).toBe(true);
     expect(isForbiddenPackName("example/aws_credentials.sql")).toBe(true);
     expect(isForbiddenPackName("demo/creds.yml")).toBe(true);
+    expect(isForbiddenPackName("tests/consistency/ai-runs/transcripts/a.json")).toBe(true);
+    expect(isForbiddenPackName("tests/unit/foo.test.ts")).toBe(true);
+    expect(isForbiddenPackName("example/fixtures/x.sql")).toBe(true);
     expect(isAllowedPackPath("demo/.env.yml")).toBe(false);
     expect(isAllowedPackPath("example/aws_credentials.sql")).toBe(false);
+    expect(isAllowedPackPath("tests/consistency/ai-runs/transcripts/a.json")).toBe(false);
     expect(isForbiddenPackName("demo/analytics/grane.yml")).toBe(false);
     // dist/secrets.js matches PACK_ALLOW_PATTERNS; only the forbidden-name layer refuses it.
     expect(PACK_ALLOW_PATTERNS.some((re) => re.test("dist/secrets.js"))).toBe(true);
