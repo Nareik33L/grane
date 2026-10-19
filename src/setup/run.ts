@@ -33,6 +33,7 @@ import {
   persistOwnConnection,
   type ConnectionDraft,
 } from "./connection.js";
+import { checkBranchProtection } from "../github/branch-protection.js";
 import {
   OWN_QUESTION,
   SETUP_BANNER,
@@ -162,6 +163,7 @@ export async function runSetup(options: RunSetupOptions = {}): Promise<SetupResu
       ...options,
       io,
       cwd,
+      env,
       dir: options.importDir,
       json: options.json,
       skipConnect: true,
@@ -367,10 +369,14 @@ async function runDemoPath(opts: {
   });
 
   const connected = connectIfRequested(opts, demo.projectDir);
-  printReady(opts.io, opts.json, demoReadyLines({
-    projectDir: demo.projectDir,
-    clientLabel: connected.label,
-  }));
+  printReady(
+    opts.io,
+    opts.json,
+    await readyLinesWithProtection(demoReadyLines({
+      projectDir: demo.projectDir,
+      clientLabel: connected.label,
+    }), { projectDir: demo.projectDir, env: opts.env }),
+  );
 
   return {
     path: "demo",
@@ -423,10 +429,13 @@ async function runDemoAuthoringPath(opts: {
   printReady(
     opts.io,
     opts.json,
-    demoAuthoringReadyLines({
-      projectDir,
-      clientLabel: connected.label,
-    }),
+    await readyLinesWithProtection(
+      demoAuthoringReadyLines({
+        projectDir,
+        clientLabel: connected.label,
+      }),
+      { projectDir, env: opts.env },
+    ),
   );
 
   return {
@@ -490,14 +499,21 @@ async function runOwnPath(opts: {
   }
 
   const live = !opts.offline;
-  const validated = await validateOwnProject(opts.io, projectDir, live, opts.prompt, opts.yes);
+  const validated = await validateOwnProject(opts.io, projectDir, live, opts.prompt, opts.yes, opts.env);
 
   const connected = connectIfRequested(opts, projectDir);
-  printReady(opts.io, opts.json, ownReadyLines({
-    projectDir,
-    clientLabel: connected.label,
-    live: live && validated,
-  }));
+  printReady(
+    opts.io,
+    opts.json,
+    await readyLinesWithProtection(
+      ownReadyLines({
+        projectDir,
+        clientLabel: connected.label,
+        live: live && validated,
+      }),
+      { projectDir, offline: opts.offline, env: opts.env },
+    ),
+  );
 
   return {
     path: "own",
@@ -524,6 +540,7 @@ function defaultOwnProjectDir(cwd: string): string {
 async function runImportPath(opts: {
   io: SetupIo;
   cwd: string;
+  env?: NodeJS.ProcessEnv;
   dir?: string;
   json?: boolean;
   offline?: boolean;
@@ -551,7 +568,7 @@ async function runImportPath(opts: {
       if (!message.includes("No git repository")) throw err;
     }
   }
-  const loaded = loadConfig(projectDir);
+  const loaded = loadConfig(projectDir, { env: opts.env });
   const kernel = new GraneKernel(loaded.config, {
     projectDir,
     providerWarnings: loaded.warnings,
@@ -626,10 +643,13 @@ async function runImportPath(opts: {
       printReady(
         opts.io,
         opts.json,
-        importInspectOnlyLines({
-          projectDir,
-          warehouseLabel: formatSetupWarehouse(warehouse),
-        }),
+        await readyLinesWithProtection(
+          importInspectOnlyLines({
+            projectDir,
+            warehouseLabel: formatSetupWarehouse(warehouse),
+          }),
+          { projectDir, offline: opts.offline, env: opts.env },
+        ),
       );
       return {
         path: "import",
@@ -682,12 +702,15 @@ async function runImportPath(opts: {
     printReady(
       opts.io,
       opts.json,
-      importReadyLines({
-        projectDir,
-        pinRef: pin.ref,
-        pinCommit: pin.commit,
-        warehouseLabel: formatSetupWarehouse(warehouse),
-      }),
+      await readyLinesWithProtection(
+        importReadyLines({
+          projectDir,
+          pinRef: pin.ref,
+          pinCommit: pin.commit,
+          warehouseLabel: formatSetupWarehouse(warehouse),
+        }),
+        { projectDir, offline: opts.offline, env: opts.env },
+      ),
     );
 
     return {
@@ -711,8 +734,9 @@ async function validateOwnProject(
   live: boolean,
   prompt: Prompter,
   yes: boolean,
+  env?: NodeJS.ProcessEnv,
 ): Promise<boolean> {
-  const loaded = loadConfig(projectDir);
+  const loaded = loadConfig(projectDir, { env });
   const kernel = new GraneKernel(loaded.config, {
     projectDir: loaded.projectDir,
     providerWarnings: loaded.warnings,
@@ -793,6 +817,23 @@ function connectIfRequested(
   opts.io.log("");
   opts.io.log(formatConnectOutput(result));
   return { result, label: result.label };
+}
+
+async function readyLinesWithProtection(
+  lines: string[],
+  opts: { projectDir: string; offline?: boolean; env?: NodeJS.ProcessEnv },
+): Promise<string[]> {
+  const report = await checkBranchProtection({
+    projectDir: opts.projectDir,
+    offline: opts.offline,
+    env: opts.env,
+  });
+  const extra = [...lines];
+  if (report.warnings.length > 0) {
+    extra.push("");
+    extra.push(...report.warnings);
+  }
+  return extra;
 }
 
 function printReady(io: SetupIo, json: boolean | undefined, lines: string[]): void {

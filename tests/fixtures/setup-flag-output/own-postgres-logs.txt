@@ -28,3 +28,6 @@ Next:
 
 Project  <PROJECT>
 Docs     https://github.com/Nareik33L/grane/blob/main/docs/first-week.md
+Team     https://github.com/Nareik33L/grane/blob/main/docs/team-setup.md
+
+WARNING: branch protection: couldn't verify (--offline)

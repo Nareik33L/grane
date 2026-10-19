@@ -44,7 +44,8 @@ proposal's merged commit on `main` (the merge commit, or the squash/rebase
 commit whose metric YAML matches), not a later tip. If no matching commit
 is reachable from `main`, it refuses instead of pinning silently. Known
 limit: the same YAML committed straight to `main` (no PR) also matches;
-branch protection and T2 close that.
+branch protection and T2 close that
+([team-setup.md](team-setup.md)).
 
 ### Account A — approve (does not merge the pin)
 

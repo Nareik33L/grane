@@ -87,6 +87,13 @@ connection:
   # pool_size: 5          # Postgres pool; raise on a shared HTTP server
 ```
 
+`${DATABASE_URL}` is inserted as a complete DSN (no further expansion, no
+re-encoding). To interpolate a password inside a YAML URL, write
+`postgres://user:${GRANE_DB_PASSWORD}@host/db` — Grane always
+`encodeURIComponent`s that raw `${VAR}` (so `100%40off` becomes
+`100%2540off`; it does not guess whether the value was already encoded).
+See [team-setup.md](team-setup.md).
+
 When `ssl: true`, certificates are verified. Set `ssl_verify: false` to opt out.
 Redshift uses the Postgres driver. Aggregates use `CASE WHEN` instead of
 `FILTER (WHERE ...)`. Postgres certification in CI does **not** cover Redshift —

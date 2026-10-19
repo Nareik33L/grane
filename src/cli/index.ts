@@ -27,6 +27,7 @@ import { runSetup, serializeSetupResult } from "../setup/run.js";
 import { parseFilterSpec, resolveSetupInvocation } from "./args.js";
 import { writeInitProject } from "./init-project.js";
 import { formatProductionLint, lintProduction } from "./production-lint.js";
+import { checkBranchProtection, formatDoctorOutput } from "../github/branch-protection.js";
 import { uncertifiedWarehouseWarning } from "../connectors/certification.js";
 import {
   defaultUserTestTargets,
@@ -346,7 +347,8 @@ program
   .description("Fail-open production lint (auth, TLS, audit path, limits, experimental metrics)")
   .option("--production", "accepted for the documented form; this command always runs the production lint")
   .option("--json", "print JSON")
-  .action((options: { production?: boolean; json?: boolean }) => {
+  .option("--offline", "skip the live GitHub branch-protection check")
+  .action(async (options: { production?: boolean; json?: boolean; offline?: boolean }) => {
     void options.production;
     let loaded;
     try {
@@ -356,15 +358,31 @@ program
     }
     const lint = lintProduction(loaded.config, loaded.projectDir);
     const pin_warnings = pinHealthWarnings(projectDir());
+    const branch_protection = await checkBranchProtection({
+      projectDir: projectDir(),
+      offline: options.offline,
+    });
     if (options.json) {
-      console.log(JSON.stringify({ ...lint, pin_warnings, config_hash: stableConfigHash(loaded.config, loaded.projectDir) }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            ...lint,
+            pin_warnings,
+            config_hash: stableConfigHash(loaded.config, loaded.projectDir),
+            branch_protection,
+          },
+          null,
+          2,
+        ),
+      );
     } else {
-      console.log("Grane production doctor\n");
-      console.log(formatProductionLint(lint));
-      if (pin_warnings.length > 0) {
-        console.log(pin_warnings.join("\n"));
-        console.log("");
-      }
+      process.stdout.write(
+        formatDoctorOutput({
+          lintText: formatProductionLint(lint),
+          pin_warnings,
+          branch_protection,
+        }),
+      );
     }
     if (!lint.ok) process.exit(1);
   });

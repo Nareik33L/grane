@@ -102,6 +102,7 @@ export function ownReadyLines(opts: {
   lines.push("");
   lines.push(`Project  ${opts.projectDir}`);
   lines.push("Docs     https://github.com/Nareik33L/grane/blob/main/docs/first-week.md");
+  lines.push("Team     https://github.com/Nareik33L/grane/blob/main/docs/team-setup.md");
   return lines;
 }
 
@@ -122,10 +123,12 @@ export function demoAuthoringReadyLines(opts: {
     `Open the Set up Grane prompt. Ask: ${DEMO_AUTHORING_QUESTION}`,
     ...AUTHORING_SWITCH_STEPS,
     "Authoring tools only propose a GitHub PR. Nothing is live until a human merges and pins.",
+    "Share a GitHub repo and turn on branch protection before inviting the team (docs/team-setup.md).",
   ];
   for (const step of numbered(steps)) lines.push(`  ${step}`);
   lines.push("");
   lines.push(`Project  ${opts.projectDir}`);
+  lines.push("Team     https://github.com/Nareik33L/grane/blob/main/docs/team-setup.md");
   return lines;
 }
 
